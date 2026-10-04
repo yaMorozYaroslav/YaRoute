@@ -1,7 +1,10 @@
+export type StorageProvider = 'google-drive' | 'mega' | 'other';
+
 export type SharedRoot = {
   remote: string;
   root: string;
   expectedOwner?: string;
+  provider?: StorageProvider;
 };
 
 export type FileRef = {

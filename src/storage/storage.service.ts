@@ -14,13 +14,81 @@ export class StorageService {
     return this.roots.listAreas();
   }
 
+  megaAreas() {
+    return this.roots.listAreas('mega');
+  }
+
   validateCopyPayload(payload: CopyJobPayload) {
     this.validateFileRef(payload.source, 'source');
     this.validateFileRef(payload.destination, 'destination');
+
+    const sourceProvider = this.roots.get(payload.source.area).provider;
+    const destinationProvider = this.roots.get(payload.destination.area).provider;
+    if (sourceProvider === 'mega' || destinationProvider === 'mega') {
+      throw new BadRequestException(
+        'MEGA copy/move is not enabled yet. Use the read-only MEGA tools until provider-specific verification is implemented.',
+      );
+    }
   }
 
   async capacity() {
-    const areas = this.roots.listAreas();
+    return this.capacityForAreas(this.roots.listAreas());
+  }
+
+  async megaCapacity() {
+    return this.capacityForAreas(this.megaAreas());
+  }
+
+  async list(area: string, relativePath = '') {
+    const target = this.roots.resolve(area, relativePath);
+    return this.rclone.json(['lsjson', target, '--metadata', '--hash']);
+  }
+
+  async megaList(account: string, relativePath = '') {
+    this.roots.assertProvider(account, 'mega');
+    return this.list(account, relativePath);
+  }
+
+  async stat(area: string, relativePath: string) {
+    const target = this.roots.resolve(area, relativePath);
+    return this.statTarget(target);
+  }
+
+  async megaStat(account: string, relativePath: string) {
+    this.roots.assertProvider(account, 'mega');
+    return this.stat(account, relativePath);
+  }
+
+  async executeCopy(payload: CopyJobPayload) {
+    this.validateCopyPayload(payload);
+
+    const source = this.roots.resolve(payload.source.area, payload.source.path);
+    const destination = this.roots.resolve(payload.destination.area, payload.destination.path);
+
+    await this.rclone.run([
+      'copyto', source, destination,
+      '--immutable',
+      '--stats=30s', '--stats-one-line', '--log-level=INFO',
+    ]);
+
+    const sourceStat = await this.statTarget(source);
+    const destinationStat = await this.statTarget(destination);
+    const verification = this.verify(sourceStat, destinationStat, payload.destination.area);
+
+    if (payload.verify !== false && !verification.trusted) {
+      throw new Error(`Copy completed but verification is not trusted: ${JSON.stringify(verification)}`);
+    }
+
+    return {
+      source: payload.source,
+      destination: payload.destination,
+      sourceRetained: true,
+      verification,
+      destinationStat,
+    };
+  }
+
+  private async capacityForAreas(areas: string[]) {
     const remoteAreas = new Map<string, string[]>();
 
     for (const area of areas) {
@@ -66,46 +134,7 @@ export class StorageService {
         used: this.sumKnown(readable.map((item) => item.used)),
         free: this.sumKnown(readable.map((item) => item.free)),
       },
-      note: 'Capacity is account/remote quota. File operations remain restricted to configured shared-folder roots.',
-    };
-  }
-
-  async list(area: string, relativePath = '') {
-    const target = this.roots.resolve(area, relativePath);
-    return this.rclone.json(['lsjson', target, '--metadata', '--hash']);
-  }
-
-  async stat(area: string, relativePath: string) {
-    const target = this.roots.resolve(area, relativePath);
-    return this.statTarget(target);
-  }
-
-  async executeCopy(payload: CopyJobPayload) {
-    this.validateCopyPayload(payload);
-
-    const source = this.roots.resolve(payload.source.area, payload.source.path);
-    const destination = this.roots.resolve(payload.destination.area, payload.destination.path);
-
-    await this.rclone.run([
-      'copyto', source, destination,
-      '--immutable',
-      '--stats=30s', '--stats-one-line', '--log-level=INFO',
-    ]);
-
-    const sourceStat = await this.statTarget(source);
-    const destinationStat = await this.statTarget(destination);
-    const verification = this.verify(sourceStat, destinationStat, payload.destination.area);
-
-    if (payload.verify !== false && !verification.trusted) {
-      throw new Error(`Copy completed but verification is not trusted: ${JSON.stringify(verification)}`);
-    }
-
-    return {
-      source: payload.source,
-      destination: payload.destination,
-      sourceRetained: true,
-      verification,
-      destinationStat,
+      note: 'Capacity is account/remote quota. File operations remain restricted to configured roots.',
     };
   }
 

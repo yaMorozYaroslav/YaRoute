@@ -31,7 +31,7 @@ export class McpService {
   private buildServer() {
     const server = new McpServer({
       name: 'NestNyx',
-      version: '0.5.0',
+      version: '0.6.0',
     });
 
     server.registerTool(
@@ -96,7 +96,7 @@ export class McpService {
       'nyx_stat',
       {
         title: 'Inspect a shared-area file',
-        description: 'Read rclone file metadata, hashes, size, and owner for one path below a configured shared-folder root.',
+        description: 'Read rclone file metadata, hashes, size, and owner for one path below a configured Nyx shared-folder root.',
         inputSchema: z.object({
           area: z.string().min(1),
           path: z.string().min(1),
@@ -128,10 +128,84 @@ export class McpService {
     );
 
     server.registerTool(
+      'nyx_mega_accounts',
+      {
+        title: 'List configured MEGA accounts',
+        description:
+          'List only logical storage aliases explicitly tagged as MEGA in NYX_SHARED_ROOTS_JSON. Remote names and credentials are not exposed.',
+        inputSchema: z.object({}),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async () => this.safeTool(() => ({ accounts: this.storage.megaAreas() })),
+    );
+
+    server.registerTool(
+      'nyx_mega_list',
+      {
+        title: 'Browse a configured MEGA account',
+        description:
+          'List files and folders below one explicitly configured MEGA root. Paths cannot escape that root.',
+        inputSchema: z.object({
+          account: z.string().min(1).describe('Logical MEGA account alias, not a raw rclone remote name.'),
+          path: z.string().default('').describe('Relative path below the configured MEGA root.'),
+        }),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async ({ account, path }) => this.safeTool(() => this.storage.megaList(account, path)),
+    );
+
+    server.registerTool(
+      'nyx_mega_stat',
+      {
+        title: 'Inspect a file in MEGA',
+        description:
+          'Read metadata, hashes and size for one path below an explicitly configured MEGA root.',
+        inputSchema: z.object({
+          account: z.string().min(1),
+          path: z.string().min(1),
+        }),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async ({ account, path }) => this.safeTool(() => this.storage.megaStat(account, path)),
+    );
+
+    server.registerTool(
+      'nyx_mega_capacity',
+      {
+        title: 'Check MEGA capacity',
+        description:
+          'Report quota total, used, and free bytes only for explicitly configured MEGA accounts.',
+        inputSchema: z.object({}),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async () => this.safeTool(() => this.storage.megaCapacity()),
+    );
+
+    server.registerTool(
       'nyx_copy_file',
       {
         title: 'Copy a file between shared areas',
-        description: 'Queue a cross-area file copy. NestNyx refuses destination clobbering and verifies size, a common hash, and destination owner. The source is retained.',
+        description: 'Queue a cross-area file copy. NestNyx refuses destination clobbering and verifies size, a common hash, and destination owner. MEGA copies remain disabled until provider-specific verification is implemented.',
         inputSchema: z.object({
           sourceArea: z.string().min(1),
           sourcePath: z.string().min(1),

@@ -20,6 +20,26 @@ export class StorageController {
     return this.storage.capacity();
   }
 
+  @Get('mega/accounts')
+  megaAccounts() {
+    return { accounts: this.storage.megaAreas() };
+  }
+
+  @Get('mega/capacity')
+  megaCapacity() {
+    return this.storage.megaCapacity();
+  }
+
+  @Get('mega/:account/list')
+  megaList(@Param('account') account: string, @Query('path') path = '') {
+    return this.storage.megaList(account, path);
+  }
+
+  @Get('mega/:account/stat')
+  megaStat(@Param('account') account: string, @Query('path') path: string) {
+    return this.storage.megaStat(account, path);
+  }
+
   @Get(':area/list')
   list(@Param('area') area: string, @Query('path') path = '') {
     return this.storage.list(area, path);
