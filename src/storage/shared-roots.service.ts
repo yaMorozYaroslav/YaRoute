@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import path from 'node:path';
+import * as path from 'node:path';
 import { SharedRoot } from './storage.types';
 
 @Injectable()
