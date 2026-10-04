@@ -138,10 +138,48 @@ export class StorageService {
     return [...explicit, ...dynamic].sort((a, b) => a.alias.localeCompare(b.alias));
   }
 
+  private async googleSharedDriveEntries(): Promise<AreaEntry[]> {
+    const main = this.roots.get('MAIN');
+    const discovered = await this.rclone.listGoogleSharedDrives(main.remote);
+    const usedAliases = new Set([
+      ...this.roots.listAreas(),
+      ...(await this.megaEntries()).map((entry) => entry.alias),
+    ]);
+
+    const entries: AreaEntry[] = [];
+    for (const drive of discovered) {
+      const stem = drive.name
+        .normalize('NFKD')
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase()
+        .slice(0, 48) || 'DRIVE';
+
+      let alias = `GDRIVE_${stem}`;
+      let suffix = 2;
+      while (usedAliases.has(alias)) {
+        alias = `GDRIVE_${stem}_${suffix}`;
+        suffix += 1;
+      }
+      usedAliases.add(alias);
+
+      entries.push({
+        alias,
+        remote: `${main.remote},team_drive=${drive.id},root_folder_id=`,
+        root: '.',
+        provider: 'google-drive',
+        dynamic: true,
+      });
+    }
+
+    return entries.sort((a, b) => a.alias.localeCompare(b.alias));
+  }
+
   private async allAreaEntries(): Promise<AreaEntry[]> {
     const explicit = this.explicitEntries();
     const dynamicMega = (await this.megaEntries()).filter((entry) => entry.dynamic);
-    return [...explicit, ...dynamicMega];
+    const sharedDrives = await this.googleSharedDriveEntries();
+    return [...explicit, ...dynamicMega, ...sharedDrives];
   }
 
   private async resolveAreaTarget(area: string, relativePath: string) {
@@ -149,7 +187,11 @@ export class StorageService {
       return this.roots.resolve(area, relativePath);
     }
 
-    const entry = (await this.megaEntries()).find((candidate) => candidate.alias === area);
+    const dynamic = [
+      ...(await this.megaEntries()).filter((entry) => entry.dynamic),
+      ...(await this.googleSharedDriveEntries()),
+    ];
+    const entry = dynamic.find((candidate) => candidate.alias === area);
     if (!entry) throw new BadRequestException(`Unknown shared area: ${area}`);
     return this.resolveEntryTarget(entry, relativePath);
   }
@@ -211,7 +253,7 @@ export class StorageService {
         used: this.sumKnown(readable.map((item) => item.used)),
         free: this.sumKnown(readable.map((item) => item.free)),
       },
-      note: 'Capacity is account/remote quota. Dynamic MEGA aliases expose only MEGA remotes already present in the private rclone config.',
+      note: 'Capacity is account/remote quota. Dynamic aliases expose only storage already available to the authenticated runtime account.',
     };
   }
 
