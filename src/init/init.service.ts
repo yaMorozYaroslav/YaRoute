@@ -6,7 +6,6 @@ import path from 'node:path';
 import { RcloneService } from '../storage/rclone.service';
 import { SharedRootsService } from '../storage/shared-roots.service';
 import { InitSessionStoreService } from './init-session-store.service';
-import { parsePathsRegistry } from './paths-registry.parser';
 import {
   BundleMemberPointer,
   CorePointer,
@@ -15,8 +14,8 @@ import {
   ParsedPathsRegistry,
 } from './init.types';
 
-type ZipEntry = { getData(): Buffer };
-type ZipReader = { getEntry(name: string): ZipEntry | null };
+type ZipEntry = { getData(): Buffer; entryName?: string };
+type ZipReader = { getEntry(name: string): ZipEntry | null; getEntries(): ZipEntry[] };
 type ZipCtor = new (filename: string) => ZipReader;
 const AdmZip = require('adm-zip') as ZipCtor;
 
@@ -48,16 +47,18 @@ export class InitService {
 
     const storageArea = process.env.NYX_INIT_AREA?.trim() || 'MAIN';
     const registryPath =
-      process.env.NYX_PATHS_REGISTRY_PATH?.trim() ||
-      'ChatGPT/1_body/1_areas_v0/NoteFlow/3_resources/SYSTEM/paths.md';
+      process.env.NYX_NORMAL_PATHS_PATH?.trim() ||
+      'ChatGPT/1_body/1_areas_v0/FileFilter/0_state/n_paths.json';
 
     const registryTarget = this.roots.resolve(storageArea, registryPath);
-    const [{ stdout: registryMarkdown }, registryStat] = await Promise.all([
+    const [{ stdout: registryJson }, registryStat] = await Promise.all([
       this.rclone.run(['cat', registryTarget]),
       this.rclone.json(['lsjson', registryTarget, '--stat', '--hash']),
     ]);
 
-    const parsed = parsePathsRegistry(registryMarkdown);
+    const parsed = this.parseNormalPathsRegistry(
+      JSON.parse(registryJson.replace(/^\uFEFF/, '')) as Record<string, unknown>,
+    );
     const warnings: string[] = [];
 
     for (const role of ['Head', 'Body', 'Footer'] as const) {
@@ -269,7 +270,7 @@ export class InitService {
           area: storageArea,
           path: registryPath,
           stat: registryStat,
-          sha256: this.sha256(registryMarkdown),
+          sha256: this.sha256(registryJson),
         },
         core: parsed.core,
         coreVerification,
@@ -405,7 +406,7 @@ export class InitService {
   }
 
   private readJsonMember(zip: ZipReader, member: string) {
-    const entry = zip.getEntry(member);
+    const entry = this.findZipEntry(zip, member);
     if (!entry) {
       return { verified: false, member, error: `Bundle member not found: ${member}` };
     }
@@ -442,7 +443,7 @@ export class InitService {
   }
 
   private readOptionalJsonMember(zip: ZipReader, member: string) {
-    const entry = zip.getEntry(member);
+    const entry = this.findZipEntry(zip, member);
     if (!entry) return null;
     try {
       const data = entry.getData();
@@ -460,7 +461,7 @@ export class InitService {
   }
 
   private readOptionalTextMember(zip: ZipReader, member: string) {
-    const entry = zip.getEntry(member);
+    const entry = this.findZipEntry(zip, member);
     if (!entry) return null;
     const data = entry.getData();
     return {
@@ -550,19 +551,19 @@ export class InitService {
         this.routePath(parsed, 'todo_current', 'Documents/Notepad/todo.md'),
       ],
       [
-        'todo_week',
+        'todo_10',
         this.routePath(
           parsed,
-          'todo_week',
-          'Documents/Notepad/0_active/todo_week.md',
+          'todo_10',
+          'Documents/Notepad/0_active/todo_10.md',
         ),
       ],
       [
-        'todo_month',
+        'todo_30',
         this.routePath(
           parsed,
-          'todo_month',
-          'Documents/Notepad/0_active/todo_month.md',
+          'todo_30',
+          'Documents/Notepad/0_active/todo_30.md',
         ),
       ],
       [
@@ -689,6 +690,117 @@ export class InitService {
     }
     warnings.push(`${label} hydration failed: ${errors.join(' | ')}`);
     return null;
+  }
+
+  private parseNormalPathsRegistry(document: Record<string, unknown>): ParsedPathsRegistry {
+    const core: ParsedPathsRegistry['core'] = {
+      Head: undefined,
+      Body: undefined,
+      Footer: undefined,
+    };
+    const routes: ParsedPathsRegistry['routes'] = {};
+    const areas: ParsedPathsRegistry['areas'] = {};
+
+    const clean = (value: unknown) =>
+      String(value ?? '').trim().replace(/^`|`$/g, '');
+    const firstId = (value: unknown) => {
+      const match = String(value ?? '').match(/[`]?([A-Za-z0-9_-]{20,})[`]?/);
+      return match?.[1] ?? '';
+    };
+
+    const current = (document.canonical_current ?? {}) as Record<string, any>;
+    const roleMeta = {
+      Head: { key: 'head', dir: '0_head' },
+      Body: { key: 'body', dir: '1_body' },
+      Footer: { key: 'footer', dir: '2_footer' },
+    } as const;
+
+    for (const role of ['Head', 'Body', 'Footer'] as const) {
+      const meta = roleMeta[role];
+      const item = current[meta.key] as Record<string, unknown> | undefined;
+      if (!item?.file || !item?.drive_id) continue;
+      core[role] = {
+        role,
+        file: String(item.file),
+        repositoryPath: `YaRoute/0_repository/${meta.dir}/${String(item.file)}`,
+        driveId: String(item.drive_id),
+        status: String(current.status ?? 'canonical current'),
+        expectedSha256: item.sha256 ? String(item.sha256).toLowerCase() : undefined,
+      };
+    }
+
+    let canonicalCli: BundleMemberPointer | undefined;
+    let compatibilityCommandTable: BundleMemberPointer | undefined;
+
+    const sections = Array.isArray(document.source_snapshot_sections)
+      ? (document.source_snapshot_sections as Array<Record<string, any>>)
+      : [];
+
+    for (const section of sections) {
+      for (const table of Array.isArray(section.tables) ? section.tables : []) {
+        for (const row of Array.isArray(table.rows) ? table.rows : []) {
+          const role = clean(row.Role);
+          if (role === 'Canonical executable CLI' || role === 'Compatibility command table') {
+            const state = clean(row.State);
+            const pointer: BundleMemberPointer = {
+              role,
+              file: clean(row['Canonical file/member']),
+              bundlePath: clean(row['Repository / bundle path']),
+              driveId: firstId(row['Google Drive ID']),
+              state,
+              expectedSha256: state.match(/\b[0-9a-f]{64}\b/i)?.[0]?.toLowerCase(),
+            };
+            if (role === 'Canonical executable CLI') canonicalCli = pointer;
+            else compatibilityCommandTable = pointer;
+          }
+
+          const key = clean(row.Key);
+          const routePath = clean(row['Repository path'] ?? row['Notepad path']);
+          const routeId = firstId(row['Google Drive ID']);
+          if (key && routePath && routeId) {
+            routes[key.replace(/`/g, '')] = {
+              key: key.replace(/`/g, ''),
+              repositoryPath: routePath,
+              driveId: routeId,
+              state: clean(row.State),
+            };
+          }
+
+          const area = clean(row.Area);
+          if (area) {
+            const rootId = firstId(row['Root ID']);
+            const manifestId = firstId(row['Local `area_paths.json` ID']);
+            const stateFolderId = firstId(row['`0_state` ID']);
+            const stateId = firstId(row['state ID']);
+            const configId = firstId(row['local config ID']);
+            if (rootId && manifestId && stateFolderId && stateId && configId) {
+              areas[area] = { area, rootId, manifestId, stateFolderId, stateId, configId };
+            }
+          }
+        }
+      }
+    }
+
+    const horizons = (document.active_planning_horizons as any)?.horizons ?? {};
+    for (const [key, value] of Object.entries(horizons) as Array<[string, any]>) {
+      if (value?.path && value?.drive_id) {
+        routes[key] = {
+          key,
+          repositoryPath: String(value.path),
+          driveId: String(value.drive_id),
+          state: String(value.state ?? ''),
+        };
+      }
+    }
+
+    return { core, canonicalCli, compatibilityCommandTable, routes, areas };
+  }
+
+  private findZipEntry(zip: ZipReader, member: string) {
+    const direct = zip.getEntry(member);
+    if (direct) return direct;
+    const suffix = `/${member.replace(/^\/+/, '')}`;
+    return zip.getEntries().find((entry: any) => entry.entryName?.endsWith(suffix)) ?? null;
   }
 
   private routePath(
