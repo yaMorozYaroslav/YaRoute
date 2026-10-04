@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { RcloneService } from '../storage/rclone.service';
 import { SharedRootsService } from '../storage/shared-roots.service';
 import { InitSessionStoreService } from './init-session-store.service';
