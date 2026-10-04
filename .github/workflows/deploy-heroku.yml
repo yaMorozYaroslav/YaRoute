@@ -20,3 +20,23 @@ jobs:
           test -n "$HEROKU_API_KEY"
           git remote add heroku "https://heroku:${HEROKU_API_KEY}@git.heroku.com/dev-nest-nyx.git"
           git push heroku HEAD:main --force
+
+      - name: Smoke test deployed app
+        run: |
+          set -euo pipefail
+          BASE="https://dev-nest-nyx-0df80c227630.herokuapp.com"
+
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "${BASE}/health" >/tmp/health.json; then
+              break
+            fi
+            sleep 5
+          done
+
+          cat /tmp/health.json
+
+          curl -fsS "${BASE}/.well-known/oauth-protected-resource" >/tmp/oauth-metadata.json
+          cat /tmp/oauth-metadata.json
+
+          status="$(curl -sS -o /tmp/mcp-unauth.txt -w '%{http_code}' "${BASE}/mcp")"
+          test "$status" = "401"
