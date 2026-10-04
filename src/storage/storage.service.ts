@@ -138,6 +138,35 @@ export class StorageService {
     return [...explicit, ...dynamic].sort((a, b) => a.alias.localeCompare(b.alias));
   }
 
+  private async googleRemoteEntries(): Promise<AreaEntry[]> {
+    const mainRemote = this.roots.get('MAIN').remote;
+    const discovered = (await this.rclone.listRemoteNamesByType('drive'))
+      .filter((remote) => remote !== mainRemote);
+
+    const usedAliases = new Set([
+      ...this.roots.listAreas(),
+      ...(await this.megaEntries()).map((entry) => entry.alias),
+    ]);
+
+    const entries: AreaEntry[] = [];
+    let index = 1;
+    for (const remote of discovered) {
+      while (usedAliases.has(`GDRIVE_${index}`)) index += 1;
+      const alias = `GDRIVE_${index}`;
+      usedAliases.add(alias);
+      entries.push({
+        alias,
+        remote,
+        root: '.',
+        provider: 'google-drive',
+        dynamic: true,
+      });
+      index += 1;
+    }
+
+    return entries;
+  }
+
   private async googleSharedDriveEntries(): Promise<AreaEntry[]> {
     const main = this.roots.get('MAIN');
     const discovered = await this.rclone.listGoogleSharedDrives(main.remote);
@@ -155,10 +184,10 @@ export class StorageService {
         .toUpperCase()
         .slice(0, 48) || 'DRIVE';
 
-      let alias = `GDRIVE_${stem}`;
+      let alias = `SHAREDDRIVE_${stem}`;
       let suffix = 2;
       while (usedAliases.has(alias)) {
-        alias = `GDRIVE_${stem}_${suffix}`;
+        alias = `SHAREDDRIVE_${stem}_${suffix}`;
         suffix += 1;
       }
       usedAliases.add(alias);
@@ -178,8 +207,9 @@ export class StorageService {
   private async allAreaEntries(): Promise<AreaEntry[]> {
     const explicit = this.explicitEntries();
     const dynamicMega = (await this.megaEntries()).filter((entry) => entry.dynamic);
+    const googleRemotes = await this.googleRemoteEntries();
     const sharedDrives = await this.googleSharedDriveEntries();
-    return [...explicit, ...dynamicMega, ...sharedDrives];
+    return [...explicit, ...dynamicMega, ...googleRemotes, ...sharedDrives];
   }
 
   private async resolveAreaTarget(area: string, relativePath: string) {
@@ -189,6 +219,7 @@ export class StorageService {
 
     const dynamic = [
       ...(await this.megaEntries()).filter((entry) => entry.dynamic),
+      ...(await this.googleRemoteEntries()),
       ...(await this.googleSharedDriveEntries()),
     ];
     const entry = dynamic.find((candidate) => candidate.alias === area);
