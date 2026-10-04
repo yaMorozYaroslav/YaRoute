@@ -11,8 +11,8 @@ export class StorageController {
   ) {}
 
   @Get('areas')
-  getAreas() {
-    return { areas: this.storage.areas() };
+  async getAreas() {
+    return { areas: await this.storage.areas() };
   }
 
   @Get('capacity')
@@ -21,8 +21,8 @@ export class StorageController {
   }
 
   @Get('mega/accounts')
-  megaAccounts() {
-    return { accounts: this.storage.megaAreas() };
+  async megaAccounts() {
+    return { accounts: await this.storage.megaAreas() };
   }
 
   @Get('mega/capacity')
