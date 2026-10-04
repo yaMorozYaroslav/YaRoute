@@ -125,7 +125,7 @@ function scanHistory() {
   for (const commit of commits) {
     try {
       const out = git([
-        'grep', '-I', '-l', '-E', ere, commit, '--', '.',
+        'grep', '-I', '-l', '-E', '-e', ere, commit, '--', '.',
         ':(exclude)scripts/public-repo-guard.mjs',
       ]).trim();
       if (out) failures.push(...out.split('\n'));
