@@ -48,8 +48,9 @@ export class SharedRootsService {
   resolve(area: string, relativePath = ''): string {
     const root = this.get(area);
     const clean = this.cleanRelativePath(relativePath);
-    const fullPath = clean ? path.posix.join(root.root, clean) : root.root;
-    return `${root.remote}:${fullPath}`;
+    const base = root.root === '.' ? '' : root.root;
+    const fullPath = clean ? path.posix.join(base, clean) : base;
+    return fullPath ? `${root.remote}:${fullPath}` : `${root.remote}:`;
   }
 
   cleanRelativePath(value: string): string {
