@@ -633,19 +633,19 @@ export class InitService {
         this.routePath(parsed, 'todo_current', 'Documents/Notepad/todo.md'),
       ],
       [
-        'todo_week',
+        'todo_7',
         this.routePath(
           parsed,
-          'todo_week',
-          'Documents/Notepad/0_active/todo_week.md',
+          'todo_7',
+          'Documents/Notepad/0_active/todo_7.md',
         ),
       ],
       [
-        'todo_month',
+        'todo_30',
         this.routePath(
           parsed,
-          'todo_month',
-          'Documents/Notepad/0_active/todo_month.md',
+          'todo_30',
+          'Documents/Notepad/0_active/todo_30.md',
         ),
       ],
       [
