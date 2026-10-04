@@ -1,0 +1,56 @@
+{
+  "name": "NestNyx",
+  "description": "Shared-folder-scoped rclone execution API and OAuth-protected MCP server for Nyx",
+  "repository": "https://github.com/linuxofpower/NestNyx",
+  "keywords": ["nestjs", "mcp", "oauth", "rclone", "google-drive", "nyx"],
+  "env": {
+    "NYX_API_KEY": {
+      "description": "Secret key required in the X-Nyx-Key header for the REST API.",
+      "generator": "secret"
+    },
+    "NYX_PUBLIC_URL": {
+      "description": "Public HTTPS origin of this Heroku app, for example https://your-app.herokuapp.com.",
+      "required": true
+    },
+    "NYX_OAUTH_ISSUER": {
+      "description": "OAuth/OIDC issuer URL used by ChatGPT to authorize access to the MCP server.",
+      "required": true
+    },
+    "NYX_OAUTH_AUDIENCE": {
+      "description": "Audience/resource identifier that NestNyx requires in MCP access tokens.",
+      "required": true
+    },
+    "NYX_OAUTH_JWKS_URI": {
+      "description": "Optional JWKS endpoint override. Leave unset for issuer/.well-known/jwks.json.",
+      "required": false
+    },
+    "NYX_OAUTH_SCOPES": {
+      "description": "Comma-separated MCP scopes. Defaults to nyx.read,nyx.write.",
+      "value": "nyx.read,nyx.write"
+    },
+    "RCLONE_CONFIG_B64": {
+      "description": "Base64-encoded rclone.conf. Keep this only in Heroku config vars.",
+      "required": true
+    },
+    "NYX_SHARED_ROOTS_JSON": {
+      "description": "JSON map of logical storage aliases to rclone remote/root pairs. Configure MAIN for linuxofpower and optionally A/B/C/D or other remotes; all configured aliases remain usable by storage tools.",
+      "required": true
+    },
+    "NYX_INIT_AREA": {
+      "description": "Logical NYX_SHARED_ROOTS_JSON alias used for canonical Nyx/Yaro initialization. MAIN should point to the linuxofpower Google Drive.",
+      "value": "MAIN"
+    },
+    "NYX_PATHS_REGISTRY_PATH": {
+      "description": "Relative path below NYX_INIT_AREA to the mutable paths.md bootstrap registry.",
+      "value": "ChatGPT/1_body/1_areas_v0/NoteFlow/3_resources/SYSTEM/paths.md"
+    },
+    "NYX_AREAS_ROOT_PATH": {
+      "description": "Relative path below NYX_INIT_AREA containing operational Area folders used by targeted initialization.",
+      "value": "ChatGPT/1_body/1_areas_v0"
+    },
+    "NYX_YARO_PREFIX": {
+      "description": "Relative YaRoute root below NYX_INIT_AREA. Current initialization also resolves the live 3_template overlays and Template map/index.",
+      "value": "YaRoute"
+    }
+  }
+}
