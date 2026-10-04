@@ -72,6 +72,89 @@ export class InitService {
       warnings.push('Missing compatibility command-table pointer in live paths registry');
     }
 
+    // Basic init is intentionally lightweight: prove the live registry and
+    // expose current routing/visible continuity without downloading/verifying
+    // the full core bundle stack. Heavy bundle/bootstrap verification belongs
+    // to normal/deep initialization.
+    if (depth === 'basic') {
+      const visibleSources = await this.loadVisibleSources(storageArea, parsed, depth);
+
+      let areaHydration: unknown = undefined;
+      if (target) {
+        const pointer = parsed.areas[target];
+        if (!pointer) {
+          warnings.push(`Target Area ${target} is not present in Operational Area routing`);
+        } else {
+          areaHydration = await this.hydrateArea(
+            storageArea,
+            target,
+            pointer,
+            warnings,
+          );
+        }
+      }
+
+      for (const [name, evidence] of Object.entries(visibleSources)) {
+        if (!(evidence as Evidence).loaded) {
+          warnings.push(
+            `Visible initialization source ${name} failed: ${(evidence as Evidence).error}`,
+          );
+        }
+      }
+
+      const receipt = {
+        schema: 'nyx.initialization.receipt.v2',
+        initializedAt: new Date().toISOString(),
+        readiness: warnings.length ? 'READY_WITH_WARNINGS' : 'READY',
+        scope,
+        depth,
+        target: target ?? null,
+        authoritySource: 'drive',
+        authority: {
+          registry: {
+            area: storageArea,
+            path: registryPath,
+            stat: registryStat,
+            sha256: this.sha256(registryMarkdown),
+          },
+          core: parsed.core,
+          canonicalCli: parsed.canonicalCli ?? null,
+          compatibilityCommandTable: parsed.compatibilityCommandTable ?? null,
+          verificationDeferred: true,
+        },
+        bootstrap: {
+          mode: 'basic',
+          verificationDeferred: true,
+          note: 'Full core/bootstrap verification is deferred to normal/deep initialization.',
+        },
+        visibleSources,
+        area: areaHydration ?? null,
+        warnings,
+        mutation: {
+          coreBundlesChanged: false,
+          areaStateChanged: false,
+          sessionStateOnly: true,
+        },
+      };
+
+      const session = await this.sessions.upsert(
+        input.sessionId,
+        target,
+        scope,
+        receipt,
+      );
+
+      return {
+        ...receipt,
+        session: {
+          id: session.id,
+          durable: this.sessions.isDurable(),
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+        },
+      };
+    }
+
     const head = parsed.core.Head
       ? await this.loadCoreBundle(storageArea, parsed.core.Head)
       : undefined;
