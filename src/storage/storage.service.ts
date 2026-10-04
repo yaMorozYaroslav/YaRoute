@@ -1,8 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { RcloneService } from './rclone.service';
 import { SharedRootsService } from './shared-roots.service';
-import { CopyJobPayload, StorageProvider } from './storage.types';
+import { CopyJobPayload, GlobalIndexJobPayload, StorageProvider } from './storage.types';
 
 type AreaEntry = {
   alias: string;
@@ -11,6 +14,18 @@ type AreaEntry = {
   provider?: StorageProvider;
   dynamic: boolean;
 };
+
+type RawListItem = {
+  Path?: string;
+  Name?: string;
+  Size?: number;
+  MimeType?: string;
+  ModTime?: string;
+  IsDir?: boolean;
+  Hashes?: Record<string, string>;
+};
+
+const GLOBAL_INDEX_ROOT = 'Documents/Nyxpad/file_global_indexes';
 
 @Injectable()
 export class StorageService {
@@ -95,6 +110,259 @@ export class StorageService {
       verification,
       destinationStat,
     };
+  }
+
+  async executeGlobalIndex(payload: GlobalIndexJobPayload = {}) {
+    const generatedAt = new Date().toISOString();
+    const scanId = generatedAt.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const entries = (await this.allAreaEntries()).sort((a, b) => a.alias.localeCompare(b.alias));
+    const driveRemotes = new Set(await this.rclone.listRemoteNamesByType('drive'));
+    const megaRemotes = new Set(await this.rclone.listRemoteNamesByType('mega'));
+
+    const normalSources: any[] = [];
+    const deepSources: any[] = [];
+    const basicSources: any[] = [];
+
+    let totalItems = 0;
+    let totalFiles = 0;
+    let totalDirs = 0;
+    let totalBytes = 0;
+
+    for (const entry of entries) {
+      const target = this.resolveEntryTarget(entry, '');
+      const raw = await this.rclone.json([
+        'lsjson',
+        target,
+        '--recursive',
+        '--metadata',
+        '--hash',
+      ]);
+
+      if (!Array.isArray(raw)) {
+        throw new Error(`Global index scan returned non-array for ${entry.alias}`);
+      }
+
+      const items = (raw as RawListItem[])
+        .filter((item) => {
+          if (entry.alias !== 'MAIN') return true;
+          const itemPath = String(item.Path || '').replace(/^\.\//, '');
+          return itemPath !== GLOBAL_INDEX_ROOT && !itemPath.startsWith(`${GLOBAL_INDEX_ROOT}/`);
+        })
+        .sort((a, b) => String(a.Path || '').localeCompare(String(b.Path || '')));
+
+      const files = items.filter((item) => !item.IsDir);
+      const dirs = items.filter((item) => item.IsDir);
+      const bytes = files.reduce((sum, item) => {
+        const size = Number(item.Size);
+        return sum + (Number.isFinite(size) && size > 0 ? size : 0);
+      }, 0);
+
+      totalItems += items.length;
+      totalFiles += files.length;
+      totalDirs += dirs.length;
+      totalBytes += bytes;
+
+      const baseRemote = entry.remote.split(',')[0];
+      const provider =
+        entry.provider ||
+        (driveRemotes.has(baseRemote) ? 'google-drive' : megaRemotes.has(baseRemote) ? 'mega' : 'other');
+
+      const normalItems = items.map((item) => ({
+        path: String(item.Path || ''),
+        type: item.IsDir ? 'directory' : 'file',
+        size: this.toNumberOrNull(item.Size),
+        modTime: item.ModTime || null,
+        mimeType: item.MimeType || null,
+      }));
+
+      const deepItems = items.map((item) => {
+        const itemPath = String(item.Path || '');
+        const parent = itemPath.includes('/') ? itemPath.slice(0, itemPath.lastIndexOf('/')) : '';
+        const name = String(item.Name || path.posix.basename(itemPath));
+        const extension = item.IsDir ? null : (path.posix.extname(name).replace(/^\./, '').toLowerCase() || null);
+        return {
+          path: itemPath,
+          name,
+          parent,
+          depth: itemPath ? itemPath.split('/').length : 0,
+          type: item.IsDir ? 'directory' : 'file',
+          size: this.toNumberOrNull(item.Size),
+          modTime: item.ModTime || null,
+          mimeType: item.MimeType || null,
+          extension,
+          hashes: this.normalizeHashes(item.Hashes),
+        };
+      });
+
+      const topLevel = items
+        .filter((item) => !String(item.Path || '').includes('/'))
+        .map((item) => ({
+          name: String(item.Name || item.Path || ''),
+          type: item.IsDir ? 'directory' : 'file',
+        }));
+
+      basicSources.push({
+        area: entry.alias,
+        provider,
+        items: items.length,
+        files: files.length,
+        directories: dirs.length,
+        bytes,
+        topLevel,
+      });
+
+      normalSources.push({
+        area: entry.alias,
+        provider,
+        summary: { items: items.length, files: files.length, directories: dirs.length, bytes },
+        items: normalItems,
+      });
+
+      deepSources.push({
+        area: entry.alias,
+        provider,
+        summary: { items: items.length, files: files.length, directories: dirs.length, bytes },
+        items: deepItems,
+      });
+    }
+
+    const totals = {
+      sources: entries.length,
+      items: totalItems,
+      files: totalFiles,
+      directories: totalDirs,
+      bytes: totalBytes,
+    };
+
+    const normalIndex = {
+      schema: 'nyx.file_global_index.normal.v1',
+      role: 'file_global_index',
+      depth: 'normal',
+      generatedAt,
+      scanId,
+      contentPolicy: 'metadata-only; no file contents or credentials read',
+      totals,
+      sources: normalSources,
+    };
+
+    const deepIndex = {
+      schema: 'nyx.file_global_index.deep.v1',
+      role: 'file_global_index',
+      depth: 'deep',
+      generatedAt,
+      scanId,
+      contentPolicy: 'metadata-only; no file contents, external object IDs, owner emails, or credentials stored',
+      totals,
+      sources: deepSources,
+    };
+
+    const basicLines = [
+      '# NYX File Global Index',
+      '',
+      `Generated: ${generatedAt}`,
+      `Scan: ${scanId}`,
+      `Sources: ${totals.sources}`,
+      `Items: ${totals.items} (${totals.files} files, ${totals.directories} directories)`,
+      `Indexed file bytes: ${totals.bytes}`,
+      '',
+      '> Metadata-only global inventory. File contents and credentials were not read.',
+      '> Current machine indexes: global.md (Basic), n_global.json (Normal), d_global.json (Deep).',
+      '',
+    ];
+
+    for (const source of basicSources) {
+      basicLines.push(
+        `## ${source.area}`,
+        '',
+        `- Provider: ${source.provider}`,
+        `- Items: ${source.items}`,
+        `- Files: ${source.files}`,
+        `- Directories: ${source.directories}`,
+        `- Indexed file bytes: ${source.bytes}`,
+        '- Top level:',
+      );
+      for (const item of source.topLevel) {
+        basicLines.push(`  - ${item.type === 'directory' ? '📁' : '📄'} ${item.name}`);
+      }
+      if (!source.topLevel.length) basicLines.push('  - (empty)');
+      basicLines.push('');
+    }
+
+    const globalMd = `${basicLines.join('\n').trimEnd()}\n`;
+    const normalJson = `${JSON.stringify(normalIndex)}\n`;
+    const deepJson = `${JSON.stringify(deepIndex)}\n`;
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nyx-global-index-'));
+    try {
+      const localFiles = [
+        { name: 'global.md', content: globalMd },
+        { name: 'n_global.json', content: normalJson },
+        { name: 'd_global.json', content: deepJson },
+      ];
+
+      const generated = localFiles.map((file) => {
+        const localPath = path.join(tempDir, file.name);
+        fs.writeFileSync(localPath, file.content, 'utf8');
+        return {
+          ...file,
+          localPath,
+          bytes: Buffer.byteLength(file.content),
+          sha256: createHash('sha256').update(file.content).digest('hex'),
+        };
+      });
+
+      const currentRoot = this.roots.resolve('MAIN', GLOBAL_INDEX_ROOT);
+      await this.rclone.run(['mkdir', currentRoot]);
+
+      let snapshotRoot: string | null = null;
+      if (payload.snapshot !== false) {
+        snapshotRoot = this.roots.resolve('MAIN', `${GLOBAL_INDEX_ROOT}/versions/${scanId}`);
+        await this.rclone.run(['mkdir', snapshotRoot]);
+        for (const file of generated) {
+          await this.rclone.run(['copyto', file.localPath, this.roots.resolve('MAIN', `${GLOBAL_INDEX_ROOT}/versions/${scanId}/${file.name}`)]);
+        }
+      }
+
+      const verification: any[] = [];
+      for (const file of generated) {
+        const remotePath = this.roots.resolve('MAIN', `${GLOBAL_INDEX_ROOT}/${file.name}`);
+        await this.rclone.run(['copyto', file.localPath, remotePath]);
+        const stat = await this.statTarget(remotePath);
+        const remoteSize = Number(stat?.Size);
+        const remoteSha = this.normalizeHashes(stat?.Hashes).sha256 || null;
+        const sizeMatch = remoteSize === file.bytes;
+        const hashMatch = remoteSha ? remoteSha === file.sha256 : null;
+        verification.push({
+          file: file.name,
+          bytes: file.bytes,
+          sha256: file.sha256,
+          sizeMatch,
+          hashMatch,
+          trusted: Boolean(sizeMatch && (hashMatch === null || hashMatch)),
+        });
+      }
+
+      if (verification.some((item) => !item.trusted)) {
+        throw new Error(`Global index upload verification failed: ${JSON.stringify(verification)}`);
+      }
+
+      return {
+        schema: 'nyx.file_global_index.receipt.v1',
+        generatedAt,
+        scanId,
+        destination: {
+          area: 'MAIN',
+          root: GLOBAL_INDEX_ROOT,
+          current: ['global.md', 'n_global.json', 'd_global.json'],
+          snapshot: payload.snapshot === false ? null : `versions/${scanId}`,
+        },
+        totals,
+        sources: basicSources.map(({ topLevel, ...source }) => source),
+        verification,
+      };
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   }
 
   private explicitEntries(): AreaEntry[] {

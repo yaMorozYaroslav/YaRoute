@@ -62,7 +62,17 @@ Shared folders are the GPT-visible control surface. Private rclone remotes are t
 - `nyx_stat` — inspect metadata, hashes, size, and owner.
 - `nyx_capacity` — report account quota information.
 - `nyx_copy_file` — queue a verified cross-area copy; source retained.
-- `nyx_job_status` — read job state and verification evidence.
+- `nyx_global_index` — queue a metadata-only scan of every accessible storage source and regenerate `global.md`, `n_global.json`, and `d_global.json` under the private Nyxpad file-global-index state.\n- `nyx_job_status` — read job state and verification evidence.
+
+## File global indexes
+
+NestNyx can build a three-depth metadata inventory across every accessible Google Drive and MEGA source:
+
+- `global.md` — Basic human-readable source/top-level map.
+- `n_global.json` — Normal complete path inventory with compact file metadata.
+- `d_global.json` — Deep complete path inventory with hashes, parent/depth and extension metadata.
+
+Current files live privately at `MAIN:Documents/Nyxpad/file_global_indexes`. Each run can also preserve a timestamped snapshot under `versions/<scan-id>/`. Indexing reads file metadata only, not file contents or credentials, and excludes the index folder itself from future scans.
 
 ## Public Heroku config bridge
 

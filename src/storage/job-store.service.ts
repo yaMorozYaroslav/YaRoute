@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { CopyJobPayload, StorageJob } from './storage.types';
+import { CopyJobPayload, GlobalIndexJobPayload, StorageJob, StorageJobType } from './storage.types';
 
 @Injectable()
 export class JobStoreService implements OnModuleInit, OnModuleDestroy {
@@ -35,20 +35,12 @@ export class JobStoreService implements OnModuleInit, OnModuleDestroy {
     return Boolean(this.pool);
   }
 
-  async createCopy(payload: CopyJobPayload): Promise<StorageJob> {
-    const id = randomUUID();
-    if (this.pool) {
-      const result = await this.pool.query(
-        `INSERT INTO nyx_storage_jobs (id, type, payload, status)
-         VALUES ($1, 'copy-file', $2::jsonb, 'queued') RETURNING *`,
-        [id, JSON.stringify(payload)],
-      );
-      return this.rowToJob(result.rows[0]);
-    }
-    const now = new Date().toISOString();
-    const job: StorageJob = { id, type: 'copy-file', payload, status: 'queued', attempts: 0, createdAt: now, updatedAt: now };
-    this.memory.set(id, job);
-    return job;
+  createCopy(payload: CopyJobPayload) {
+    return this.createJob('copy-file', payload);
+  }
+
+  createGlobalIndex(payload: GlobalIndexJobPayload = {}) {
+    return this.createJob('global-index', payload);
   }
 
   async get(id: string): Promise<StorageJob | undefined> {
@@ -120,6 +112,34 @@ export class JobStoreService implements OnModuleInit, OnModuleDestroy {
       job.error = error;
       job.updatedAt = new Date().toISOString();
     }
+  }
+
+  private async createJob(
+    type: StorageJobType,
+    payload: CopyJobPayload | GlobalIndexJobPayload,
+  ): Promise<StorageJob> {
+    const id = randomUUID();
+    if (this.pool) {
+      const result = await this.pool.query(
+        `INSERT INTO nyx_storage_jobs (id, type, payload, status)
+         VALUES ($1, $2, $3::jsonb, 'queued') RETURNING *`,
+        [id, type, JSON.stringify(payload)],
+      );
+      return this.rowToJob(result.rows[0]);
+    }
+
+    const now = new Date().toISOString();
+    const job: StorageJob = {
+      id,
+      type,
+      payload,
+      status: 'queued',
+      attempts: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.memory.set(id, job);
+    return job;
   }
 
   private rowToJob(row: any): StorageJob {

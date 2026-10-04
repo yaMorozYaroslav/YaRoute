@@ -31,7 +31,7 @@ export class McpService {
   private buildServer() {
     const server = new McpServer({
       name: 'NestNyx',
-      version: '0.6.1',
+      version: '0.7.0',
     });
 
     server.registerTool(
@@ -199,6 +199,36 @@ export class McpService {
         },
       },
       async () => this.safeTool(() => this.storage.megaCapacity()),
+    );
+
+    server.registerTool(
+      'nyx_global_index',
+      {
+        title: 'Regenerate NYX file global indexes',
+        description:
+          'Queue a metadata-only scan of every currently accessible storage source and regenerate global.md, n_global.json, and d_global.json in the private Nyxpad file_global_indexes folder. File contents and credentials are not read.',
+        inputSchema: z.object({
+          snapshot: z.boolean().optional().default(true),
+        }),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async ({ snapshot }) => this.safeTool(async () => {
+        const job = await this.jobs.createGlobalIndex({ snapshot });
+        return {
+          job,
+          destination: {
+            area: 'MAIN',
+            root: 'Documents/Nyxpad/file_global_indexes',
+            files: ['global.md', 'n_global.json', 'd_global.json'],
+          },
+          message: 'Global file indexing queued. Poll nyx_job_status for completion.',
+        };
+      }),
     );
 
     server.registerTool(
