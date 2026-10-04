@@ -1,0 +1,22 @@
+name: Deploy to Heroku
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Deploy YaRoute master to dev-nest-nyx
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          test -n "$HEROKU_API_KEY"
+          git remote add heroku "https://heroku:${HEROKU_API_KEY}@git.heroku.com/dev-nest-nyx.git"
+          git push heroku HEAD:main --force
