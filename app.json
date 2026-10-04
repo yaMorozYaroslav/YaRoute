@@ -1,8 +1,15 @@
 {
   "name": "NestNyx",
   "description": "Shared-folder-scoped rclone execution API and OAuth-protected MCP server for Nyx",
-  "repository": "https://github.com/linuxofpower/NestNyx",
-  "keywords": ["nestjs", "mcp", "oauth", "rclone", "google-drive", "nyx"],
+  "repository": "https://github.com/yaMorozYaroslav/YaRoute",
+  "keywords": [
+    "nestjs",
+    "mcp",
+    "oauth",
+    "rclone",
+    "google-drive",
+    "nyx"
+  ],
   "env": {
     "NYX_API_KEY": {
       "description": "Secret key required in the X-Nyx-Key header for the REST API.",
