@@ -31,7 +31,7 @@ export class McpService {
   private buildServer() {
     const server = new McpServer({
       name: 'NestNyx',
-      version: '0.6.0',
+      version: '0.6.1',
     });
 
     server.registerTool(
@@ -70,7 +70,7 @@ export class McpService {
           openWorldHint: false,
         },
       },
-      async () => this.safeTool(() => ({ areas: this.storage.areas() })),
+      async () => this.safeTool(async () => ({ areas: await this.storage.areas() })),
     );
 
     server.registerTool(
@@ -132,7 +132,7 @@ export class McpService {
       {
         title: 'List configured MEGA accounts',
         description:
-          'List only logical storage aliases explicitly tagged as MEGA in NYX_SHARED_ROOTS_JSON. Remote names and credentials are not exposed.',
+          'List safe logical aliases for MEGA remotes discovered from the private rclone config, plus explicitly configured MEGA roots. Remote names and credentials are not exposed.',
         inputSchema: z.object({}),
         annotations: {
           readOnlyHint: true,
@@ -141,7 +141,7 @@ export class McpService {
           openWorldHint: false,
         },
       },
-      async () => this.safeTool(() => ({ accounts: this.storage.megaAreas() })),
+      async () => this.safeTool(async () => ({ accounts: await this.storage.megaAreas() })),
     );
 
     server.registerTool(
