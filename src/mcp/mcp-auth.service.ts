@@ -9,7 +9,7 @@ export class McpAuthService {
 
   protectedResourceMetadata() {
     const publicUrl = this.required('NYX_PUBLIC_URL').replace(/\/$/, '');
-    const issuer = this.required('NYX_OAUTH_ISSUER').replace(/\/$/, '');
+    const issuer = this.required('NYX_OAUTH_ISSUER');
 
     return {
       resource: `${publicUrl}/mcp`,
@@ -50,7 +50,7 @@ export class McpAuthService {
   }
 
   private verify(token: string): Promise<JwtPayload> {
-    const issuer = this.required('NYX_OAUTH_ISSUER').replace(/\/$/, '');
+    const issuer = this.required('NYX_OAUTH_ISSUER');
     const audience = this.required('NYX_OAUTH_AUDIENCE');
     const algorithms = (process.env.NYX_OAUTH_ALGORITHMS || 'RS256')
       .split(',')
