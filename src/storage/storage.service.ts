@@ -235,8 +235,9 @@ export class StorageService {
 
   private resolveEntryTarget(entry: AreaEntry, relativePath: string) {
     const clean = this.roots.cleanRelativePath(relativePath);
-    const fullPath = clean ? path.posix.join(entry.root, clean) : entry.root;
-    return `${entry.remote}:${fullPath}`;
+    const base = entry.root === '.' ? '' : entry.root;
+    const fullPath = clean ? path.posix.join(base, clean) : base;
+    return fullPath ? `${entry.remote}:${fullPath}` : `${entry.remote}:`;
   }
 
   private async capacityForEntries(entries: AreaEntry[]) {
