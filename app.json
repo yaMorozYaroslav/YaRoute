@@ -40,11 +40,11 @@
       "required": true
     },
     "NYX_SHARED_ROOTS_JSON": {
-      "description": "JSON map of logical storage aliases to rclone remote/root pairs. Configure MAIN for linuxofpower and optionally A/B/C/D or other remotes; all configured aliases remain usable by storage tools.",
+      "description": "JSON map of logical storage aliases to rclone remote/root pairs. Configure MAIN for the primary Drive and optionally A/B/C/D or other remotes; all configured aliases remain usable by storage tools.",
       "required": true
     },
     "NYX_INIT_AREA": {
-      "description": "Logical NYX_SHARED_ROOTS_JSON alias used for canonical Nyx/Yaro initialization. MAIN should point to the linuxofpower Google Drive.",
+      "description": "Logical NYX_SHARED_ROOTS_JSON alias used for canonical Nyx/Yaro initialization. MAIN should point to the primary Google Drive root.",
       "value": "MAIN"
     },
     "NYX_PATHS_REGISTRY_PATH": {

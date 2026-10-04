@@ -1,18 +1,18 @@
-name: CI
+name: Public repository security audit
 
 on:
+  workflow_dispatch:
   push:
     branches: [master]
-  pull_request:
 
 jobs:
-  build:
+  audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm run security:check
-      - run: npm install
-      - run: npm run build
+      - run: node scripts/public-repo-guard.mjs --history

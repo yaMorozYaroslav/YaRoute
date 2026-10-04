@@ -4,6 +4,7 @@ The MCP layer exposes only logical shared-folder operations. It never accepts an
 
 V0 tools:
 
+- `nyx_ini`
 - `nyx_areas`
 - `nyx_list`
 - `nyx_stat`
@@ -11,6 +12,6 @@ V0 tools:
 - `nyx_copy_file`
 - `nyx_job_status`
 
-`nyx_copy_file` is intentionally copy-only. It refuses clobbering, queues work, keeps the source, and relies on the existing worker to verify size, a common hash, and destination ownership.
+`nyx_copy_file` is intentionally copy-only. It refuses clobbering, queues work, keeps the source, and relies on the worker to verify size, a common hash, and destination ownership.
 
-The initial private connector uses `NYX_MCP_TOKEN` as a bearer secret. The secret may be supplied in an Authorization header for ordinary MCP clients, or as the final URL segment for hosts that cannot attach a static custom header. The secret URL is an MVP mechanism, not a replacement for OAuth in a shared or production deployment.
+Production MCP access uses OAuth bearer tokens validated by NestNyx against the configured issuer, audience, JWKS and scopes. Reusable tokens, client secrets, rclone credentials and other secret material must never be committed to this repository.

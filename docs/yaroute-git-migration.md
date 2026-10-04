@@ -1,32 +1,34 @@
 # YaRoute Git migration
 
-Status: migration in progress. Git is a verified mirror/implementation surface, not canonical Yaro authority yet.
+**Canonical implementation repository:** `yaMorozYaroslav/YaRoute`.
 
-## Current canonical source
+Git is the public implementation and deployment surface for NestNyx. Canonical Yaro knowledge, continuity state, Drive object identifiers, private artifact hashes, account identities, credentials, and runtime storage configuration remain outside this public repository.
 
-- Head: `head_db_v025.zip` — Drive `1M0kL2VzWSLF2m32WkLE1zqSA-Kfmvhob` — SHA-256 `7391f63cbba78dcfb19901bd683675dc45a7af0fb1c8d2fe906956e88d3603c1`
-- Body: `body_db_v022.zip` — Drive `17crbtFcY9TP594SWVpCLON1Les6snT6Y` — SHA-256 `91a77a92c1e457a250cfeebbdfc9ef6e6deef01c4b96ea99e944e868bf72e82e`
-- Footer: `footer_db_v073.zip` — Drive `1LyFCCt-8G9zPhaJbJhpd0g34RZd6wvd7` — SHA-256 `8d3c068b55b351fa49a4824bde3d6917a58939b207ef7daf84e16a096ef6ef3b`
+## Repository boundary
 
-Private Git mirror/migration target: `linuxofpower/NyxGPT`.
+This repository may contain:
 
-## Runtime bootstrap
+- reusable NestJS/TypeScript implementation;
+- public-safe schemas and examples;
+- deployment workflow definitions that reference secrets only through secret-variable names;
+- public-safe documentation.
 
-NestNyx resolves the current Drive authority in this order:
+This repository must not contain:
 
-1. live `paths.md`
-2. canonical Head / Body / Footer and exact hashes
-3. Head `LEAD/Core_Skills/FileFilter/paths.json`
-4. live `temp_paths.json`
-5. Head `LEAD/Core_Skills/YaRoCLI/nyxcli.json`
-6. live `temp_nyxcli.json`
-7. staged/live `nyx_entry.md`
-8. live `template_map.md` + `template_index.json`
-9. project topology when it becomes canonical/available
-10. Area/command-required sources
+- passwords, access tokens, API keys, OAuth client secrets, private keys, recovery codes, or reusable credential hashes;
+- `rclone.conf`, encoded rclone configuration, or runtime environment files;
+- personal email addresses or private account identifiers;
+- private Google Drive IDs or private artifact hashes;
+- alternate private GitHub mirror targets.
 
-The historical `3_subfooter` route is normalized to the renamed `3_template` runtime folder while original provenance is preserved in receipts.
+Runtime authority is resolved from configured external sources. Changes to canonical Head/Body/Footer continue to follow the Yaro lifecycle outside this repository.
 
-## Authority boundary
+## Deployment rule
 
-Git migration does not promote Git to canonical authority. That requires an explicit future Yaro architecture change through FIN → UPD → GEN → Footer/diff verification → CAN. Until then, Drive plus the newest canonical Footer remains authoritative.
+All implementation changes and Heroku deployments for this service originate from:
+
+```text
+yaMorozYaroslav/YaRoute
+```
+
+Do not deploy another repository as a substitute for YaRoute.

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "nest build",
+    "security:check": "node scripts/public-repo-guard.mjs",
     "postinstall": "node scripts/install-rclone.mjs",
     "heroku-postbuild": "npm run build",
     "start": "node dist/main.js",
