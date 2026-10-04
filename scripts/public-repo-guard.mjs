@@ -68,8 +68,10 @@ function scanCurrent() {
       }
     }
 
-    for (const id of forbiddenPublicIdentifiers) {
-      if (text.includes(id)) failures.push(`noncanonical/private repository identifier in ${file}`);
+    if (file !== 'scripts/public-repo-guard.mjs') {
+      for (const id of forbiddenPublicIdentifiers) {
+        if (text.includes(id)) failures.push(`noncanonical/private repository identifier in ${file}`);
+      }
     }
 
     if (text.includes('linuxofpower') && file !== 'scripts/public-repo-guard.mjs') {
