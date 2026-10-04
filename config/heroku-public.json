@@ -1,0 +1,9 @@
+{
+  "NYX_PUBLIC_URL": "https://dev-nest-nyx-0df80c227630.herokuapp.com",
+  "NYX_OAUTH_AUDIENCE": "https://dev-nest-nyx-0df80c227630.herokuapp.com/mcp",
+  "NYX_OAUTH_SCOPES": "nyx.read,nyx.write",
+  "NYX_INIT_AREA": "MAIN",
+  "NYX_NORMAL_PATHS_PATH": "ChatGPT/1_body/1_areas_v0/FileFilter/0_state/n_paths.json",
+  "NYX_AREAS_ROOT_PATH": "ChatGPT/1_body/1_areas_v0",
+  "NYX_YARO_PREFIX": "YaRoute"
+}

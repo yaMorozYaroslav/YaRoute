@@ -13,6 +13,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate public Heroku config
+        run: node scripts/validate-heroku-public-config.mjs config/heroku-public.json
+
+      - name: Sync public Heroku config
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$HEROKU_API_KEY"
+          curl -fsS -o /dev/null \
+            -X PATCH \
+            -H "Authorization: Bearer $HEROKU_API_KEY" \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            -H "Content-Type: application/json" \
+            --data-binary @config/heroku-public.json \
+            https://api.heroku.com/apps/dev-nest-nyx/config-vars
+
       - name: Deploy YaRoute master to dev-nest-nyx
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}

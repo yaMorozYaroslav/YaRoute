@@ -64,6 +64,18 @@ Shared folders are the GPT-visible control surface. Private rclone remotes are t
 - `nyx_copy_file` — queue a verified cross-area copy; source retained.
 - `nyx_job_status` — read job state and verification evidence.
 
+## Public Heroku config bridge
+
+Public, non-secret runtime values that ChatGPT is allowed to maintain live in:
+
+```text
+config/heroku-public.json
+```
+
+A push to `master` validates this file against a strict allow-list, then GitHub Actions updates only those config vars through the Heroku Platform API before deployment. The API response is discarded so Heroku does not print the app's full config-var map into CI logs.
+
+Do **not** put credentials, rclone configuration, private account mappings, `NYX_SHARED_ROOTS_JSON`, database URLs, tokens, keys, or client secrets in this file. Those remain private runtime configuration.
+
 ## Heroku config vars
 
 ### Storage
