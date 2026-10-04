@@ -24,6 +24,15 @@ export class RcloneService implements OnModuleInit {
     return stdout.split('\n')[0]?.trim() || 'unknown';
   }
 
+  async listRemoteNamesByType(type: string): Promise<string[]> {
+    const { stdout } = await this.run(['listremotes', '--type', type, '--exact']);
+    return stdout
+      .split('\n')
+      .map((line) => line.trim().replace(/:$/, ''))
+      .filter(Boolean)
+      .sort();
+  }
+
   async json(args: string[]): Promise<unknown> {
     const { stdout } = await this.run(args);
     return JSON.parse(stdout);
