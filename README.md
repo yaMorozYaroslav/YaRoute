@@ -1,6 +1,6 @@
 # NestNyx
 
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/linuxofpower/NestNyx)
+[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/yaMorozYaroslav/YaRoute)
 
 NestNyx is the execution side of Nyx storage operations. ChatGPT can inspect explicitly shared Google Drive folders and, through the MCP endpoint, call a small allow-listed set of storage tools. NestNyx executes those tools with `rclone` against the same logical shared-folder roots.
 
