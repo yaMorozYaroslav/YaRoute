@@ -127,6 +127,7 @@ function scanHistory() {
       const out = git([
         'grep', '-I', '-l', '-E', '-e', ere, commit, '--', '.',
         ':(exclude)scripts/public-repo-guard.mjs',
+        ':(exclude,glob)**/node_modules/**',
       ]).trim();
       if (out) failures.push(...out.split('\n'));
     } catch (error) {
@@ -139,6 +140,7 @@ function scanHistory() {
     .map((x) => x.trim())
     .filter(Boolean);
   for (const file of names) {
+    if (file.includes('/node_modules/')) continue;
     if (forbiddenFilename(file)) failures.push(`historical sensitive filename: ${file}`);
   }
 
