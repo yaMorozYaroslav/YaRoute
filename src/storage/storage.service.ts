@@ -1,7 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import path from 'node:path';
 import { RcloneService } from './rclone.service';
 import { SharedRootsService } from './shared-roots.service';
-import { CopyJobPayload } from './storage.types';
+import { CopyJobPayload, StorageProvider } from './storage.types';
+
+type AreaEntry = {
+  alias: string;
+  remote: string;
+  root: string;
+  provider?: StorageProvider;
+  dynamic: boolean;
+};
 
 @Injectable()
 export class StorageService {
@@ -10,12 +19,12 @@ export class StorageService {
     private readonly rclone: RcloneService,
   ) {}
 
-  areas() {
-    return this.roots.listAreas();
+  async areas() {
+    return (await this.allAreaEntries()).map((entry) => entry.alias).sort();
   }
 
-  megaAreas() {
-    return this.roots.listAreas('mega');
+  async megaAreas() {
+    return (await this.megaEntries()).map((entry) => entry.alias).sort();
   }
 
   validateCopyPayload(payload: CopyJobPayload) {
@@ -32,31 +41,31 @@ export class StorageService {
   }
 
   async capacity() {
-    return this.capacityForAreas(this.roots.listAreas());
+    return this.capacityForEntries(await this.allAreaEntries());
   }
 
   async megaCapacity() {
-    return this.capacityForAreas(this.megaAreas());
+    return this.capacityForEntries(await this.megaEntries());
   }
 
   async list(area: string, relativePath = '') {
-    const target = this.roots.resolve(area, relativePath);
+    const target = await this.resolveAreaTarget(area, relativePath);
     return this.rclone.json(['lsjson', target, '--metadata', '--hash']);
   }
 
   async megaList(account: string, relativePath = '') {
-    this.roots.assertProvider(account, 'mega');
-    return this.list(account, relativePath);
+    const target = await this.resolveMegaTarget(account, relativePath);
+    return this.rclone.json(['lsjson', target, '--metadata', '--hash']);
   }
 
   async stat(area: string, relativePath: string) {
-    const target = this.roots.resolve(area, relativePath);
+    const target = await this.resolveAreaTarget(area, relativePath);
     return this.statTarget(target);
   }
 
   async megaStat(account: string, relativePath: string) {
-    this.roots.assertProvider(account, 'mega');
-    return this.stat(account, relativePath);
+    const target = await this.resolveMegaTarget(account, relativePath);
+    return this.statTarget(target);
   }
 
   async executeCopy(payload: CopyJobPayload) {
@@ -88,14 +97,82 @@ export class StorageService {
     };
   }
 
-  private async capacityForAreas(areas: string[]) {
+  private explicitEntries(): AreaEntry[] {
+    return this.roots.listAreas().map((alias) => {
+      const root = this.roots.get(alias);
+      return {
+        alias,
+        remote: root.remote,
+        root: root.root,
+        provider: root.provider,
+        dynamic: false,
+      };
+    });
+  }
+
+  private async megaEntries(): Promise<AreaEntry[]> {
+    const explicit = this.explicitEntries().filter((entry) => entry.provider === 'mega');
+    const explicitMegaRemotes = new Set(explicit.map((entry) => entry.remote));
+    const usedAliases = new Set(this.roots.listAreas());
+    const discovered = await this.rclone.listRemoteNamesByType('mega');
+
+    const dynamic: AreaEntry[] = [];
+    let index = 1;
+
+    for (const remote of discovered) {
+      if (explicitMegaRemotes.has(remote)) continue;
+      while (usedAliases.has(`MEGA_${index}`)) index += 1;
+
+      const alias = `MEGA_${index}`;
+      usedAliases.add(alias);
+      dynamic.push({
+        alias,
+        remote,
+        root: '.',
+        provider: 'mega',
+        dynamic: true,
+      });
+      index += 1;
+    }
+
+    return [...explicit, ...dynamic].sort((a, b) => a.alias.localeCompare(b.alias));
+  }
+
+  private async allAreaEntries(): Promise<AreaEntry[]> {
+    const explicit = this.explicitEntries();
+    const dynamicMega = (await this.megaEntries()).filter((entry) => entry.dynamic);
+    return [...explicit, ...dynamicMega];
+  }
+
+  private async resolveAreaTarget(area: string, relativePath: string) {
+    if (this.roots.listAreas().includes(area)) {
+      return this.roots.resolve(area, relativePath);
+    }
+
+    const entry = (await this.megaEntries()).find((candidate) => candidate.alias === area);
+    if (!entry) throw new BadRequestException(`Unknown shared area: ${area}`);
+    return this.resolveEntryTarget(entry, relativePath);
+  }
+
+  private async resolveMegaTarget(account: string, relativePath: string) {
+    const entry = (await this.megaEntries()).find((candidate) => candidate.alias === account);
+    if (!entry) throw new BadRequestException(`Unknown MEGA account alias: ${account}`);
+    return this.resolveEntryTarget(entry, relativePath);
+  }
+
+  private resolveEntryTarget(entry: AreaEntry, relativePath: string) {
+    const clean = this.roots.cleanRelativePath(relativePath);
+    const fullPath = clean ? path.posix.join(entry.root, clean) : entry.root;
+    return `${entry.remote}:${fullPath}`;
+  }
+
+  private async capacityForEntries(entries: AreaEntry[]) {
     const remoteAreas = new Map<string, string[]>();
 
-    for (const area of areas) {
-      const remote = this.roots.get(area).remote;
-      const mappedAreas = remoteAreas.get(remote) || [];
-      mappedAreas.push(area);
-      remoteAreas.set(remote, mappedAreas);
+    for (const entry of entries) {
+      const mappedAreas = remoteAreas.get(entry.remote) || [];
+      mappedAreas.push(entry.alias);
+      remoteAreas.set(entry.remote, mappedAreas);
     }
 
     const remotes = await Promise.all(
@@ -127,14 +204,14 @@ export class StorageService {
 
     const readable = remotes.filter((item) => item.error === null);
     return {
-      areas,
+      areas: entries.map((entry) => entry.alias).sort(),
       remotes,
       aggregate: {
         total: this.sumKnown(readable.map((item) => item.total)),
         used: this.sumKnown(readable.map((item) => item.used)),
         free: this.sumKnown(readable.map((item) => item.free)),
       },
-      note: 'Capacity is account/remote quota. File operations remain restricted to configured roots.',
+      note: 'Capacity is account/remote quota. Dynamic MEGA aliases expose only MEGA remotes already present in the private rclone config.',
     };
   }
 
