@@ -33,6 +33,22 @@ export class RcloneService implements OnModuleInit {
       .sort();
   }
 
+  async listGoogleSharedDrives(remote: string): Promise<Array<{ id: string; name: string }>> {
+    const raw = await this.json(['backend', 'drives', `${remote}:`]);
+    if (!Array.isArray(raw)) return [];
+
+    return raw
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const value = item as Record<string, unknown>;
+        const id = typeof value.id === 'string' ? value.id.trim() : '';
+        const name = typeof value.name === 'string' ? value.name.trim() : '';
+        return id && name ? { id, name } : null;
+      })
+      .filter((item): item is { id: string; name: string } => Boolean(item))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }
+
   async json(args: string[]): Promise<unknown> {
     const { stdout } = await this.run(args);
     return JSON.parse(stdout);
