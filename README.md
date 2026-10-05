@@ -68,7 +68,7 @@ Shared folders are the GPT-visible control surface. Private rclone remotes are t
 
 NestNyx can build a three-depth metadata inventory across every accessible Google Drive and MEGA source:
 
-- `global.md` — Basic human-readable source/top-level map.
+- `global.md` — Basic human-readable map: short source lines plus top-level folders only, in the same spirit as `paths.md`. No hashes, IDs, raw metadata, or exhaustive file lists.
 - `n_global.json` — Normal complete path inventory with compact file metadata.
 - `d_global.json` — Deep complete path inventory with hashes, parent/depth and extension metadata.
 
