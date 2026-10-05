@@ -256,37 +256,39 @@ export class StorageService {
       sources: deepSources,
     };
 
+    const humanGb = (bytes: number) => {
+      const gb = bytes / 1_000_000_000;
+      return gb >= 10 ? gb.toFixed(1) : gb.toFixed(2);
+    };
+
     const basicLines = [
-      '# NYX File Global Index',
+      '# Nyx Global Files',
       '',
-      `Generated: ${generatedAt}`,
-      `Scan: ${scanId}`,
-      `Sources: ${totals.sources}`,
-      `Items: ${totals.items} (${totals.files} files, ${totals.directories} directories)`,
-      `Indexed file bytes: ${totals.bytes}`,
-      '',
-      '> Metadata-only global inventory. File contents and credentials were not read.',
-      '> Current machine indexes: global.md (Basic), n_global.json (Normal), d_global.json (Deep).',
+      `📊 Total - ${totals.sources} sources · ${totals.files.toLocaleString('en-US')} files · ${totals.directories.toLocaleString('en-US')} folders · ${humanGb(totals.bytes)} GB indexed`,
       '',
     ];
 
     for (const source of basicSources) {
-      basicLines.push(
-        `## ${source.area}`,
-        '',
-        `- Provider: ${source.provider}`,
-        `- Items: ${source.items}`,
-        `- Files: ${source.files}`,
-        `- Directories: ${source.directories}`,
-        `- Indexed file bytes: ${source.bytes}`,
-        '- Top level:',
-      );
-      for (const item of source.topLevel) {
-        basicLines.push(`  - ${item.type === 'directory' ? '📁' : '📄'} ${item.name}`);
+      const sourceIcon = source.provider === 'mega' ? '🟣' : source.area === 'MAIN' ? '🧠' : '☁️';
+      basicLines.push(`${sourceIcon} ${source.area} - /`);
+
+      const folders = source.topLevel.filter((item: any) => item.type === 'directory');
+      for (const item of folders) {
+        basicLines.push(`  📁 ${item.name}`);
       }
-      if (!source.topLevel.length) basicLines.push('  - (empty)');
+
+      const topLevelFileCount = source.topLevel.filter((item: any) => item.type === 'file').length;
+      if (topLevelFileCount > 0) basicLines.push(`  📄 ${topLevelFileCount} top-level files`);
+      if (!source.topLevel.length) basicLines.push('  (empty)');
       basicLines.push('');
     }
+
+    basicLines.push(
+      '🧭 Normal - n_global.json',
+      '🔬 Deep - d_global.json',
+      '',
+      `Updated - ${generatedAt}`,
+    );
 
     const globalMd = `${basicLines.join('\n').trimEnd()}\n`;
     const normalJson = `${JSON.stringify(normalIndex)}\n`;
