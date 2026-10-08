@@ -50,7 +50,8 @@ export class InitService {
       process.env.NYX_NORMAL_PATHS_PATH?.trim() ||
       'ChatGPT/1_body/1_areas_v0/FileFilter/0_state/n_paths.json';
 
-    const registryTarget = this.roots.resolve(storageArea, registryPath);
+    const registryStoragePath = this.repositoryPathToStoragePath(registryPath);
+    const registryTarget = this.roots.resolve(storageArea, registryStoragePath);
     const [{ stdout: registryJson }, registryStat] = await Promise.all([
       this.rclone.run(['cat', registryTarget]),
       this.rclone.json(['lsjson', registryTarget, '--stat', '--hash']),
@@ -269,6 +270,7 @@ export class InitService {
         registry: {
           area: storageArea,
           path: registryPath,
+          storagePath: registryStoragePath,
           stat: registryStat,
           sha256: this.sha256(registryJson),
         },
@@ -628,7 +630,7 @@ export class InitService {
   ) {
     const root =
       process.env.NYX_AREAS_ROOT_PATH?.trim() ||
-      'ChatGPT/1_body/1_areas_v0';
+      'YaRoute/1_depository/3_subfooter/2_areas_v0';
     const base = path.posix.join(root, target);
 
     const result: Record<string, unknown> = { pointer };
