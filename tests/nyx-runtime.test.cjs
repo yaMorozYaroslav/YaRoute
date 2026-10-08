@@ -9,6 +9,7 @@ const { NyxCommandExecutor } = require('../dist/nyx/command-executor.service');
 const { NyxBootstrapService } = require('../dist/nyx/bootstrap.service');
 const { HandoffStore, artifactId, assertNoSecrets } = require('../dist/nyx/handoff-store.service');
 const { NyxResourceStore, sha256 } = require('../dist/nyx/resource-store.service');
+const { NyxExecutionProfileService } = require('../dist/nyx/execution-profile.service');
 const { InitService } = require('../dist/init/init.service');
 const ref = path => ({ area: 'MAIN', path });
 const locator = { schema: 'nyx.bootstrap.v1', cli: ref('authority.json'), paths: { basic: ref('paths.md'), normal: ref('n_paths.json'), deep: ref('d_paths.json') }, canonical: { head: 'head_fixture.zip', body: 'body_fixture.zip', footer: 'footer_fixture.zip' } };
@@ -19,6 +20,7 @@ class MemoryResources {
   constructor(files = {}) { this.files = new Map(Object.entries(files)); this.reads = []; this.writes = []; this.stats = 0; }
   async stat(r) { this.stats++; const data = this.files.get(r.path); if (data === undefined) throw new Error('RESOURCE_STAT_FAILED'); return { Size: Buffer.byteLength(data), Hashes: { sha256: sha256(data) } }; }
   async read(r) { this.reads.push(r.path); if (!this.files.has(r.path)) throw new Error('RESOURCE_READ_FAILED'); return this.files.get(r.path); }
+  async optionalList(r) { return Array.from(this.files.keys()).filter(p => p.startsWith(r.path + '/') && !p.slice(r.path.length + 1).includes('/')).map(p => ({ Name: p.slice(r.path.length + 1), IsDir: false })); }
   async optionalRead(r) { return this.files.get(r.path); }
   async createVerified(r, data) { const old = this.files.get(r.path); if (old !== undefined && old !== data) throw new Error('IMMUTABLE_ARTIFACT_CONFLICT'); this.files.set(r.path, data); this.writes.push(r.path); return { sha256: sha256(data), verified: true }; }
 }
@@ -32,7 +34,7 @@ function handoffs(resources) {
 const routes = { maps: ref('maps.md'), todo: ref('todo.md'), handoffs: ref('private/Handoffs'), normal: ref('normal.md'), deep: ref('deep.md'), 'area:Voice:state': ref('voice-state.json'), 'area:Voice:config': ref('voice-config.json'), 'area:oGN:state': ref('ogn-state.json'), 'area:oGN:config': ref('ogn-config.json') };
 const markdown = '# Paths\n\n| key | area | path |\n| --- | --- | --- |\n' + Object.entries(routes).map(([key, r]) => `| ${key} | ${r.area} | ${r.path} |`).join('\n') + '\n';
 function resources() { return new MemoryResources({ 'authority.json': JSON.stringify(makeCli()), 'paths.md': markdown, 'n_paths.json': JSON.stringify({ schema: 'nyx.paths.v1', resources: routes }), 'd_paths.json': JSON.stringify({ schema: 'nyx.paths.v1', resources: routes }), 'maps.md': '# Maps\nExact content\n', 'todo.md': '# Todo\n', 'voice-state.json': '{"state":"active"}', 'voice-config.json': '{}', 'ogn-state.json': '{}', 'ogn-config.json': '{}', 'normal.md': 'Normal', 'deep.md': 'Deep' }); }
-function executor(r) { return new NyxCommandExecutor({ locate: async () => locator }, new NyxCliRegistryService(r), new NyxCommandResolver(), new NyxResourceResolver(r), handoffs(r)); }
+function executor(r) { return new NyxCommandExecutor({ locate: async () => locator }, new NyxCliRegistryService(r), new NyxCommandResolver(), new NyxResourceResolver(r), handoffs(r), new NyxExecutionProfileService(r)); }
 
 test('matches data-defined names and aliases, including case', () => { const resolver = new NyxCommandResolver(); assert.equal(resolver.resolve(makeCli(), { command: 'START' }).name, 'begin'); });
 test('unknown command rejected', () => assert.throws(() => new NyxCommandResolver().resolve(makeCli(), { command: 'unlisted' }), /UNKNOWN_COMMAND/));
@@ -88,4 +90,37 @@ test('promoted FIB member tampering blocks further SUM promotion', async () => {
   await h.initialize('owner', 'fib-tamper', ref('Handoffs'), metadata);
   const cp = await h.promote('owner', 'fib-tamper', ref('Handoffs'), { markdown: 'A', data: {} }); const manifest = JSON.parse(r.files.get(cp.ref.path)); r.files.set(manifest.files[0].ref.path, '{}');
   await assert.rejects(() => h.promote('owner', 'fib-tamper', ref('Handoffs'), { markdown: 'B', data: {} }), /FIB_MEMBER_CHANGED/);
+});
+
+
+test('private profile is bound to current canonical CLI and cannot introduce commands', async () => {
+ const r = resources(); const cli = makeCli(); const hash = sha256(JSON.stringify(cli)); const profile = { schema: 'nyx.runtime-profile.v1', authority: 'user-authorized-runtime-configuration', cliSha256: hash, commands: { begin: contract() } }; r.files.set('profile.json', JSON.stringify(profile)); const loc = { ...locator, executionProfile: ref('profile.json') }; const service = new NyxExecutionProfileService(r);
+ assert.equal((await service.apply(loc, cli, hash)).cli.commands.begin.execution.depth.default, 'basic');
+ await assert.rejects(() => service.apply(loc, cli, '0'.repeat(64)), /EXECUTION_PROFILE_INVALID/);
+ profile.commands.unlisted = contract(); r.files.set('profile.json', JSON.stringify(profile)); await assert.rejects(() => service.apply(loc, cli, hash), /EXECUTION_PROFILE_INVALID/);
+});
+test('single-dyno remote ledger survives restart and serializes retries without a database', async () => {
+ const oldMode = process.env.NYX_HANDOFF_COORDINATION, oldDyno = process.env.DYNO; process.env.NYX_HANDOFF_COORDINATION = 'single-dyno'; process.env.DYNO = 'web.1';
+ try { const r = resources(); const h = new HandoffStore(r); const meta = { command: { name: 'begin', targets: [], depth: 'basic' }, canonical: locator.canonical, cli: { version: 'test', sha256: 'test' }, loaded_context: { areas: [], sources: [] }, source_refs: [] }; const [a,b] = await Promise.all([h.initialize('owner', 'remote', ref('Handoffs'), meta),h.initialize('owner', 'remote', ref('Handoffs'), meta)]); assert.equal(a.id,b.id); const restarted = new HandoffStore(r); assert.equal((await restarted.initialize('owner', 'remote', ref('Handoffs'), meta)).ref.path, a.ref.path); assert.equal(r.writes.length,2); process.env.DYNO = 'web.2'; await assert.rejects(() => restarted.initialize('owner', 'other', ref('Handoffs'), meta), /DURABLE_HANDOFF_LOCK/); }
+ finally { if (oldMode === undefined) delete process.env.NYX_HANDOFF_COORDINATION; else process.env.NYX_HANDOFF_COORDINATION = oldMode; if (oldDyno === undefined) delete process.env.DYNO; else process.env.DYNO = oldDyno; }
+});
+
+test('single-dyno deployment gate rejects scaling, preboot and unknown topology', () => {
+  const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+  const { tmpdir } = require('node:os');
+  const { join } = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'nyx-topology-'));
+  try {
+    const formation = join(dir, 'formation.json'), features = join(dir, 'features.json');
+    const run = (quantity, preboot) => {
+      writeFileSync(formation, JSON.stringify([{ type: 'web', quantity }]));
+      writeFileSync(features, JSON.stringify(preboot === undefined ? [] : [{ name: 'preboot', enabled: preboot }]));
+      return spawnSync(process.execPath, ['scripts/verify-handoff-topology.mjs', formation, features], { encoding: 'utf8' }).status;
+    };
+    assert.equal(run(1, false), 0);
+    assert.notEqual(run(2, false), 0);
+    assert.notEqual(run(1, true), 0);
+    assert.notEqual(run(1, undefined), 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

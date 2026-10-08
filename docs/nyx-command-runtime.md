@@ -4,9 +4,9 @@ The interpreter reads a private stable bootstrap locator, checks CLI authority o
 
 ## Current activation boundary
 
-The inspected canonical Head v028 CLI v004 has descriptive `ini` semantics but no typed `execution` contract. Its Basic Markdown routing also lacks the resource table needed to resolve maps and Handoffs. Consequently this implementation is **not activated against live authority**. It fails closed rather than inventing those contracts. Head, Body and Footer are not rewritten by this implementation.
+The inspected canonical Head v028 CLI v004 has descriptive `ini` semantics but no typed `execution` contract. The live deployment therefore uses a private, user-authorized execution profile pinned to the exact canonical CLI content SHA. The profile can bind adapters only to existing CLI commands. Names and aliases remain canonical. A CLI change invalidates the profile until it is reviewed and rebound; invalid profile data stops execution. Head, Body and Footer are not rewritten.
 
-Activation requires a verified private `NYX_BOOTSTRAP_PATH`, an authority-approved executable CLI contract, and routed resources. Changes to core command semantics follow the separate Yaro generation lifecycle. The desired lightweight bare-init and FIF-to-FIB behavior are user implementation requirements; these docs do not declare them newly canonical.
+This operational configuration enables Basic init and verified current working routes. It does not canonicalize chat decisions into core authority. Normal/Deep, unresolved Area targets and full SUM remain unavailable until their contracts/routes are configured. Core changes follow the separate Yaro generation lifecycle.
 
 ## Private bootstrap
 
@@ -33,7 +33,7 @@ These are synthetic examples, not actual routes or canonical pointers. A bundle-
 
 ## Execution schema
 
-Existing CLI commands without `execution` are discoverable but not executable. The implementation supports two typed adapters: `context.initialize.v1` and `context.read.v1`. It does not bind particular command names to adapters. Other adapter contracts require an implementation before execution.
+Existing CLI commands without `execution` are discoverable but not executable unless a verified private profile supplies their contract. The bootstrap may reference `executionProfile` using the same area/path resource shape. Its schema is `nyx.runtime-profile.v1`, authority is `user-authorized-runtime-configuration`, `cliSha256` pins the CLI content, and `commands` maps existing command names to execution contracts. Profile hashes are recorded in FIF and response metadata. The profile is reread on each command. The implementation supports two typed adapters: `context.initialize.v1` and `context.read.v1`. It does not bind particular command names to adapters. Other adapter contracts require an implementation before execution.
 
 Each matched command supplies:
 
@@ -75,7 +75,7 @@ When no conversation ID is supplied, the server returns a new UUID as `conversat
 
 Artifact identity is derived from verified OAuth subject (or the API-key principal) and conversation ID. Raw subject, raw conversation ID and credentials are not persisted in FIF. OAuth and API-key identities are separate. Never use the same conversation ID for unrelated chats. `message_count` is `UNKNOWN` because the backend has no conversation-message telemetry.
 
-Repeated identical init reuses the same verified checkpoint. Changed context appends an immutable revision with the same stable artifact ID. It never overwrites historical FIF evidence. PostgreSQL advisory transaction locks serialize the same identity across dynos; initialization fails when durable locking is not configured. Readback verifies the exact bytes before saving the durable checkpoint or reporting success. An interrupted remote write can be recovered without rewriting its timestamp or evidence.
+Repeated identical init reuses the same verified checkpoint. Changed context appends an immutable revision with the same stable artifact ID. It never overwrites historical FIF evidence. PostgreSQL advisory transaction locks serialize the same identity across dynos. For this deployment without a database, explicit `NYX_HANDOFF_COORDINATION=single-dyno` supports exactly one `web.1` process with preboot disabled. Per-artifact serialization plus immutable, readback-verified Drive ledger checkpoints preserves lineage across restarts. The deploy workflow checks formation and preboot before enabling this mode; other dyno names fail closed. Use PostgreSQL before scaling, enabling preboot, or running multiple Node processes. Single-dyno mode is not a distributed lock and topology changes outside the deployment workflow must respect this constraint. Initialization fails when neither supported coordination mode is configured. Readback verifies the exact bytes before saving the durable checkpoint or reporting success. An interrupted remote write can be recovered without rewriting its timestamp or evidence.
 
 ## FIF and FIB
 
@@ -87,4 +87,4 @@ The private FIF is `FIF_<id>.json` beneath the routed Handoffs root. It records 
 
 Resource access stays within existing configured shared roots. Traversal, oversized resources, duplicate routes, unsafe mutation contracts, missing mandatory sources and credential-shaped source content fail closed. MCP errors redact provider stderr and private transport details. Temporary local transfer files are private and removed after use; generated conversation artifacts are never written into this repository.
 
-Tests cover matching/aliases, invalid authority and cache reload, depth selection, targeted sources, immutable/idempotent FIF, identity isolation, interrupted-write recovery, readback tampering and FIB promotion. The production storage and PostgreSQL adapters still require live integration verification; in-memory test resources are not evidence of a real Drive write.
+Tests cover matching/aliases, invalid authority and cache reload, depth selection, targeted sources, immutable/idempotent FIF, identity isolation, interrupted-write recovery, readback tampering and FIB promotion. Tests also cover private profile authority binding and restart-safe remote ledger checkpoints. Production storage and PostgreSQL require live integration verification; in-memory resources are not evidence of a real Drive write.

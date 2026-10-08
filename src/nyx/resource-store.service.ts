@@ -51,6 +51,16 @@ export class NyxResourceStore {
     }
     return this.read(ref);
   }
+  async optionalList(ref: ResourceRef): Promise<Array<{ Name: string; IsDir: boolean }>> {
+    try {
+      const result = await this.rclone.json(['lsjson', this.target(ref)]);
+      if (!Array.isArray(result)) throw new Error('INVALID_LIST');
+      return result;
+    } catch (error) {
+      if (error instanceof Error && /^rclone exited [34]:/.test(error.message) && /directory not found|doesn't exist|not found/i.test(error.message)) return [];
+      throw new Error('LINEAGE_LIST_FAILED');
+    }
+  }
   async createVerified(ref: ResourceRef, text: string) {
     const existing = await this.optionalRead(ref);
     if (existing !== undefined) {

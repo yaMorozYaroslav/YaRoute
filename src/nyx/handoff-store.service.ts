@@ -8,7 +8,7 @@ export type Fif = {
   schema: 'nyx.fif.v1'; id: string; created_at: string;
   command: { name: string; targets: string[]; depth: string };
   canonical: { head: string; body: string; footer: string };
-  cli: { version: string; sha256: string };
+  cli: { version: string; sha256: string; profile_sha256?: string };
   loaded_context: { areas: string[]; sources: string[] };
   source_refs: Array<{ key: string; ref: ResourceRef; sha256: string; bytes: number; returned: boolean }>;
   continuity: { predecessor?: ResourceRef }; message_count: number | 'UNKNOWN';
@@ -26,6 +26,7 @@ export function assertNoSecrets(value: unknown) {
 @Injectable()
 export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotionPort {
   private pool?: Pool;
+  private readonly pending = new Map<string, Promise<unknown>>();
   constructor(private readonly resources: NyxResourceStore) {}
   async onModuleInit() {
     if (!process.env.DATABASE_URL) return;
@@ -33,8 +34,11 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
     await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_handoff_lineage (id text PRIMARY KEY, checkpoint jsonb NOT NULL)`);
   }
   async onModuleDestroy() { await this.pool?.end(); }
-  private async locked<T>(id: string, action: (old: Checkpoint | undefined, save: (next: Checkpoint) => Promise<void>) => Promise<T>) {
-    if (!this.pool) throw new Error('DURABLE_HANDOFF_LOCK_NOT_CONFIGURED');
+  private async locked<T>(id: string, action: (old: Checkpoint | undefined, save: (next: Checkpoint) => Promise<void>) => Promise<T>, handoffs?: ResourceRef) {
+    if (!this.pool) {
+      if (process.env.NYX_HANDOFF_COORDINATION !== 'single-dyno' || process.env.DYNO !== 'web.1' || !handoffs) throw new Error('DURABLE_HANDOFF_LOCK_NOT_CONFIGURED');
+      return this.remoteLocked(id, handoffs, action);
+    }
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -72,7 +76,7 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
       const receipt = await this.resources.createVerified(ref, text);
       const next: Checkpoint = { id, kind: old?.kind ?? 'FIF', ref, sha256: receipt.sha256, fingerprint, fif };
       await save(next); return next;
-    });
+    }, handoffs);
     return { ...checkpoint, conversationId: conversation, verified: true };
   }
   async promote(owner: string, conversationId: string, handoffs: ResourceRef, summary: { markdown: string; data: unknown }) {
@@ -104,7 +108,35 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
       const receipt = await this.resources.createVerified(ref, text);
       const next: Checkpoint = { ...old, kind: 'FIB', ref, sha256: receipt.sha256, promotionHash };
       await save(next); return next;
+    }, handoffs);
+  }
+  private async remoteLocked<T>(id: string, handoffs: ResourceRef, action: (old: Checkpoint | undefined, save: (next: Checkpoint) => Promise<void>) => Promise<T>): Promise<T> {
+    const prior = this.pending.get(id) ?? Promise.resolve();
+    const work = prior.catch(() => {}).then(async () => {
+      const root = { ...handoffs, path: `${handoffs.path}/runtime_lineage/${id}` };
+      const entries = await this.resources.optionalList(root);
+      const files = entries.filter(x => !x.IsDir && /^\d{10}\.json$/.test(x.Name)).sort((a, b) => a.Name.localeCompare(b.Name));
+      const names = new Set(files.map(x => x.Name));
+      if (names.size !== files.length) throw new Error('DUPLICATE_LINEAGE_CHECKPOINT');
+      const last = files.at(-1);
+      let old: Checkpoint | undefined;
+      if (last) {
+        const record = JSON.parse(await this.resources.read({ ...root, path: `${root.path}/${last.Name}` }));
+        if (record.schema !== 'nyx.handoff-ledger.v1' || record.checkpoint.id !== id) throw new Error('LINEAGE_CHECKPOINT_INVALID');
+        old = record.checkpoint;
+        assertNoSecrets(old);
+      }
+      return action(old, async next => {
+        const sequence = last ? Number(last.Name.slice(0, 10)) + 1 : 1;
+        if (sequence > 9999999999) throw new Error('LINEAGE_SEQUENCE_EXHAUSTED');
+        const ref = { ...root, path: `${root.path}/${String(sequence).padStart(10, '0')}.json` };
+        const text = JSON.stringify({ schema: 'nyx.handoff-ledger.v1', checkpoint: next }, null, 2) + '\n';
+        await this.resources.createVerified(ref, text);
+      });
     });
+    this.pending.set(id, work);
+    try { return await work; }
+    finally { if (this.pending.get(id) === work) this.pending.delete(id); }
   }
   private async verify(checkpoint: Checkpoint) {
     const content = await this.resources.read(checkpoint.ref);

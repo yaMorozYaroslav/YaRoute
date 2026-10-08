@@ -6,5 +6,7 @@
   "NYX_NORMAL_PATHS_PATH": "YaRoute/1_depository/3_subfooter/2_areas_v0/FileFilter/0_state/n_paths.json",
   "NYX_AREAS_ROOT_PATH": "YaRoute/1_depository/3_subfooter/2_areas_v0",
   "NYX_YARO_PREFIX": "YaRoute",
-  "NYX_GLOBAL_INDEX_ON_BOOT": "false"
+  "NYX_GLOBAL_INDEX_ON_BOOT": "false",
+  "NYX_BOOTSTRAP_PATH": "Documents/Nyxpad/nyx_bootstrap.json",
+  "NYX_HANDOFF_COORDINATION": "single-dyno"
 }

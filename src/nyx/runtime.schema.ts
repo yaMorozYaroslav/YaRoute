@@ -8,6 +8,7 @@ export const refSchema = z.object({
 export const locatorSchema = z.object({
   schema: z.literal('nyx.bootstrap.v1'),
   cli: refSchema.extend({ member: z.string().optional(), sha256: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
+  executionProfile: refSchema.optional(),
   paths: z.object({ basic: refSchema, normal: refSchema.optional(), deep: refSchema.optional() }).strict(),
   canonical: z.object({ head: z.string().min(1), body: z.string().min(1), footer: z.string().min(1) }).strict(),
 }).strict();
@@ -31,6 +32,12 @@ export const cliSchema = z.object({
   schema: z.string().min(1), version: z.string().min(1),
   commands: z.record(name, z.object({ aliases: z.array(name).optional(), execution: executionSchema.optional() }).passthrough()),
 }).passthrough();
+export const profileSchema = z.object({
+  schema: z.literal('nyx.runtime-profile.v1'),
+  authority: z.literal('user-authorized-runtime-configuration'),
+  cliSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  commands: z.record(name, executionSchema),
+}).strict();
 export const requestSchema = z.object({
   command: name, args: z.array(name).max(16).default([]), depth: depthSchema.optional(),
   conversationId: z.string().min(1).max(256).optional(),
