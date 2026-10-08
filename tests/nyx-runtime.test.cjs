@@ -78,8 +78,9 @@ test('production artifact adapter refuses clobber and verifies actual provider r
   const fs = require('node:fs/promises'); const data = new Map(); let corrupt = false;
   const rclone = { json: async ([op, target]) => { if (!data.has(target)) throw new Error('rclone exited 3: object not found'); return { Size: Buffer.byteLength(data.get(target)), IsDir: false }; }, run: async args => {
     if (args[0] === 'copyto') { assert.equal(args[3], '--immutable'); data.set(args[2], corrupt ? 'corrupted' : await fs.readFile(args[1], 'utf8')); return { stdout: '', stderr: '' }; }
-    if (!data.has(args[1])) throw new Error('rclone exited 3: object not found');
-    return { stdout: data.get(args[1]), stderr: '' };
+    const name = (await fs.readFile(args[3], 'utf8')).trimEnd(), target = args[1] + '/' + name;
+    if (!data.has(target)) throw new Error('rclone exited 9:');
+    return { stdout: data.get(target), stderr: '' };
   } };
   const store = new NyxResourceStore({ resolve: (area, path) => `fixture:${path}` }, rclone);
   const receipt = await store.createVerified(ref('Handoffs/test.json'), '{"safe":true}'); assert.equal(receipt.verified, true);
@@ -159,4 +160,20 @@ test('remote checkpoint reader preserves previously deployed nested lineage', as
     assert.equal((await restarted.initialize('owner', 'legacy', ref('Handoffs'), meta)).sha256, a.sha256);
     assert.equal(r.files.has(nested), true); assert.equal(r.files.has(flat), false);
   } finally { saved.forEach((value, i) => { const key = ['NYX_HANDOFF_COORDINATION', 'DYNO'][i]; if (value === undefined) delete process.env[key]; else process.env[key] = value; }); }
+});
+
+test('real rclone exact reads reject directory concatenation and distinguish empty files from absence', async () => {
+  const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
+  const { RcloneService } = require('../dist/storage/rclone.service');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'nyx-object-test-'));
+  const oldConfig = process.env.RCLONE_CONFIG_PATH; process.env.RCLONE_CONFIG_PATH = '/dev/null';
+  try {
+    await fs.writeFile(path.join(dir, 'exact'), 'EXACT'); await fs.writeFile(path.join(dir, 'empty'), '');
+    await fs.mkdir(path.join(dir, 'folder')); await fs.writeFile(path.join(dir, 'folder', 'unrelated'), 'MUST_NOT_RETURN');
+    const rclone = new RcloneService(), store = new NyxResourceStore({ resolve: (area, relative) => path.join(dir, relative) }, rclone);
+    assert.equal(await store.read(ref('exact')), 'EXACT'); assert.equal(await store.optionalRead(ref('empty')), '');
+    assert.equal(await store.optionalRead(ref('missing')), undefined);
+    await assert.rejects(() => store.read(ref('folder')), /RESOURCE_READ_FAILED/);
+    await assert.rejects(() => store.optionalRead(ref('folder')), /RESOURCE_LOOKUP_FAILED/);
+  } finally { if (oldConfig === undefined) delete process.env.RCLONE_CONFIG_PATH; else process.env.RCLONE_CONFIG_PATH = oldConfig; await fs.rm(dir, { recursive: true, force: true }); }
 });

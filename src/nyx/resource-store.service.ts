@@ -21,9 +21,9 @@ export class NyxResourceStore {
   }
   async read(ref: ResourceRef, maxBytes = 2 * 1024 * 1024): Promise<string> {
     // Bound the actual stream instead of a separate size lookup, which cannot protect against a read race.
-    // rclone cat rejects folders; the subprocess is killed if its output exceeds this limit.
+    // Exact-object selection prevents cat's default directory concatenation behavior.
     try {
-      const { stdout } = await this.rclone.run(['cat', this.target(ref)], maxBytes);
+      const { stdout } = await this.exactRead(ref, maxBytes);
       if (Buffer.byteLength(stdout) > maxBytes) throw new Error();
       return stdout;
     } catch { throw new Error('RESOURCE_READ_FAILED'); }
@@ -45,14 +45,26 @@ export class NyxResourceStore {
   async optionalRead(ref: ResourceRef): Promise<string | undefined> {
     // Distinguish absence from access/transient errors; never overwrite on an uncertain read.
     try {
-      const { stdout } = await this.rclone.run(['cat', this.target(ref)], 2 * 1024 * 1024);
+      const { stdout } = await this.exactRead(ref, 2 * 1024 * 1024);
       if (Buffer.byteLength(stdout) > 2 * 1024 * 1024) throw new Error('RESOURCE_SIZE_UNSUPPORTED');
       return stdout;
     }
     catch (error) {
+      if (error instanceof Error && /^rclone exited 9:/.test(error.message)) return undefined;
       if (error instanceof Error && /^rclone exited [34]:/.test(error.message) && /not found|doesn't exist|directory not found|object not found/i.test(error.message)) return undefined;
       throw new Error('RESOURCE_LOOKUP_FAILED');
     }
+  }
+  private async exactRead(ref: ResourceRef, maxBytes: number) {
+    this.target(ref); // Validate the original path before creating any subprocess arguments.
+    const name = path.posix.basename(ref.path);
+    if (!name || name === '.' || name === '..' || ref.path.endsWith('/')) throw new Error('INVALID_FILE_PATH');
+    const directory = await mkdtemp(path.join(tmpdir(), 'nyx-selection-'));
+    try {
+      const list = path.join(directory, 'file');
+      await writeFile(list, name + '\n', { mode: 0o600 });
+      return await this.rclone.run(['cat', this.target({ ...ref, path: path.posix.dirname(ref.path) }), '--files-from-raw', list, '--no-traverse', '--error-on-no-transfer'], maxBytes);
+    } finally { await rm(directory, { recursive: true, force: true }); }
   }
   async optionalList(ref: ResourceRef): Promise<Array<{ Name: string; IsDir: boolean }>> {
     try {
