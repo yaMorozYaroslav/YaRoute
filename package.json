@@ -8,13 +8,14 @@
     "node": "22.x"
   },
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && node scripts/build-info.mjs",
     "security:check": "node scripts/public-repo-guard.mjs",
     "postinstall": "node scripts/install-rclone.mjs",
     "heroku-postbuild": "npm run build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/main.js"
+    "start:prod": "node dist/main.js",
+    "test": "npm run build && node --test tests/*.test.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
@@ -22,7 +23,7 @@
     "@nestjs/common": "^11.1.6",
     "@nestjs/core": "^11.1.6",
     "@nestjs/platform-express": "^11.1.6",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.1",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.2.0",
     "pg": "^8.16.3",

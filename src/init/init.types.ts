@@ -3,6 +3,8 @@ export type InitDepth = 'basic' | 'normal' | 'deep';
 
 export type InitInput = {
   target?: string;
+  targets?: string[];
+  conversationId?: string;
   scope?: InitScope;
   sessionId?: string;
   depth?: InitDepth;

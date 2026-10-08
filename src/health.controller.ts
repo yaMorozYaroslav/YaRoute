@@ -17,6 +17,7 @@ export class HealthController {
     return {
       ok: true,
       service: 'NestNyx',
+      commit: process.env.HEROKU_SLUG_COMMIT ?? require('./build-info.json').commit,
       rclone: version,
       durableJobs: this.jobs.isDurable(),
     };

@@ -42,6 +42,8 @@ export class McpAuthService {
         return false;
       }
 
+      if (!payload.sub) throw new Error('Missing subject');
+      res.locals.nyxSubject = payload.sub;
       return true;
     } catch (error) {
       console.error(

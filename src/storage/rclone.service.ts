@@ -54,7 +54,7 @@ export class RcloneService implements OnModuleInit {
     return JSON.parse(stdout);
   }
 
-  async run(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  async run(args: string[], maxOutputBytes?: number): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, ['--config', this.configPath, ...args], {
         env: process.env,
@@ -64,7 +64,13 @@ export class RcloneService implements OnModuleInit {
       let stderr = '';
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (chunk) => { stdout += chunk; });
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+        if (maxOutputBytes && Buffer.byteLength(stdout) > maxOutputBytes) {
+          child.kill();
+          reject(new Error('rclone output exceeded configured limit'));
+        }
+      });
       child.stderr.on('data', (chunk) => { stderr += chunk; });
       child.on('error', reject);
       child.on('close', (code) => {

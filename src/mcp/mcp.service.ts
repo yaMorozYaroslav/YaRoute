@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { NyxCommandExecutor } from '../nyx/command-executor.service';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { toNodeHandler } from '@modelcontextprotocol/node';
@@ -10,6 +12,7 @@ import { CopyJobPayload } from '../storage/storage.types';
 
 @Injectable()
 export class McpService {
+  private readonly ownerContext = new AsyncLocalStorage<string>();
   private readonly logger = new Logger(McpService.name);
   private readonly nodeHandler: ReturnType<typeof toNodeHandler>;
 
@@ -17,6 +20,7 @@ export class McpService {
     private readonly storage: StorageService,
     private readonly jobs: JobStoreService,
     private readonly init: InitService,
+    private readonly commands: NyxCommandExecutor,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -25,7 +29,7 @@ export class McpService {
   }
 
   async handle(req: Request, res: Response, parsedBody: unknown) {
-    await this.nodeHandler(req, res, parsedBody);
+    await this.ownerContext.run(`oauth:${res.locals.nyxSubject}`, () => this.nodeHandler(req, res, parsedBody));
   }
 
   private buildServer() {
@@ -35,26 +39,24 @@ export class McpService {
     });
 
     server.registerTool(
+      'nyx_execute',
+      {
+        title: 'Execute a Nyx command',
+        description: 'Check current CLI authority, resolve its typed execution contract and load only required resources. Requires a private bootstrap locator. Initialization returns verified private FIF and files_to_paste.',
+        inputSchema: z.object({ command: z.string().min(1).max(64), args: z.array(z.string().min(1).max(64)).max(16).default([]), depth: z.enum(['basic', 'normal', 'deep']).optional(), conversationId: z.string().min(1).max(256).optional() }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      async input => this.safeTool(() => this.commands.execute(input, this.ownerContext.getStore())),
+    );
+    server.registerTool(
       'nyx_ini',
       {
-        title: 'Initialize Nyx runtime context',
-        description:
-          'Resolve the current Nyx bootstrap: verify canonical Head/Body/Footer, Head paths.json and nyxcli.json, live paths.md plus pending overlays, nyx_entry, Template map/index, then optionally hydrate an Area. Pending overlays remain noncanonical and initialization does not rewrite core bundles or Area state.',
-        inputSchema: z.object({
-          target: z.string().min(1).max(64).optional(),
-          scope: z.enum(['local', 'global']).optional().default('local'),
-          sessionId: z.string().uuid().optional(),
-          depth: z.enum(['basic', 'normal', 'deep']).optional().default('normal'),
-        }),
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: false,
-          idempotentHint: false,
-          openWorldHint: false,
-        },
+        title: 'Initialize Nyx working context',
+        description: 'Compatibility wrapper for current CLI ini. Returns FIF receipt, files_to_paste and metadata. Reuse returned conversation_id as sessionId on subsequent calls; no heavy audit fallback.',
+        inputSchema: z.object({ target: z.string().min(1).max(1024).optional(), targets: z.array(z.string().min(1).max(64)).max(16).optional(), scope: z.enum(['local', 'global']).optional(), sessionId: z.string().uuid().optional(), depth: z.enum(['basic', 'normal', 'deep']).optional() }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       },
-      async ({ target, scope, sessionId, depth }) =>
-        this.safeTool(() => this.init.initialize({ target, scope, sessionId, depth })),
+      async input => this.safeTool(() => this.init.initialize(input, this.ownerContext.getStore())),
     );
 
     server.registerTool(
@@ -299,7 +301,8 @@ export class McpService {
         structuredContent: { result },
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const raw = error instanceof Error ? error.message : '';
+      const message = /^[A-Z][A-Z_]+(?::[A-Za-z0-9_:.-]{1,128})?$/.test(raw) ? raw : 'NYX_OPERATION_FAILED';
       return {
         isError: true,
         content: [{ type: 'text' as const, text: message }],
