@@ -78,6 +78,7 @@ test('production artifact adapter refuses clobber and verifies actual provider r
   const fs = require('node:fs/promises'); const data = new Map(); let corrupt = false;
   const rclone = { json: async ([op, target]) => { if (!data.has(target)) throw new Error('rclone exited 3: object not found'); return { Size: Buffer.byteLength(data.get(target)), IsDir: false }; }, run: async args => {
     if (args[0] === 'copyto') { assert.equal(args[3], '--immutable'); data.set(args[2], corrupt ? 'corrupted' : await fs.readFile(args[1], 'utf8')); return { stdout: '', stderr: '' }; }
+    if (!data.has(args[1])) throw new Error('rclone exited 3: object not found');
     return { stdout: data.get(args[1]), stderr: '' };
   } };
   const store = new NyxResourceStore({ resolve: (area, path) => `fixture:${path}` }, rclone);
@@ -123,4 +124,24 @@ test('single-dyno deployment gate rejects scaling, preboot and unknown topology'
     assert.notEqual(run(1, true), 0);
     assert.notEqual(run(1, undefined), 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('selected sources read with bounded concurrency and retain contract order', async () => {
+  const r = resources(), read = r.read.bind(r); let active = 0, peak = 0;
+  r.read = async ref => {
+    if (['authority.json', 'paths.md'].includes(ref.path)) return read(ref);
+    active++; peak = Math.max(peak, active);
+    try { await new Promise(resolve => setTimeout(resolve, ref.path.includes('voice') ? 15 : 2)); return await read(ref); }
+    finally { active--; }
+  };
+  const out = await executor(r).execute({ command: 'begin', args: ['Voice', 'oGN'] });
+  assert.ok(peak > 1 && peak <= 4);
+  assert.deepEqual(out.files_to_paste.map(f => f.name), ['paths.md', 'maps.md', 'todo.md', 'voice-state.json', 'ogn-state.json', 'voice-config.json', 'ogn-config.json']);
+});
+
+test('bounded source reads reject oversized payloads and uncertain optional reads', async () => {
+  const store = new NyxResourceStore({ resolve: (area, path) => path }, { run: async (args, limit) => { assert.equal(limit, 8); return { stdout: 'oversized-content', stderr: '' }; } });
+  await assert.rejects(() => store.read(ref('source'), 8), /RESOURCE_READ_FAILED/);
+  const denied = new NyxResourceStore({ resolve: (area, path) => path }, { run: async () => { throw new Error('rclone exited 5: access denied'); } });
+  await assert.rejects(() => denied.optionalRead(ref('destination')), /RESOURCE_LOOKUP_FAILED/);
 });

@@ -73,7 +73,7 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
         if (existing !== JSON.stringify(fif, null, 2) + '\n') throw new Error('ARTIFACT_RECOVERY_CONFLICT');
       }
       const text = JSON.stringify(fif, null, 2) + '\n';
-      const receipt = await this.resources.createVerified(ref, text);
+      const receipt = await this.resources.createVerified(ref, text, { existing });
       const next: Checkpoint = { id, kind: old?.kind ?? 'FIF', ref, sha256: receipt.sha256, fingerprint, fif };
       await save(next); return next;
     }, handoffs);

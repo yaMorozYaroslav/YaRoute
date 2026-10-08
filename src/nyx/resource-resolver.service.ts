@@ -13,26 +13,43 @@ export class NyxResourceResolver {
     const resources = plan.depth === 'basic' ? this.markdownRoutes(paths) : routingSchema.parse(parseJson(paths)).resources;
     const files: LoadedSource[] = [{ key: 'paths', ref: pathsRef, content: paths, sha256: sha256(paths), bytes: Buffer.byteLength(paths), visible: plan.contract.pathsVisible }];
     const warnings: string[] = [];
-    const loaded = new Map<string, LoadedSource>();
+    const pending: Array<{ key: string; ref: ResourceRef; required: boolean; visible: boolean }> = [];
+    const identities = new Map<string, typeof pending[number]>();
+    // Resolve every mandatory route before reading any payload, then read only the selected sources.
     for (const source of plan.contract.sources[plan.depth]) {
       if (source.when === 'targeted' && !plan.targets.length) continue;
       const keys = source.perTarget ? plan.targets.map(t => source.key.replaceAll('{target}', t)) : [source.key];
       for (const key of keys) {
-        let ref: ResourceRef | undefined;
-        try {
-          ref = this.route(resources, key);
-          if (!ref) throw new Error('SOURCE_ROUTE_MISSING');
-          const identity = JSON.stringify(ref);
-          const prior = loaded.get(identity);
-          if (prior) { prior.visible ||= source.visible; continue; }
-          const content = await this.store.read(ref);
-          const file = { key, ref, content, sha256: sha256(content), bytes: Buffer.byteLength(content), visible: source.visible };
-          loaded.set(identity, file); files.push(file);
-        } catch {
+        const ref = this.route(resources, key);
+        if (!ref) {
           if (source.required) throw new Error(`REQUIRED_SOURCE_UNAVAILABLE:${key}`);
-          warnings.push(`OPTIONAL_SOURCE_UNAVAILABLE:${key}`);
+          warnings.push(`OPTIONAL_SOURCE_UNAVAILABLE:${key}`); continue;
         }
+        const identity = JSON.stringify(ref);
+        const prior = identities.get(identity);
+        if (prior) { prior.visible ||= source.visible; prior.required ||= source.required; continue; }
+        const item = { key, ref, required: source.required, visible: source.visible };
+        identities.set(identity, item); pending.push(item);
       }
+    }
+    const results: Array<LoadedSource | undefined> = new Array(pending.length);
+    const failures: Array<string | undefined> = new Array(pending.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+      while (next < pending.length) {
+        const index = next++, source = pending[index];
+        try {
+          const content = await this.store.read(source.ref);
+          results[index] = { key: source.key, ref: source.ref, content, sha256: sha256(content), bytes: Buffer.byteLength(content), visible: source.visible };
+        } catch { failures[index] = `${source.required ? 'REQUIRED' : 'OPTIONAL'}_SOURCE_UNAVAILABLE:${source.key}`; }
+      }
+    }));
+    // Stable contract response order, independent of provider completion order.
+    for (let i = 0; i < pending.length; i++) {
+      if (failures[i]) {
+        if (pending[i].required) throw new Error(failures[i]);
+        warnings.push(failures[i]!);
+      } else files.push(results[i]!);
     }
     const handoffs = plan.contract.handoffsKey ? this.route(resources, plan.contract.handoffsKey) : undefined;
     if (plan.contract.mutation === 'conversation-artifact' && !handoffs) throw new Error('HANDOFFS_ROUTE_MISSING');

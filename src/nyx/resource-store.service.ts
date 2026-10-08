@@ -20,8 +20,8 @@ export class NyxResourceStore {
     catch { throw new Error('RESOURCE_STAT_FAILED'); }
   }
   async read(ref: ResourceRef, maxBytes = 2 * 1024 * 1024): Promise<string> {
-    const stat = await this.stat(ref);
-    if (stat.IsDir || stat.Size < 0 || stat.Size > maxBytes) throw new Error('RESOURCE_SIZE_UNSUPPORTED');
+    // Bound the actual stream instead of a separate size lookup, which cannot protect against a read race.
+    // rclone cat rejects folders; the subprocess is killed if its output exceeds this limit.
     try {
       const { stdout } = await this.rclone.run(['cat', this.target(ref)], maxBytes);
       if (Buffer.byteLength(stdout) > maxBytes) throw new Error();
@@ -44,12 +44,15 @@ export class NyxResourceStore {
   }
   async optionalRead(ref: ResourceRef): Promise<string | undefined> {
     // Distinguish absence from access/transient errors; never overwrite on an uncertain read.
-    try { await this.rclone.json(['lsjson', this.target(ref), '--stat']); }
+    try {
+      const { stdout } = await this.rclone.run(['cat', this.target(ref)], 2 * 1024 * 1024);
+      if (Buffer.byteLength(stdout) > 2 * 1024 * 1024) throw new Error('RESOURCE_SIZE_UNSUPPORTED');
+      return stdout;
+    }
     catch (error) {
       if (error instanceof Error && /^rclone exited [34]:/.test(error.message) && /not found|doesn't exist|directory not found|object not found/i.test(error.message)) return undefined;
       throw new Error('RESOURCE_LOOKUP_FAILED');
     }
-    return this.read(ref);
   }
   async optionalList(ref: ResourceRef): Promise<Array<{ Name: string; IsDir: boolean }>> {
     try {
@@ -61,8 +64,10 @@ export class NyxResourceStore {
       throw new Error('LINEAGE_LIST_FAILED');
     }
   }
-  async createVerified(ref: ResourceRef, text: string) {
-    const existing = await this.optionalRead(ref);
+  async createVerified(ref: ResourceRef, text: string, lookup?: { existing: string | undefined }) {
+    // Recovery callers already checked this exact path inside the lineage lock. The immutable checksum
+    // transfer and readback still protect against a destination appearing after that lookup.
+    const existing = lookup ? lookup.existing : await this.optionalRead(ref);
     if (existing !== undefined) {
       if (existing !== text) throw new Error('IMMUTABLE_ARTIFACT_CONFLICT');
       return { sha256: sha256(text), verified: true as const };
@@ -71,7 +76,7 @@ export class NyxResourceStore {
     try {
       const file = path.join(directory, 'artifact.json');
       await writeFile(file, text, { mode: 0o600 });
-      await this.rclone.run(['copyto', file, this.target(ref), '--immutable']);
+      await this.rclone.run(['copyto', file, this.target(ref), '--immutable', '--checksum']);
       if (await this.read(ref) !== text) throw new Error('ARTIFACT_READBACK_MISMATCH');
       return { sha256: sha256(text), verified: true as const };
     } catch { throw new Error('ARTIFACT_WRITE_VERIFY_FAILED'); }
