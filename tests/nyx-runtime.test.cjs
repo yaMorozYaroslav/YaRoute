@@ -20,7 +20,7 @@ class MemoryResources {
   constructor(files = {}) { this.files = new Map(Object.entries(files)); this.reads = []; this.writes = []; this.stats = 0; }
   async stat(r) { this.stats++; const data = this.files.get(r.path); if (data === undefined) throw new Error('RESOURCE_STAT_FAILED'); return { Size: Buffer.byteLength(data), Hashes: { sha256: sha256(data) } }; }
   async read(r) { this.reads.push(r.path); if (!this.files.has(r.path)) throw new Error('RESOURCE_READ_FAILED'); return this.files.get(r.path); }
-  async optionalList(r) { return Array.from(this.files.keys()).filter(p => p.startsWith(r.path + '/') && !p.slice(r.path.length + 1).includes('/')).map(p => ({ Name: p.slice(r.path.length + 1), IsDir: false })); }
+  async optionalList(r) { const items = new Map(); for (const p of this.files.keys()) if (p.startsWith(r.path + '/')) { const tail = p.slice(r.path.length + 1), Name = tail.split('/')[0]; items.set(Name, { Name, IsDir: tail.includes('/') }); } return [...items.values()]; }
   async optionalRead(r) { return this.files.get(r.path); }
   async createVerified(r, data) { const old = this.files.get(r.path); if (old !== undefined && old !== data) throw new Error('IMMUTABLE_ARTIFACT_CONFLICT'); this.files.set(r.path, data); this.writes.push(r.path); return { sha256: sha256(data), verified: true }; }
 }
@@ -144,4 +144,19 @@ test('bounded source reads reject oversized payloads and uncertain optional read
   await assert.rejects(() => store.read(ref('source'), 8), /RESOURCE_READ_FAILED/);
   const denied = new NyxResourceStore({ resolve: (area, path) => path }, { run: async () => { throw new Error('rclone exited 5: access denied'); } });
   await assert.rejects(() => denied.optionalRead(ref('destination')), /RESOURCE_LOOKUP_FAILED/);
+});
+
+test('remote checkpoint reader preserves previously deployed nested lineage', async () => {
+  const saved = [process.env.NYX_HANDOFF_COORDINATION, process.env.DYNO];
+  process.env.NYX_HANDOFF_COORDINATION = 'single-dyno'; process.env.DYNO = 'web.1';
+  try {
+    const r = resources(), h = new HandoffStore(r);
+    const meta = { command: { name: 'begin', targets: [], depth: 'basic' }, canonical: locator.canonical, cli: { version: 'test', sha256: 'test' }, loaded_context: { areas: [], sources: [] }, source_refs: [] };
+    const a = await h.initialize('owner', 'legacy', ref('Handoffs'), meta);
+    const flat = `Handoffs/runtime_lineage/${a.id}.0000000001.json`, nested = `Handoffs/runtime_lineage/${a.id}/0000000001.json`;
+    r.files.set(nested, r.files.get(flat)); r.files.delete(flat);
+    const restarted = new HandoffStore(r);
+    assert.equal((await restarted.initialize('owner', 'legacy', ref('Handoffs'), meta)).sha256, a.sha256);
+    assert.equal(r.files.has(nested), true); assert.equal(r.files.has(flat), false);
+  } finally { saved.forEach((value, i) => { const key = ['NYX_HANDOFF_COORDINATION', 'DYNO'][i]; if (value === undefined) delete process.env[key]; else process.env[key] = value; }); }
 });

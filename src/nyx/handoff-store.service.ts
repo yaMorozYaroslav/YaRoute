@@ -113,9 +113,16 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
   private async remoteLocked<T>(id: string, handoffs: ResourceRef, action: (old: Checkpoint | undefined, save: (next: Checkpoint) => Promise<void>) => Promise<T>): Promise<T> {
     const prior = this.pending.get(id) ?? Promise.resolve();
     const work = prior.catch(() => {}).then(async () => {
-      const root = { ...handoffs, path: `${handoffs.path}/runtime_lineage/${id}` };
-      const entries = await this.resources.optionalList(root);
-      const files = entries.filter(x => !x.IsDir && /^\d{10}\.json$/.test(x.Name)).sort((a, b) => a.Name.localeCompare(b.Name));
+      let root = { ...handoffs, path: `${handoffs.path}/runtime_lineage` };
+      let entries = await this.resources.optionalList(root);
+      let prefix = `${id}.`;
+      // Keep the first deployed nested ledgers intact; new identities use the existing flat ledger folder.
+      if (entries.some(x => x.IsDir && x.Name === id)) {
+        root = { ...root, path: `${root.path}/${id}` };
+        entries = await this.resources.optionalList(root);
+        prefix = '';
+      }
+      const files = entries.filter(x => !x.IsDir && x.Name.startsWith(prefix) && /^\d{10}\.json$/.test(x.Name.slice(prefix.length))).sort((a, b) => a.Name.localeCompare(b.Name));
       const names = new Set(files.map(x => x.Name));
       if (names.size !== files.length) throw new Error('DUPLICATE_LINEAGE_CHECKPOINT');
       const last = files.at(-1);
@@ -127,11 +134,13 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
         assertNoSecrets(old);
       }
       return action(old, async next => {
-        const sequence = last ? Number(last.Name.slice(0, 10)) + 1 : 1;
+        const sequence = last ? Number(last.Name.slice(prefix.length, prefix.length + 10)) + 1 : 1;
         if (sequence > 9999999999) throw new Error('LINEAGE_SEQUENCE_EXHAUSTED');
-        const ref = { ...root, path: `${root.path}/${String(sequence).padStart(10, '0')}.json` };
+        const ref = { ...root, path: `${root.path}/${prefix}${String(sequence).padStart(10, '0')}.json` };
         const text = JSON.stringify({ schema: 'nyx.handoff-ledger.v1', checkpoint: next }, null, 2) + '\n';
-        await this.resources.createVerified(ref, text);
+        // This sequence was absent from the listing inside the lock. Immutable checksum transfer
+        // still refuses a conflicting concurrent provider write and verifies exact readback.
+        await this.resources.createVerified(ref, text, { existing: undefined });
       });
     });
     this.pending.set(id, work);
