@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { ResourceRef } from './runtime.schema';
+import { ResourceRef, SumPayload } from './runtime.schema';
 import { NyxResourceStore, sha256 } from './resource-store.service';
 
 export type ChatScope = 'local' | 'global';
@@ -30,18 +30,23 @@ export type ChatConfig = {
 };
 
 export type Fif = {
-  schema: 'nyx.fif.v1'; id: string; created_at: string;
+  schema: 'nyx.fif.v1'; id: string; created_at: string; updated_at?: string;
   command: { name: string; targets: string[]; depth: string };
   canonical: { head: string; body: string; footer: string };
   cli: { version: string; sha256: string; profile_sha256?: string };
   loaded_context: { areas: string[]; sources: string[] };
   source_refs: Array<{ key: string; ref: ResourceRef; sha256: string; bytes: number; returned: boolean }>;
   chat_config?: ChatConfig;
-  continuity: { predecessor?: ResourceRef }; message_count: number | 'UNKNOWN';
+  compact_context?: string;
+  urgent_items?: string[];
+  next_action?: string;
+  continuity: { predecessor?: ResourceRef };
+  message_count: number | 'UNKNOWN';
 };
 type Checkpoint = { id: string; kind: 'FIF' | 'FIB'; ref: ResourceRef; sha256: string; fingerprint: string; promotionHash?: string; fif: Fif };
+type FibSummary = { markdown: string; data: unknown };
 export interface FifPromotionPort {
-  promote(owner: string, conversationId: string, handoffs: ResourceRef, summary: { markdown: string; data: unknown }): Promise<Checkpoint>;
+  promote(owner: string, conversationId: string, handoffs: ResourceRef, summary: FibSummary): Promise<Checkpoint>;
 }
 export function artifactId(owner: string, conversation: string) { return sha256(JSON.stringify([owner, conversation])); }
 export function assertNoSecrets(value: unknown) {
@@ -77,7 +82,8 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
   }
-  async initialize(owner: string, conversationId: string | undefined, handoffs: ResourceRef, metadata: Omit<Fif, 'schema' | 'id' | 'created_at' | 'continuity' | 'message_count'>) {
+
+  async initialize(owner: string, conversationId: string | undefined, handoffs: ResourceRef, metadata: Omit<Fif, 'schema' | 'id' | 'created_at' | 'updated_at' | 'continuity' | 'message_count' | 'compact_context' | 'urgent_items' | 'next_action'>) {
     const conversation = conversationId ?? randomUUID();
     const id = artifactId(owner, conversation);
     const fingerprint = sha256(JSON.stringify(metadata));
@@ -85,20 +91,33 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
     const checkpoint = await this.locked(id, async (old, save) => {
       if (old) await this.verify(old);
       if (old?.fingerprint === fingerprint) return old;
-      const fif: Fif = { schema: 'nyx.fif.v1', id, created_at: new Date().toISOString(), ...metadata, continuity: old ? { predecessor: old.ref } : {}, message_count: 'UNKNOWN' };
+      const now = new Date().toISOString();
+      const fif: Fif = {
+        schema: 'nyx.fif.v1',
+        id,
+        created_at: old?.fif.created_at ?? now,
+        updated_at: old?.fif.updated_at ?? now,
+        ...metadata,
+        chat_config: old?.fif.chat_config ?? metadata.chat_config,
+        compact_context: old?.fif.compact_context ?? '',
+        urgent_items: old?.fif.urgent_items ?? [],
+        next_action: old?.fif.next_action,
+        continuity: old ? { predecessor: old.ref } : {},
+        message_count: old?.fif.message_count ?? 'UNKNOWN',
+      };
+      if (old?.kind === 'FIB') {
+        const summary = await this.readFibSummary(old);
+        const next = await this.writeFibRevision(handoffs, old, fif, summary, sha256(JSON.stringify([fingerprint, summary])));
+        await save(next); return next;
+      }
       const revision = sha256(JSON.stringify([fingerprint, old?.sha256]));
       const filename = old ? `FIF_${id}.revisions/${revision}.json` : `FIF_${id}.json`;
       const ref = { ...handoffs, path: `${handoffs.path}/${filename}` };
-      const existing = await this.resources.optionalRead(ref);
-      if (existing !== undefined) {
-        const parsed = JSON.parse(existing);
-        if (typeof parsed.created_at !== 'string' || !Number.isFinite(Date.parse(parsed.created_at))) throw new Error('ARTIFACT_RECOVERY_INVALID');
-        fif.created_at = parsed.created_at;
-        if (existing !== JSON.stringify(fif, null, 2) + '\n') throw new Error('ARTIFACT_RECOVERY_CONFLICT');
-      }
       const text = JSON.stringify(fif, null, 2) + '\n';
+      const existing = await this.resources.optionalRead(ref);
+      if (existing !== undefined && existing !== text) throw new Error('ARTIFACT_RECOVERY_CONFLICT');
       const receipt = await this.resources.createVerified(ref, text, { existing });
-      const next: Checkpoint = { id, kind: old?.kind ?? 'FIF', ref, sha256: receipt.sha256, fingerprint, fif };
+      const next: Checkpoint = { id, kind: 'FIF', ref, sha256: receipt.sha256, fingerprint, fif };
       await save(next); return next;
     }, handoffs);
     return { ...checkpoint, conversationId: conversation, verified: true };
@@ -124,9 +143,15 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
         current: { ...before, scope: desired, modifier: to, source: 'operation', access: this.accessFor(config, desired) },
         history: [...config.history, { operation: op, from: before.modifier, to, at: now }],
       };
-      const fif: Fif = { ...old.fif, chat_config: nextConfig, continuity: { predecessor: old.ref } };
+      const fif: Fif = { ...old.fif, updated_at: now, chat_config: nextConfig, continuity: { predecessor: old.ref } };
       assertNoSecrets(fif);
       const fingerprint = sha256(JSON.stringify({ previous: old.fingerprint, chat_config: nextConfig }));
+      if (old.kind === 'FIB') {
+        const summary = await this.readFibSummary(old);
+        const next = await this.writeFibRevision(handoffs, old, fif, summary, sha256(JSON.stringify([old.promotionHash, nextConfig])));
+        await save(next);
+        return { checkpoint: next, changed: true, from: before.modifier, to };
+      }
       const revision = sha256(JSON.stringify([fingerprint, old.sha256]));
       const ref = { ...handoffs, path: `${handoffs.path}/FIF_${id}.revisions/${revision}.json` };
       const text = JSON.stringify(fif, null, 2) + '\n';
@@ -140,6 +165,46 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
     return { ...checkpoint.checkpoint, conversationId, verified: true, changed: checkpoint.changed, from: checkpoint.from, to: checkpoint.to };
   }
 
+  async summarize(owner: string, conversationId: string, handoffs: ResourceRef, payload: SumPayload) {
+    assertNoSecrets(payload);
+    const id = artifactId(owner, conversationId);
+    const checkpoint = await this.locked(id, async (old, save) => {
+      if (!old) throw new Error('FIF_NOT_INITIALIZED');
+      await this.verify(old);
+      const semanticHash = sha256(JSON.stringify({
+        payload,
+        source_refs: old.fif.source_refs,
+        chat_config: old.fif.chat_config,
+        canonical: old.fif.canonical,
+      }));
+      if (old.kind === 'FIB' && old.promotionHash === semanticHash) return old;
+      const now = new Date().toISOString();
+      const fif: Fif = {
+        ...old.fif,
+        updated_at: now,
+        message_count: payload.messageCount ?? old.fif.message_count,
+        compact_context: payload.compactContext ?? payload.summary,
+        urgent_items: payload.urgentItems,
+        next_action: payload.nextAction,
+        continuity: { predecessor: old.ref },
+      };
+      const data = {
+        title: payload.title,
+        summary: payload.summary,
+        message_count: fif.message_count,
+        compact_context: fif.compact_context,
+        urgent_items: fif.urgent_items,
+        next_action: fif.next_action,
+        updated_at: now,
+      };
+      const summary: FibSummary = { markdown: `# ${payload.title}\n\n${payload.summary}\n`, data };
+      const next = await this.writeFibRevision(handoffs, old, fif, summary, semanticHash);
+      await save(next);
+      return next;
+    }, handoffs);
+    return { ...checkpoint, conversationId, verified: true };
+  }
+
   private accessFor(config: ChatConfig, scope: ChatScope): ChatAccess {
     if (scope === config.initial.scope) return config.initial.access;
     if (scope === 'local') {
@@ -149,36 +214,54 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
     return { backend_areas: 'all_configured_nyx_drives', external_context: config.current.access.external_context };
   }
 
-  async promote(owner: string, conversationId: string, handoffs: ResourceRef, summary: { markdown: string; data: unknown }) {
+  async promote(owner: string, conversationId: string, handoffs: ResourceRef, summary: FibSummary) {
     assertNoSecrets(summary);
     const id = artifactId(owner, conversationId);
     return this.locked(id, async (old, save) => {
       if (!old) throw new Error('FIF_NOT_INITIALIZED');
       await this.verify(old);
-      const promotionHash = sha256(JSON.stringify([old.fif, summary]));
+      const promotionHash = sha256(JSON.stringify({ summary, source_refs: old.fif.source_refs, chat_config: old.fif.chat_config }));
       if (old.kind === 'FIB' && old.promotionHash === promotionHash) return old;
-      const hash = sha256(JSON.stringify([promotionHash, old.sha256]));
-      const root = `${handoffs.path}/FIB_${id}`;
-      const source = old.fif;
-      const outputs: Record<string, string> = {
-        'fif.json': JSON.stringify(source, null, 2) + '\n',
-        'summary.md': summary.markdown,
-        'summary.json': JSON.stringify(summary.data, null, 2) + '\n',
-        'sources.json': JSON.stringify(source.source_refs, null, 2) + '\n',
-        'continuity.json': JSON.stringify({ id, predecessor: old.ref }, null, 2) + '\n',
-      };
-      const refs = [];
-      for (const [file, content] of Object.entries(outputs)) {
-        const ref = { ...handoffs, path: `${root}/revisions/${hash}/${file}` };
-        refs.push({ ref, ...(await this.resources.createVerified(ref, content)) });
-      }
-      const ref = { ...handoffs, path: `${root}/revisions/${hash}/manifest.json` };
-      const text = JSON.stringify({ schema: 'nyx.fib.v1', id, revision: hash, files: refs }, null, 2) + '\n';
-      const receipt = await this.resources.createVerified(ref, text);
-      const next: Checkpoint = { ...old, kind: 'FIB', ref, sha256: receipt.sha256, promotionHash };
+      const fif: Fif = { ...old.fif, updated_at: new Date().toISOString(), continuity: { predecessor: old.ref } };
+      const next = await this.writeFibRevision(handoffs, old, fif, summary, promotionHash);
       await save(next); return next;
     }, handoffs);
   }
+
+  private async writeFibRevision(handoffs: ResourceRef, old: Checkpoint, fif: Fif, summary: FibSummary, promotionHash: string) {
+    const hash = sha256(JSON.stringify([promotionHash, old.sha256]));
+    const root = `${handoffs.path}/FIB_${old.id}`;
+    const outputs: Record<string, string> = {
+      'fif.json': JSON.stringify(fif, null, 2) + '\n',
+      'summary.md': summary.markdown,
+      'summary.json': JSON.stringify(summary.data, null, 2) + '\n',
+      'sources.json': JSON.stringify(fif.source_refs, null, 2) + '\n',
+      'continuity.json': JSON.stringify({ id: old.id, predecessor: old.ref }, null, 2) + '\n',
+    };
+    const refs = [];
+    for (const [file, content] of Object.entries(outputs)) {
+      const ref = { ...handoffs, path: `${root}/revisions/${hash}/${file}` };
+      refs.push({ ref, ...(await this.resources.createVerified(ref, content)) });
+    }
+    const ref = { ...handoffs, path: `${root}/revisions/${hash}/manifest.json` };
+    const text = JSON.stringify({ schema: 'nyx.fib.v1', id: old.id, revision: hash, files: refs }, null, 2) + '\n';
+    const receipt = await this.resources.createVerified(ref, text);
+    return { ...old, kind: 'FIB' as const, ref, sha256: receipt.sha256, promotionHash, fingerprint: sha256(JSON.stringify(fif)), fif };
+  }
+
+  private async readFibSummary(checkpoint: Checkpoint): Promise<FibSummary> {
+    const manifest = JSON.parse(await this.resources.read(checkpoint.ref));
+    if (manifest.schema !== 'nyx.fib.v1' || !Array.isArray(manifest.files)) throw new Error('FIB_MANIFEST_INVALID');
+    const find = (name: string) => manifest.files.find((item: any) => item?.ref?.path?.endsWith('/' + name));
+    const markdown = find('summary.md');
+    const data = find('summary.json');
+    if (!markdown || !data) throw new Error('FIB_SUMMARY_MISSING');
+    const markdownText = await this.resources.read(markdown.ref);
+    const dataText = await this.resources.read(data.ref);
+    if (sha256(markdownText) !== markdown.sha256 || sha256(dataText) !== data.sha256) throw new Error('FIB_MEMBER_CHANGED');
+    return { markdown: markdownText, data: JSON.parse(dataText) };
+  }
+
   private async remoteLocked<T>(id: string, handoffs: ResourceRef, action: (old: Checkpoint | undefined, save: (next: Checkpoint) => Promise<void>) => Promise<T>): Promise<T> {
     const prior = this.pending.get(id) ?? Promise.resolve();
     const work = prior.catch(() => {}).then(async () => {
@@ -213,6 +296,7 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
     try { return await work; }
     finally { if (this.pending.get(id) === work) this.pending.delete(id); }
   }
+
   private async verify(checkpoint: Checkpoint) {
     const content = await this.resources.read(checkpoint.ref);
     if (sha256(content) !== checkpoint.sha256) throw new Error('HANDOFF_CHECKPOINT_CHANGED');

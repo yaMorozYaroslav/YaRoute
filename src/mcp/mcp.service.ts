@@ -9,6 +9,9 @@ import { InitService } from '../init/init.service';
 import { JobStoreService } from '../storage/job-store.service';
 import { StorageService } from '../storage/storage.service';
 import { CopyJobPayload } from '../storage/storage.types';
+import { NyxBootstrapService } from '../nyx/bootstrap.service';
+import { NyxCliRegistryService } from '../nyx/cli-registry.service';
+import { NyxHeadLibraryService } from '../nyx/head-library.service';
 
 @Injectable()
 export class McpService {
@@ -21,6 +24,9 @@ export class McpService {
     private readonly jobs: JobStoreService,
     private readonly init: InitService,
     private readonly commands: NyxCommandExecutor,
+    private readonly bootstrap: NyxBootstrapService,
+    private readonly registry: NyxCliRegistryService,
+    private readonly head: NyxHeadLibraryService,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -35,7 +41,7 @@ export class McpService {
   private buildServer() {
     const server = new McpServer({
       name: 'NestNyx',
-      version: '0.7.0',
+      version: '0.8.0',
     });
 
     server.registerTool(
@@ -43,7 +49,20 @@ export class McpService {
       {
         title: 'Execute a Nyx command',
         description: 'Check current CLI authority, resolve its typed execution contract and load only required resources. Requires a private bootstrap locator. Initialization returns verified private FIF and files_to_paste.',
-        inputSchema: z.object({ command: z.string().min(1).max(64), args: z.array(z.string().min(1).max(64)).max(16).default([]), depth: z.enum(['basic', 'normal', 'deep']).optional(), conversationId: z.string().min(1).max(256).optional() }),
+        inputSchema: z.object({
+          command: z.string().min(1).max(64),
+          args: z.array(z.string().min(1).max(64)).max(16).default([]),
+          depth: z.enum(['basic', 'normal', 'deep']).optional(),
+          conversationId: z.string().min(1).max(256).optional(),
+          payload: z.object({
+            title: z.string().min(1).max(200),
+            summary: z.string().min(1).max(100000),
+            messageCount: z.union([z.number().int().nonnegative(), z.literal('UNKNOWN')]).optional(),
+            compactContext: z.string().max(20000).optional(),
+            urgentItems: z.array(z.string().min(1).max(2000)).max(64).default([]),
+            nextAction: z.string().max(5000).optional(),
+          }).strict().optional(),
+        }),
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       },
       async input => this.safeTool(() => this.commands.execute(input, this.ownerContext.getStore())),
@@ -57,6 +76,59 @@ export class McpService {
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       },
       async input => this.safeTool(() => this.init.initialize(input, this.ownerContext.getStore())),
+    );
+
+    server.registerTool(
+      'nyx_sum',
+      {
+        title: 'Summarize and checkpoint Nyx conversation',
+        description: 'Update the active conversation FIF with current continuity, then promote or revise it as a verified FIB while preserving the same conversation artifact identity.',
+        inputSchema: z.object({
+          sessionId: z.string().uuid(),
+          title: z.string().min(1).max(200),
+          summary: z.string().min(1).max(100000),
+          messageCount: z.union([z.number().int().nonnegative(), z.literal('UNKNOWN')]).optional(),
+          compactContext: z.string().max(20000).optional(),
+          urgentItems: z.array(z.string().min(1).max(2000)).max(64).default([]),
+          nextAction: z.string().max(5000).optional(),
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async input => this.safeTool(() => this.commands.execute({
+        command: 'sum',
+        conversationId: input.sessionId,
+        payload: {
+          title: input.title,
+          summary: input.summary,
+          messageCount: input.messageCount,
+          compactContext: input.compactContext,
+          urgentItems: input.urgentItems,
+          nextAction: input.nextAction,
+        },
+      }, this.ownerContext.getStore())),
+    );
+
+    server.registerTool(
+      'nyx_head_status',
+      {
+        title: 'Inspect Nyx Head constitution library',
+        description: 'Verify canonical Head CLI authority and report the read-only Head library cache used by NestNyx.',
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async () => this.safeTool(async () => {
+        const locator = await this.bootstrap.locate();
+        const cli = await this.registry.current(locator);
+        return {
+          status: 'READY',
+          role: 'constitution-library',
+          canonical: locator.canonical,
+          cli: { version: cli.cli.version, sha256: cli.hash },
+          library: this.head.snapshot(),
+          source_of_truth: 'canonical Head bundle',
+          mutation: 'read-only runtime cache',
+        };
+      }),
     );
 
     server.registerTool(
