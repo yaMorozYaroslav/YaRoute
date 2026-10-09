@@ -7,12 +7,20 @@
       "adapter": "context.initialize.v1",
       "depth": {
         "default": "normal",
-        "allowed": ["basic", "normal", "deep"]
+        "allowed": [
+          "basic",
+          "normal",
+          "deep"
+        ]
       },
       "scope": {
         "default": "local",
-        "localAreas": ["MAIN"],
-        "externalContext": ["chatgpt_library"],
+        "localAreas": [
+          "MAIN"
+        ],
+        "externalContext": [
+          "chatgpt_library"
+        ],
         "globalLabel": "all_configured_nyx_drives"
       },
       "arguments": {
@@ -21,28 +29,144 @@
       },
       "sources": {
         "basic": [
-          { "key": "maps", "required": true, "visible": true, "when": "always", "perTarget": false },
-          { "key": "nyxcli", "required": true, "visible": true, "when": "always", "perTarget": false },
-          { "key": "todo", "required": true, "visible": true, "when": "targeted", "perTarget": false },
-          { "key": "todo_10", "required": true, "visible": true, "when": "targeted", "perTarget": false },
-          { "key": "toget", "required": true, "visible": true, "when": "targeted", "perTarget": false }
+          {
+            "key": "maps",
+            "required": true,
+            "visible": true,
+            "when": "always",
+            "perTarget": false
+          },
+          {
+            "key": "nyxcli",
+            "required": true,
+            "visible": true,
+            "when": "always",
+            "perTarget": false
+          },
+          {
+            "key": "todo",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          },
+          {
+            "key": "todo_10",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          },
+          {
+            "key": "toget",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          }
         ],
         "normal": [
-          { "key": "maps", "required": true, "visible": true, "when": "always", "perTarget": false },
-          { "key": "nyxcli", "required": true, "visible": true, "when": "always", "perTarget": false },
-          { "key": "todo", "required": true, "visible": true, "when": "targeted", "perTarget": false },
-          { "key": "todo_10", "required": true, "visible": true, "when": "targeted", "perTarget": false },
-          { "key": "toget", "required": true, "visible": true, "when": "targeted", "perTarget": false }
+          {
+            "key": "maps",
+            "required": true,
+            "visible": true,
+            "when": "always",
+            "perTarget": false
+          },
+          {
+            "key": "nyxcli",
+            "required": true,
+            "visible": true,
+            "when": "always",
+            "perTarget": false
+          },
+          {
+            "key": "todo",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          },
+          {
+            "key": "todo_10",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          },
+          {
+            "key": "toget",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          }
         ],
         "deep": [
-          { "key": "maps", "required": true, "visible": true, "when": "always", "perTarget": false },
-          { "key": "nyxcli", "required": true, "visible": true, "when": "always", "perTarget": false },
-          { "key": "todo", "required": true, "visible": true, "when": "targeted", "perTarget": false },
-          { "key": "todo_10", "required": true, "visible": true, "when": "targeted", "perTarget": false },
-          { "key": "toget", "required": true, "visible": true, "when": "targeted", "perTarget": false }
+          {
+            "key": "maps",
+            "required": true,
+            "visible": true,
+            "when": "always",
+            "perTarget": false
+          },
+          {
+            "key": "nyxcli",
+            "required": true,
+            "visible": true,
+            "when": "always",
+            "perTarget": false
+          },
+          {
+            "key": "todo",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          },
+          {
+            "key": "todo_10",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          },
+          {
+            "key": "toget",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false
+          }
         ]
       },
       "pathsVisible": true,
+      "mutation": "conversation-artifact",
+      "handoffsKey": "handoffs",
+      "verification": {
+        "sourceRead": true,
+        "artifactReadback": true
+      },
+      "response": "nyx.context.v1"
+    },
+    "sum": {
+      "adapter": "context.summarize.v1",
+      "depth": {
+        "default": "normal",
+        "allowed": [
+          "normal"
+        ]
+      },
+      "arguments": {
+        "targets": false,
+        "maxTargets": 0
+      },
+      "sources": {
+        "basic": [],
+        "normal": [],
+        "deep": []
+      },
+      "pathsVisible": false,
       "mutation": "conversation-artifact",
       "handoffsKey": "handoffs",
       "verification": {
