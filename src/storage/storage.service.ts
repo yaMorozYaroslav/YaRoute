@@ -97,7 +97,7 @@ export class StorageService {
 
     const sourceStat = await this.statTarget(source);
     const destinationStat = await this.statTarget(destination);
-    const verification = this.verify(sourceStat, destinationStat, payload.destination.area);
+    const verification = this.verify(sourceStat, destinationStat, payload.source.area, payload.destination.area);
 
     if (payload.verify !== false && !verification.trusted) {
       throw new Error(`Copy completed but verification is not trusted: ${JSON.stringify(verification)}`);
@@ -570,14 +570,17 @@ export class StorageService {
     return this.rclone.json(['lsjson', target, '--stat', '--metadata', '--hash']);
   }
 
-  private verify(source: any, destination: any, destinationArea: string) {
+  private verify(source: any, destination: any, sourceArea: string, destinationArea: string) {
     const sourceHashes = this.normalizeHashes(source?.Hashes);
     const destinationHashes = this.normalizeHashes(destination?.Hashes);
     const common = Object.keys(sourceHashes).find((key) => destinationHashes[key]);
     const sizeMatch = Number(source?.Size) === Number(destination?.Size);
     const hashMatch = common ? sourceHashes[common] === destinationHashes[common] : false;
     const destinationOwner = destination?.Metadata?.owner;
-    const expectedOwner = this.roots.get(destinationArea).expectedOwner;
+    const configuredOwner = this.roots.get(destinationArea).expectedOwner;
+    const sourceOwner = source?.Metadata?.owner;
+    const inferredSameAreaOwner = sourceArea === destinationArea ? sourceOwner : undefined;
+    const expectedOwner = configuredOwner || inferredSameAreaOwner;
     const ownerMatch = expectedOwner ? destinationOwner === expectedOwner : false;
 
     return {
@@ -587,6 +590,7 @@ export class StorageService {
       destinationOwner: destinationOwner || null,
       expectedOwner: expectedOwner || null,
       ownerMatch: expectedOwner ? ownerMatch : null,
+      ownerSource: configuredOwner ? 'configured-destination-owner' : inferredSameAreaOwner ? 'same-area-source-owner' : null,
       trusted: Boolean(sizeMatch && common && hashMatch && expectedOwner && ownerMatch),
     };
   }
