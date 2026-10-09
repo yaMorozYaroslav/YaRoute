@@ -1,13 +1,16 @@
 import * as z from 'zod/v4';
 
 const name = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
+const argumentToken = z.string().min(1).max(64).refine(value => /^(?:[A-Za-z][A-Za-z0-9_-]{0,63}|\+\+|--)$/.test(value), 'invalid command argument');
 export const depthSchema = z.enum(['basic', 'normal', 'deep']);
+export const scopeSchema = z.enum(['local', 'global']);
 export const refSchema = z.object({
   area: name, path: z.string().min(1).max(2048), driveId: z.string().optional(),
 }).strict();
 export const locatorSchema = z.object({
   schema: z.literal('nyx.bootstrap.v1'),
   cli: refSchema.extend({ member: z.string().optional(), sha256: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
+  humanCli: refSchema.optional(),
   executionProfile: refSchema.optional(),
   paths: z.object({ basic: refSchema, normal: refSchema.optional(), deep: refSchema.optional() }).strict(),
   canonical: z.object({ head: z.string().min(1), body: z.string().min(1), footer: z.string().min(1) }).strict(),
@@ -16,9 +19,16 @@ export const sourceSchema = z.object({
   key: z.string().min(1).max(128), required: z.boolean(), visible: z.boolean(),
   when: z.enum(['always', 'targeted']).default('always'), perTarget: z.boolean().default(false),
 }).strict();
+export const scopeConfigSchema = z.object({
+  default: scopeSchema,
+  localAreas: z.array(name).min(1),
+  externalContext: z.array(z.string().min(1).max(128)).default([]),
+  globalLabel: z.string().min(1).max(128).default('all_configured_nyx_drives'),
+}).strict();
 export const executionSchema = z.object({
   adapter: z.enum(['context.initialize.v1', 'context.read.v1']),
   depth: z.object({ default: depthSchema, allowed: z.array(depthSchema).min(1) }).strict(),
+  scope: scopeConfigSchema.optional(),
   arguments: z.object({ targets: z.boolean(), maxTargets: z.number().int().min(0).max(16) }).strict(),
   sources: z.object({ basic: z.array(sourceSchema), normal: z.array(sourceSchema), deep: z.array(sourceSchema) }).strict(),
   pathsVisible: z.boolean(),
@@ -39,7 +49,10 @@ export const profileSchema = z.object({
   commands: z.record(name, executionSchema),
 }).strict();
 export const requestSchema = z.object({
-  command: name, args: z.array(name).max(16).default([]), depth: depthSchema.optional(),
+  command: name,
+  args: z.array(argumentToken).max(16).default([]),
+  depth: depthSchema.optional(),
+  scope: scopeSchema.optional(),
   conversationId: z.string().min(1).max(256).optional(),
 }).strict();
 export const routingSchema = z.object({ schema: z.literal('nyx.paths.v1'), resources: z.record(z.string(), refSchema) }).strict();
