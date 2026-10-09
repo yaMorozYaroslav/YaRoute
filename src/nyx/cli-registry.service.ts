@@ -7,7 +7,7 @@ import { NyxHeadLibraryService } from './head-library.service';
 export class NyxCliRegistryService {
   private cache?: { fingerprint: string; cli: Cli; hash: string };
   private pending?: Promise<{ cli: Cli; hash: string }>;
-  constructor(private readonly store: NyxResourceStore, private readonly head: NyxHeadLibraryService) {}
+  constructor(private readonly store: NyxResourceStore, private readonly head?: NyxHeadLibraryService) {}
   async current(locator: Locator): Promise<{ cli: Cli; hash: string }> {
     // A fresh stat is mandatory even if another request is resolving the same authority.
     const stat = await this.store.stat(locator.cli);
@@ -28,7 +28,7 @@ export class NyxCliRegistryService {
       let raw: Buffer;
       if (locator.cli.member) {
         if (!fingerprint) throw new Error();
-        const member = await this.head.readMember(locator.cli, fingerprint, providerHashes);
+        const member = await (this.head ?? new NyxHeadLibraryService(this.store)).readMember(locator.cli, fingerprint, providerHashes);
         text = member.text;
         raw = Buffer.alloc(0);
       } else {
