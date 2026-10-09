@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { cliSchema, Cli, Locator, parseJson } from './runtime.schema';
 import { NyxResourceStore, sha256 } from './resource-store.service';
-const AdmZip = require('adm-zip');
+import { NyxHeadLibraryService } from './head-library.service';
 @Injectable()
 export class NyxCliRegistryService {
   private cache?: { fingerprint: string; cli: Cli; hash: string };
   private pending?: Promise<{ cli: Cli; hash: string }>;
-  constructor(private readonly store: NyxResourceStore) {}
+  constructor(private readonly store: NyxResourceStore, private readonly head: NyxHeadLibraryService) {}
   async current(locator: Locator): Promise<{ cli: Cli; hash: string }> {
     // A fresh stat is mandatory even if another request is resolving the same authority.
     const stat = await this.store.stat(locator.cli);
@@ -27,21 +27,18 @@ export class NyxCliRegistryService {
       let text: string;
       let raw: Buffer;
       if (locator.cli.member) {
-        const bytes = await this.store.bytes(locator.cli);
-        raw = bytes;
-        if (!locator.cli.sha256 || sha256(bytes) !== locator.cli.sha256) throw new Error();
-        const zip = new AdmZip(bytes);
-        const entries = zip.getEntries().filter((e: any) => e.entryName === locator.cli.member);
-        if (entries.length !== 1 || entries[0].header.size > 2 * 1024 * 1024) throw new Error();
-        text = entries[0].getData().toString('utf8');
+        if (!fingerprint) throw new Error();
+        const member = await this.head.readMember(locator.cli, fingerprint, providerHashes);
+        text = member.text;
+        raw = Buffer.alloc(0);
       } else {
         text = await this.store.read(locator.cli);
         raw = Buffer.from(text);
         if (locator.cli.sha256 && sha256(text) !== locator.cli.sha256) throw new Error();
-      }
-      for (const algorithm of ['sha256', 'sha1', 'md5']) {
-        const expected = providerHashes[algorithm];
-        if (expected && createHash(algorithm).update(raw!).digest('hex') !== expected.toLowerCase()) throw new Error();
+        for (const algorithm of ['sha256', 'sha1', 'md5']) {
+          const expected = providerHashes[algorithm];
+          if (expected && createHash(algorithm).update(raw).digest('hex') !== expected.toLowerCase()) throw new Error();
+        }
       }
       const cli = cliSchema.parse(parseJson(text));
       if (!Object.keys(cli.commands).length) throw new Error();
