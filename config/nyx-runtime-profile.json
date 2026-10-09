@@ -1,0 +1,55 @@
+{
+  "schema": "nyx.runtime-profile.v1",
+  "authority": "user-authorized-runtime-configuration",
+  "cliSha256": "70e8cd6a1e4c52c2a21145ab02cdccb36ceab5f1fcb0f368d32acaa4e8b6c1c4",
+  "commands": {
+    "ini": {
+      "adapter": "context.initialize.v1",
+      "depth": {
+        "default": "normal",
+        "allowed": ["basic", "normal", "deep"]
+      },
+      "scope": {
+        "default": "local",
+        "localAreas": ["MAIN"],
+        "externalContext": ["chatgpt_library"],
+        "globalLabel": "all_configured_nyx_drives"
+      },
+      "arguments": {
+        "targets": true,
+        "maxTargets": 16
+      },
+      "sources": {
+        "basic": [
+          { "key": "maps", "required": true, "visible": true, "when": "always", "perTarget": false },
+          { "key": "nyxcli", "required": true, "visible": true, "when": "always", "perTarget": false },
+          { "key": "todo", "required": true, "visible": true, "when": "targeted", "perTarget": false },
+          { "key": "todo_10", "required": true, "visible": true, "when": "targeted", "perTarget": false },
+          { "key": "toget", "required": true, "visible": true, "when": "targeted", "perTarget": false }
+        ],
+        "normal": [
+          { "key": "maps", "required": true, "visible": true, "when": "always", "perTarget": false },
+          { "key": "nyxcli", "required": true, "visible": true, "when": "always", "perTarget": false },
+          { "key": "todo", "required": true, "visible": true, "when": "targeted", "perTarget": false },
+          { "key": "todo_10", "required": true, "visible": true, "when": "targeted", "perTarget": false },
+          { "key": "toget", "required": true, "visible": true, "when": "targeted", "perTarget": false }
+        ],
+        "deep": [
+          { "key": "maps", "required": true, "visible": true, "when": "always", "perTarget": false },
+          { "key": "nyxcli", "required": true, "visible": true, "when": "always", "perTarget": false },
+          { "key": "todo", "required": true, "visible": true, "when": "targeted", "perTarget": false },
+          { "key": "todo_10", "required": true, "visible": true, "when": "targeted", "perTarget": false },
+          { "key": "toget", "required": true, "visible": true, "when": "targeted", "perTarget": false }
+        ]
+      },
+      "pathsVisible": true,
+      "mutation": "conversation-artifact",
+      "handoffsKey": "handoffs",
+      "verification": {
+        "sourceRead": true,
+        "artifactReadback": true
+      },
+      "response": "nyx.context.v1"
+    }
+  }
+}
