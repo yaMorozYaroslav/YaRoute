@@ -16,6 +16,37 @@ export class NyxCommandExecutor {
     const profile = await this.profiles.apply(locator, cli, hash);
     const plan = this.resolver.resolve(profile.cli, request);
 
+    if (plan.contract.adapter === 'context.summarize.v1') {
+      const handoffRef = await this.resources.resolveHandoffs(locator, plan);
+      const fib = await this.handoffs.summarize(owner, plan.conversationId!, handoffRef, plan.payload!);
+      return {
+        schema: plan.contract.response,
+        status: 'COMPLETE',
+        conversation_id: fib.conversationId,
+        fif: { id: fib.id, kind: fib.kind, ref: fib.ref, sha256: fib.sha256, verified: fib.verified },
+        files_to_paste: [],
+        summary: {
+          title: plan.payload!.title,
+          body: plan.payload!.summary,
+          message_count: fib.fif.message_count,
+          urgent_items: fib.fif.urgent_items ?? [],
+          next_action: fib.fif.next_action,
+        },
+        metadata: {
+          command: plan.name,
+          targets: [],
+          depth: fib.fif.chat_config?.current.depth ?? plan.depth,
+          scope: fib.fif.chat_config?.current.scope,
+          modifier: fib.fif.chat_config?.current.modifier,
+          cli: { version: cli.version, sha256: hash, profile_sha256: profile.hash },
+          source_receipts: [],
+          warnings: [],
+          upgraded: true,
+          artifact_kind: fib.kind,
+        },
+      };
+    }
+
     if (plan.scopeAction) {
       const handoffs = await this.resources.resolveHandoffs(locator, plan);
       const changed = await this.handoffs.reconfigure(owner, plan.conversationId!, handoffs, plan.scopeAction);
