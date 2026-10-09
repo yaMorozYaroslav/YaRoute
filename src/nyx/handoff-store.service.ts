@@ -113,8 +113,14 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
       const revision = sha256(JSON.stringify([fingerprint, old?.sha256]));
       const filename = old ? `FIF_${id}.revisions/${revision}.json` : `FIF_${id}.json`;
       const ref = { ...handoffs, path: `${handoffs.path}/${filename}` };
-      const text = JSON.stringify(fif, null, 2) + '\n';
       const existing = await this.resources.optionalRead(ref);
+      if (existing !== undefined) {
+        const parsed = JSON.parse(existing);
+        if (parsed?.schema !== 'nyx.fif.v1' || parsed?.id !== id || typeof parsed?.created_at !== 'string' || !Number.isFinite(Date.parse(parsed.created_at))) throw new Error('ARTIFACT_RECOVERY_INVALID');
+        fif.created_at = parsed.created_at;
+        fif.updated_at = typeof parsed.updated_at === 'string' ? parsed.updated_at : parsed.created_at;
+      }
+      const text = JSON.stringify(fif, null, 2) + '\n';
       if (existing !== undefined && existing !== text) throw new Error('ARTIFACT_RECOVERY_CONFLICT');
       const receipt = await this.resources.createVerified(ref, text, { existing });
       const next: Checkpoint = { id, kind: 'FIF', ref, sha256: receipt.sha256, fingerprint, fif };
