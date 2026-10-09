@@ -48,12 +48,21 @@ export const profileSchema = z.object({
   cliSha256: z.string().regex(/^[a-f0-9]{64}$/),
   commands: z.record(name, executionSchema),
 }).strict();
+export const sumPayloadSchema = z.object({
+  title: z.string().min(1).max(200),
+  summary: z.string().min(1).max(100000),
+  messageCount: z.union([z.number().int().nonnegative(), z.literal('UNKNOWN')]).optional(),
+  compactContext: z.string().max(20000).optional(),
+  urgentItems: z.array(z.string().min(1).max(2000)).max(64).default([]),
+  nextAction: z.string().max(5000).optional(),
+}).strict();
 export const requestSchema = z.object({
   command: name,
   args: z.array(argumentToken).max(16).default([]),
   depth: depthSchema.optional(),
   scope: scopeSchema.optional(),
   conversationId: z.string().min(1).max(256).optional(),
+  payload: sumPayloadSchema.optional(),
 }).strict();
 export const routingSchema = z.object({ schema: z.literal('nyx.paths.v1'), resources: z.record(z.string(), refSchema) }).strict();
 export type ResourceRef = z.infer<typeof refSchema>;
@@ -61,5 +70,6 @@ export type Locator = z.infer<typeof locatorSchema>;
 export type Cli = z.infer<typeof cliSchema>;
 export type Contract = z.infer<typeof executionSchema>;
 export type CommandRequest = z.input<typeof requestSchema>;
+export type SumPayload = z.infer<typeof sumPayloadSchema>;
 export type LoadedSource = { key: string; ref: ResourceRef; sha256: string; bytes: number; content: string; visible: boolean };
 export function parseJson(text: string): unknown { return JSON.parse(text.replace(/^\uFEFF/, '')); }
