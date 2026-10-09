@@ -109,6 +109,29 @@ export class McpService {
     );
 
     server.registerTool(
+      'nyx_head_status',
+      {
+        title: 'Inspect Nyx Head constitution library',
+        description: 'Verify canonical Head CLI authority and report the read-only Head library cache used by NestNyx.',
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async () => this.safeTool(async () => {
+        const locator = await this.bootstrap.locate();
+        const cli = await this.registry.current(locator);
+        return {
+          status: 'READY',
+          role: 'constitution-library',
+          canonical: locator.canonical,
+          cli: { version: cli.cli.version, sha256: cli.hash },
+          library: this.head.snapshot(),
+          source_of_truth: 'canonical Head bundle',
+          mutation: 'read-only runtime cache',
+        };
+      }),
+    );
+
+    server.registerTool(
       'nyx_areas',
       {
         title: 'List Nyx shared areas',
