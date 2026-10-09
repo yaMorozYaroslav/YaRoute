@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import path from 'node:path';
 import { LoadedSource, Locator, ResourceRef, parseJson, refSchema, routingSchema } from './runtime.schema';
 import { NyxResourceStore, sha256 } from './resource-store.service';
 import { NyxCommandResolver } from './command-resolver';
@@ -47,6 +48,7 @@ export class NyxResourceResolver {
       }
     }
     await this.readPending(pending, files, warnings);
+    await this.hydrateTargetOwners(plan, resources, files, warnings);
     const handoffs = plan.contract.handoffsKey ? this.route(resources, plan.contract.handoffsKey) : undefined;
     if (plan.contract.mutation === 'conversation-artifact' && !handoffs) throw new Error('HANDOFFS_ROUTE_MISSING');
     if (handoffs) this.assertScope(plan, handoffs, plan.contract.handoffsKey!);
@@ -91,6 +93,47 @@ export class NyxResourceResolver {
     const handoffs = plan.contract.handoffsKey ? this.route(resources, plan.contract.handoffsKey) : undefined;
     if (plan.contract.mutation === 'conversation-artifact' && !handoffs) throw new Error('HANDOFFS_ROUTE_MISSING');
     return { files, warnings, handoffs };
+  }
+
+  private async hydrateTargetOwners(plan: Plan, resources: Record<string, ResourceRef>, files: LoadedSource[], warnings: string[]) {
+    if (!plan.contract.scope || !plan.targets.length) return;
+    const seen = new Set(files.map(file => JSON.stringify(file.ref)));
+    for (const target of plan.targets) {
+      const manifestRef = this.route(resources, `${target}.area_paths`);
+      if (!manifestRef) continue;
+      this.assertScope(plan, manifestRef, `${target}.area_paths`);
+      let manifestText: string;
+      try { manifestText = await this.store.read(manifestRef); }
+      catch { throw new Error(`REQUIRED_SOURCE_UNAVAILABLE:${target}.area_paths`); }
+      const manifestFile: LoadedSource = {
+        key: `${target}.area_paths`, ref: manifestRef, content: manifestText,
+        sha256: sha256(manifestText), bytes: Buffer.byteLength(manifestText), visible: false,
+      };
+      if (!seen.has(JSON.stringify(manifestRef))) {
+        files.push(manifestFile); seen.add(JSON.stringify(manifestRef));
+      }
+      let manifest: any;
+      try { manifest = parseJson(manifestText); }
+      catch { throw new Error(`AREA_MANIFEST_INVALID:${target}`); }
+      const candidates = [
+        ['config', manifest?.config?.file ?? manifest?.configs?.file],
+        ['state', manifest?.central_mutable_state?.file ?? manifest?.main_state?.file],
+      ].filter((item): item is [string, string] => typeof item[1] === 'string' && item[1].length > 0);
+      const base = path.posix.dirname(manifestRef.path);
+      for (const [role, relative] of candidates) {
+        const ref = { ...manifestRef, path: path.posix.join(base, relative) };
+        this.assertScope(plan, ref, `${target}.${role}`);
+        const identity = JSON.stringify(ref);
+        if (seen.has(identity)) continue;
+        try {
+          const content = await this.store.read(ref);
+          files.push({ key: `${target}.${role}`, ref, content, sha256: sha256(content), bytes: Buffer.byteLength(content), visible: false });
+          seen.add(identity);
+        } catch {
+          warnings.push(`OPTIONAL_SOURCE_UNAVAILABLE:${target}.${role}`);
+        }
+      }
+    }
   }
 
   private async readPending(pending: Array<{ key: string; ref: ResourceRef; required: boolean; visible: boolean }>, files: LoadedSource[], warnings: string[]) {
