@@ -26,7 +26,7 @@ export const scopeConfigSchema = z.object({
   globalLabel: z.string().min(1).max(128).default('all_configured_nyx_drives'),
 }).strict();
 export const executionSchema = z.object({
-  adapter: z.enum(['context.initialize.v1', 'context.read.v1']),
+  adapter: z.enum(['context.initialize.v1', 'context.read.v1', 'context.summarize.v1']),
   depth: z.object({ default: depthSchema, allowed: z.array(depthSchema).min(1) }).strict(),
   scope: scopeConfigSchema.optional(),
   arguments: z.object({ targets: z.boolean(), maxTargets: z.number().int().min(0).max(16) }).strict(),
