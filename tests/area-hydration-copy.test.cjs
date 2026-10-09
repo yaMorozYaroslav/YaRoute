@@ -136,12 +136,12 @@ test('same-area copy can establish owner trust from verified source owner when d
   const source = {
     Size: 4,
     Hashes: { md5: 'abcd' },
-    Metadata: { owner: 'owner@example.test' },
+    Metadata: { owner: 'fixture-owner' },
   };
   const destination = {
     Size: 4,
     Hashes: { md5: 'abcd' },
-    Metadata: { owner: 'owner@example.test' },
+    Metadata: { owner: 'fixture-owner' },
   };
   const rclone = {
     run: async () => ({ stdout: '', stderr: '' }),
