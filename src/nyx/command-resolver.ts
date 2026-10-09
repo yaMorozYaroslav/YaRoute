@@ -61,8 +61,13 @@ export class NyxCommandResolver {
 
     if (contract.adapter === 'context.initialize.v1' && (contract.mutation !== 'conversation-artifact' || !contract.handoffsKey || !contract.verification.artifactReadback)) throw new Error('INIT_CONTRACT_UNSAFE');
     if (contract.adapter === 'context.read.v1' && contract.mutation !== 'none') throw new Error('READ_CONTRACT_UNSAFE');
+    if (contract.adapter === 'context.summarize.v1') {
+      if (contract.mutation !== 'conversation-artifact' || !contract.handoffsKey || !contract.verification.artifactReadback) throw new Error('SUM_CONTRACT_UNSAFE');
+      if (!request.conversationId) throw new Error('CONVERSATION_ID_REQUIRED');
+      if (!request.payload) throw new Error('SUM_PAYLOAD_REQUIRED');
+    } else if (request.payload) throw new Error('PAYLOAD_NOT_SUPPORTED');
     return {
-      name, contract, depth, scope, modifier, modifierSource, targets, conversationId: request.conversationId,
+      name, contract, depth, scope, modifier, modifierSource, targets, conversationId: request.conversationId, payload: request.payload,
       scopeAction: operations[0] === '++' ? 'upgrade' as const : operations[0] === '--' ? 'downgrade' as const : undefined,
     };
   }
