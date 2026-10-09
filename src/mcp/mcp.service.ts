@@ -9,6 +9,9 @@ import { InitService } from '../init/init.service';
 import { JobStoreService } from '../storage/job-store.service';
 import { StorageService } from '../storage/storage.service';
 import { CopyJobPayload } from '../storage/storage.types';
+import { NyxBootstrapService } from '../nyx/bootstrap.service';
+import { NyxCliRegistryService } from '../nyx/cli-registry.service';
+import { NyxHeadLibraryService } from '../nyx/head-library.service';
 
 @Injectable()
 export class McpService {
@@ -21,6 +24,9 @@ export class McpService {
     private readonly jobs: JobStoreService,
     private readonly init: InitService,
     private readonly commands: NyxCommandExecutor,
+    private readonly bootstrap: NyxBootstrapService,
+    private readonly registry: NyxCliRegistryService,
+    private readonly head: NyxHeadLibraryService,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
