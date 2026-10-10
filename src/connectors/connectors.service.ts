@@ -111,7 +111,17 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     return {id,status:'revoked',providerUninstallRequired:true};
   }
   async getOwned(ownerId:string, id:string) { return this.owned(this.owner(ownerId), id); }
-  registryPolicy() { return this.policy(); }
+  /**
+   * Lazy repository wrapper: Nest constructs provider factories before onModuleInit.
+   * Every read/write still fails closed until initialization has succeeded.
+   */
+  registryPolicy() {
+    return new ConnectorRegistry({
+      get: async id => { this.db(); return this.repository!.get(id); },
+      list: async owner => { this.db(); return this.repository!.list(owner); },
+      save: async connection => { this.db(); return this.repository!.save(connection); },
+    });
+  }
 
   async beginGithub(ownerId:string, id:string, installationId:string) {
     const c = await this.owned(ownerId,id);
