@@ -71,3 +71,13 @@ test('optional legacy labels suggested in order', () => {
   assert.equal(suggestConnectionName('google-drive', ['google_main']), 'google_work');
   assert.equal(suggestConnectionName('github', ['GitHub']), 'GitHub 2');
 });
+
+test('owner selected resource restricts GitHub access', async () => {
+ const registry = new ConnectorRegistry(repository);
+ await assert.rejects(() => registry.requireResource('alice','conn1','ci:read', {kind:'repository',id:'other/repo'}), /CONNECTOR_RESOURCE_FORBIDDEN/);
+ let saved;
+ const scoped = new ConnectorRegistry({...repository,save:async c=>{saved=c;}});
+ await scoped.setResources('alice','conn1',[{kind:'repository',id:'org/repo',capabilities:['ci:read'],branches:['master']}]);
+ assert.equal(saved.resources[0].branches[0],'master');
+ await assert.rejects(() => new ConnectorRegistry({...repository,get:async()=>saved}).requireResource('alice','conn1','ci:read',{kind:'repository',id:'org/repo',branch:'dev'}), /CONNECTOR_RESOURCE_FORBIDDEN/);
+});
