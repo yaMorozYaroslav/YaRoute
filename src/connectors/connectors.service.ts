@@ -89,7 +89,10 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       displayName: validateConnectionName(name), externalAccountId: 'pending',
       capabilities: [], providerCapabilities: [], resources: [], status: 'pending',
     };
-    await this.policy().list(ownerId); // Verify DB before writing.
+    const existing=await this.policy().list(ownerId);
+    if(existing.filter(c=>c.status!=='revoked').length>=12) {
+      throw new Error('CONNECTOR_ACCOUNT_LIMIT');
+    }
     await this.repository!.save(connection);
     return this.view(connection);
   }
@@ -145,6 +148,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async beginGithub(ownerId:string, id:string, installationId:string) {
+    await this.consumeQuota(ownerId,id);
     const c = await this.owned(ownerId,id);
     if (c.provider !== 'github' || c.status !== 'pending') throw new Error('GITHUB_CONNECTION_NOT_PENDING');
     if (!/^[1-9][0-9]{0,19}$/.test(installationId)) throw new Error('GITHUB_INSTALLATION_INVALID');
