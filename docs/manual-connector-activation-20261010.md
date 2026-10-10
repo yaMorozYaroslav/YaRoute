@@ -91,13 +91,18 @@ connection has been tested end-to-end.
    Heroku connection in panel and verify a manually authorized app.
    Select `heroku:apps:read` and `heroku:releases:read` for that app.
    All Heroku administration remains unavailable.
-10. **Staging gate:** Check CI and security audit on exact deployed commit;
-    verify database init, mock+real OAuth, multi-owner isolation, resource
-    denied tests, broker HMAC and app restrictions. In a separately approved
-    environment, enable `NYX_DEPLOYMENT_MODE=public` and
-    `NYX_PUBLIC_CONNECTORS_ENABLED=true`. This changes MCP behavior and
-    hides private legacy tools. Do NOT enable until old API-key HTTP surfaces
-    and Rclone credentials have been isolated and tested.
+10. **Staging gate — preserve existing NYX:** Keep your CURRENT NestNyx
+    installation in its existing PRIVATE mode, with its existing
+    `NYX_PRIVATE_OAUTH_SUBJECTS` allowlist, so NYX initialization, FIF/FIB,
+    Rclone storage and other old tools remain available. The new connector
+    tools and panel coexist in private mode once database and app authorization
+    are configured. Check CI and security audit on the deployed commit,
+    verify owner isolation and one-time OAuth plus denied-resource tests.
+    A FUTURE separate multi-user rollout can use
+    `NYX_DEPLOYMENT_MODE=public` and
+    `NYX_PUBLIC_CONNECTORS_ENABLED=true` after explicit approval and
+    isolation testing. It will hide legacy shared credentials and commands;
+    NEVER flip the current private NYX instance into public mode casually.
 11. **Deployment:** From GitHub Actions manually dispatch the existing
     `Deploy to Heroku` workflow for `master`; it uses a GitHub Actions
     secret for Heroku deployment that must never become accessible to NYX
