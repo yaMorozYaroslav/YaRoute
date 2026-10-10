@@ -1,3 +1,5 @@
+> **Superseded decision (2026-10-10):** No Git CLI or Heroku CLI access for NYX. Use scoped provider APIs only. See [API-only connector architecture](api-only-connectors.md). Earlier CLI-worker proposals below are historical and MUST NOT be implemented.
+
 # NestNyx production connectors and CLI execution contract
 
 Status: engineering plan + early type-safe library contracts. Nothing below asserts that OAuth
