@@ -27,5 +27,5 @@ test('legacy proposal append retains original trailing whitespace', () => {
  assert.ok(updated.startsWith(original));
 });
 test('multiline proposal source is rejected', () => {
- assert.throws(() => appendLegacyProposals(sample, [{id:'p3',target:'head',description:'Valid',confidence:0.5,source:'bad\\nsource'}], 'tx3'), /KEY_CANDIDATE_INVALID/);
+ assert.throws(() => appendLegacyProposals(sample, [{id:'p3',target:'head',description:'Valid',confidence:0.5,source:'bad\nsource'}], 'tx3'), /KEY_CANDIDATE_INVALID/);
 });
