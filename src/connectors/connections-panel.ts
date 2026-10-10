@@ -116,6 +116,14 @@ function render(connections){
   if(c.provider==='heroku' && c.status==='pending'){
     const warning=el('div','Heroku activation is not available until a separate, verified finance-blind broker is configured. No Heroku credentials are accepted in this panel.');
     warning.className='warn';box.append(warning);
+    const row=el('div');row.className='row';
+    const appName=input('');appName.placeholder='Authorized Heroku app';
+    row.append(appName,button('Verify via broker',async()=>{
+      await call('nyx_connection_verify_heroku',{id:c.id,app:appName.value.trim()});
+      show('Heroku app verified by independent read-only broker. Choose permissions and resources next.');
+      await refresh();
+    }));
+    box.append(row);
   }
   if(c.status==='active'){
     const group=el('fieldset');group.append(el('legend','Allowed API operations'));
