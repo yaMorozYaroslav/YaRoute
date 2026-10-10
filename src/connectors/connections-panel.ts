@@ -3,11 +3,11 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v1.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v2.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NestNyx Connections</title>
+<title>NestNyx GitHub Connections</title>
 <style>
 :root{color-scheme:light dark;font:14px/1.5 system-ui,sans-serif}
 body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
@@ -28,19 +28,18 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .capabilities{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:5px}
 .controls{display:flex;flex-wrap:wrap;gap:7px}
 </style></head>
-<body><header><h1>⚙️ NestNyx connections</h1>
-<p class="muted">Your services, your names, your selected resources. No CLI, no billing or payment access.</p>
-<div class="warn">GitHub API connection requires a GitHub App installation and secure authorization.
-Heroku currently requires a separate finance-blind broker. Financial actions are permanently unavailable.</div>
+<body><header><h1>⚙️ NestNyx GitHub connections</h1>
+<p class="muted">Manage GitHub repositories through verified, repository-scoped API permissions. No infrastructure, billing, CLI, or payment access.</p>
+<div class="warn">GitHub read-only APIs are available now. GitHub writes require separate implementation and approved scopes. No Heroku or Vercel connection is available.</div>
 </header>
 <section><h2>Add connection</h2><form id="new-form" class="row">
-<label>Provider <select id="provider"><option value="github">GitHub</option><option value="heroku">Heroku (broker required)</option></select></label>
+<span>Provider: <strong>GitHub</strong></span>
 <label>Name <input id="new-name" type="text" maxlength="80" placeholder="My development projects" required></label>
 <button type="submit">Add connection</button></form>
-<p><small>You can create multiple connections for the same provider. Old Google/MEGA names remain optional suggestions for future migration.</small></p></section>
+<p><small>You can create multiple separately named, repo-scoped GitHub connections. No provider secrets are entered in this panel.</small></p></section>
 <section><div class="row" style="justify-content:space-between"><h2>My connections</h2><button id="refresh">Refresh</button></div>
 <div id="connection-list" aria-live="polite">Loading…</div></section>
-<section><h2>Technical safeguards</h2><p>Only typed, owner-scoped API operations can be exposed. No Git or Heroku CLI, arbitrary API proxy, plan changes, paid provisioning, financial credentials or payment controls.</p></section>
+<section><h2>Technical safeguards</h2><p>Only verified GitHub App installation access and repository-scoped API operations are exposed. No Git, Heroku, or Vercel CLI, infrastructure API, workflow dispatch, plan changes, billing, or payment controls.</p></section>
 <div id="message" role="status" aria-live="polite"></div>
 <script>
 (function(){
@@ -93,7 +92,7 @@ function input(value){const n=el('input');n.type='text';n.value=value||'';n.maxL
 function render(connections){
  root.replaceChildren();
  if(!connections.length){root.append(el('p','No connections yet. Add one above.'));return;}
- for(const c of connections){
+ for(const c of connections.filter(c=>c.provider==='github')){
   const box=el('div');box.className='card';
   const title=el('div');title.className='row';
   title.append(el('strong',c.displayName),el('span',c.provider),el('span',c.status));
@@ -113,24 +112,11 @@ function render(connections){
     }));
     box.append(row);
   }
-  if(c.provider==='heroku' && c.status==='pending'){
-    const warning=el('div','Heroku activation is not available until a separate, verified finance-blind broker is configured. No Heroku credentials are accepted in this panel.');
-    warning.className='warn';box.append(warning);
-    const row=el('div');row.className='row';
-    const appName=input('');appName.placeholder='Authorized Heroku app';
-    row.append(appName,button('Verify via broker',async()=>{
-      await call('nyx_connection_verify_heroku',{id:c.id,app:appName.value.trim()});
-      show('Heroku app verified by independent read-only broker. Choose permissions and resources next.');
-      await refresh();
-    }));
-    box.append(row);
-  }
   if(c.status==='active'){
     const group=el('fieldset');group.append(el('legend','Allowed API operations'));
     const grid=el('div');grid.className='capabilities';const checks=[];
-    const allowed=(c.availableCapabilities||[]).filter(x=>c.provider==='github'?
-      ['repository:metadata','resources:read','ci:read','issues:read','pulls:read','releases:read'].includes(x):
-      ['heroku:apps:read','heroku:releases:read'].includes(x));
+    const allowed=(c.availableCapabilities||[]).filter(x=>
+      ['repository:metadata','resources:read','ci:read','issues:read','pulls:read','releases:read'].includes(x));
     for(const cap of allowed){
       const label=el('label');const check=el('input');check.type='checkbox';
       check.checked=(c.capabilities||[]).includes(cap);
@@ -145,13 +131,11 @@ function render(connections){
       await refresh();
     }));box.append(group);
     const field=el('fieldset');field.append(el('legend','Resources'));
-    field.append(el('p',c.provider==='github'?
-      'One repository per line (owner/repo). These repositories must already be granted to your GitHub App.':
-      'One already-existing Heroku app name per line. Only apps independently authorized by the broker are accessible.'));
+    field.append(el('p','One repository per line (owner/repo). These repositories must already be granted to your GitHub App.'));
     const area=el('textarea');area.value=(c.resources||[]).map(x=>x.id).join('\n');field.append(area);
     field.append(button('Save resources',async()=>{
       const selected=checks.filter(x=>x.check.checked).map(x=>x.cap);
-      const kind=c.provider==='github'?'repository':'heroku-app';
+      const kind='repository';
       const ids=[...new Set(area.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))];
       await call('nyx_connection_resources',{id:c.id,resources:ids.map(id=>({kind,id,capabilities:selected}))});
       show('Resource selection saved. Provider grants are still enforced.');
@@ -160,7 +144,7 @@ function render(connections){
     box.append(field);
   }
   box.append(button('Disconnect',async()=>{
-    if(!confirm('Disconnect from NestNyx? You must separately revoke the GitHub App installation or external Heroku broker grant in the provider settings.'))return;
+    if(!confirm('Disconnect from NestNyx? To revoke GitHub authorization completely, also uninstall the GitHub App in GitHub settings.'))return;
     await call('nyx_connection_disconnect',{id:c.id});await refresh();show('Connection revoked in NestNyx.');
   }));
   root.append(box);
@@ -174,7 +158,7 @@ async function refresh(){
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('new-form').addEventListener('submit',async e=>{
  e.preventDefault();const name=document.getElementById('new-name').value.trim();
- const provider=document.getElementById('provider').value;
+ const provider='github';
  try{await call('nyx_connection_create',{provider,name});await refresh();
   document.getElementById('new-name').value='';show('Connection created. Authorize before using resources.');
  }catch(e){show(e.message,true);}
