@@ -50,14 +50,14 @@ test('user permissions cannot expand external provider grants', async () => {
 test('GitHub CI reads use owner-bound installation token', async () => {
   let url;
   const api = new GithubReadonlyConnector(new ConnectorRegistry(repository), {
-    tokenFor: async (owner, id, installation) => {
-      assert.deepEqual([owner, id, installation], ['alice', 'conn1', '123']);
+    tokenFor: async (owner, id, installation, repoName, capability) => {
+      assert.deepEqual([owner, id, installation, repoName, capability], ['alice', 'conn1', '123', 'org/repo', 'ci:read']);
       return 'test-token';
     },
   }, async (u, options) => {
     url = u;
     assert.equal(options.headers.Authorization, 'Bearer test-token');
-    return { ok: true, json: async () => ({ workflow_runs: [] }) };
+    return { ok: true, text: async () => JSON.stringify({ workflow_runs: [] }) };
   });
   assert.deepEqual(await api.runs('alice', 'conn1', 'org/repo'), { workflow_runs: [] });
   assert.match(url, /\/actions\/runs\?/);
