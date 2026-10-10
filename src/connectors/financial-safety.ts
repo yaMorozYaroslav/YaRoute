@@ -26,7 +26,7 @@ const forbiddenSegments = new Set([
   'paymentmethods', 'creditcards', 'cards', 'invoices', 'invoice',
   'subscription', 'subscriptions', 'subscribe', 'purchase', 'purchases',
   'checkout', 'charges', 'charge', 'refund', 'refunds',
-  'tariff', 'tariffs', 'pricing', 'priceplan', 'rateplan',
+  'tariff', 'tariffs', 'pricing', 'priceplan', 'rateplan', 'plan', 'plans', 'tier', 'tiers',
   'paidplans', 'paidplan', 'planupgrade', 'planchanges',
   'addon', 'addons', 'add-on', 'marketplace', 'formation',
   'dynosize', 'dynotype', 'scale', 'scaling',
