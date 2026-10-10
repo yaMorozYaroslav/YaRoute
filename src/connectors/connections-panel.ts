@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v2.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v3.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -71,7 +71,7 @@ window.addEventListener('message',function(event){
  if(m.method==='ui/notifications/tool-result')consume(m.params);
 });
 async function initialize(){
- await request('ui/initialize',{appInfo:{name:'NestNyx connections',version:'1.0.0'},
+ await request('ui/initialize',{appInfo:{name:'NestNyx connections',version:'1.1.0'},
   appCapabilities:{},protocolVersion:'2026-01-26'});
  window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}},'*');
 }
