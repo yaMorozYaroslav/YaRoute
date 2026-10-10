@@ -1,5 +1,5 @@
 import { ConnectorRegistry, type ConnectorCapability } from './connector-registry';
-import { assertNoFinancialAccess } from './financial-safety';
+import { assertNoFinancialAccess, isFinanciallyProhibited } from './financial-safety';
 
 /**
  * Out-of-process Heroku read broker interface. The NestNyx runtime MUST NOT
@@ -61,6 +61,7 @@ export class HerokuReadonlyConnector {
       names.some(name => typeof name !== 'string' || !/^[A-Z_][A-Z0-9_]{0,127}$/.test(name))) {
       throw new Error('HEROKU_RESPONSE_INVALID');
     }
-    return [...new Set(names)].sort();
+    // Even configuration KEY NAMES that identify payment integrations stay hidden.
+    return [...new Set(names)].filter(name => !isFinanciallyProhibited(name)).sort();
   }
 }
