@@ -1,5 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { NyxCommandExecutor } from '../nyx/command-executor.service';
+import { NyxBootstrapService } from '../nyx/bootstrap.service';
+import { NyxCliRegistryService } from '../nyx/cli-registry.service';
+import { NyxHeadLibraryService } from '../nyx/head-library.service';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { toNodeHandler } from '@modelcontextprotocol/node';
@@ -27,6 +30,9 @@ export class McpService {
     private readonly jobs: JobStoreService,
     private readonly init: InitService,
     private readonly commands: NyxCommandExecutor,
+    private readonly bootstrap: NyxBootstrapService,
+    private readonly cliRegistry: NyxCliRegistryService,
+    private readonly headLibrary: NyxHeadLibraryService,
     private readonly connections: ConnectorsService,
     private readonly github: GithubReadonlyConnector,
     private readonly githubWrites: GithubWriteConnector,
@@ -51,7 +57,7 @@ export class McpService {
   private buildServer() {
     const server = new McpServer({
       name: 'NestNyx',
-      version: '0.8.1',
+      version: '0.8.2',
     });
 
     // Capability discovery is advisory: canonical Head/nyxcli.json defines semantics.
@@ -75,7 +81,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -330,6 +336,64 @@ export class McpService {
     },async()=>this.safeTool(()=>{
       this.connectorOwner();
       return this.storage.rcloneConnections();
+    }));
+
+    // Private-only operational tools. These are MCP auxiliaries and must not
+    // silently introduce new canonical Yaro CLI commands or execution contracts.
+    server.registerTool('nyx_head_status',{
+      title:'Verify the current canonical NYX Head and CLI',
+      description:'Read canonical Head/CLI version, hash and verified cache metadata from the current NYX bootstrap. Does not modify any bundle.',
+      inputSchema:z.object({}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>this.safeTool(async()=>{
+      this.connectorOwner();
+      const locator=await this.bootstrap.locate();
+      const {cli,hash}=await this.cliRegistry.current(locator);
+      return {
+        status:'READY',role:'constitution-library',canonical:locator.canonical,
+        cli:{version:cli.version,sha256:hash},
+        library:this.headLibrary.snapshot(),
+        source_of_truth:'canonical Head bundle',
+        mutation:'read-only runtime cache; canonical Head lifecycle remains separate',
+      };
+    }));
+    server.registerTool('nyx_areas',{
+      title:'List logical NYX storage areas',
+      description:'List storage-area aliases configured and discovered in private NYX. Read-only; these are storage aliases, not Head project areas.',
+      inputSchema:z.object({}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>this.safeTool(async()=>({areas:await this.storage.areas()})));
+
+    server.registerTool('nyx_list',{
+      title:'List files and folders in a selected NYX storage area',
+      description:'Read-only, path-bound list for an existing configured storage area; no configuration or credentials exposed.',
+      inputSchema:z.object({area:z.string().min(1).max(128),path:z.string().default('')}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async({area,path})=>this.safeTool(()=>this.storage.list(area,path)));
+
+    server.registerTool('nyx_stat',{
+      title:'Read metadata for one NYX storage path',
+      description:'Read-only metadata for a file or folder below a selected logical storage area.',
+      inputSchema:z.object({area:z.string().min(1).max(128),path:z.string().min(1).max(2048)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async({area,path})=>this.safeTool(()=>this.storage.stat(area,path)));
+
+    server.registerTool('nyx_capacity',{
+      title:'Read NYX configured storage capacities',
+      description:'Read-only quota summaries for allowed logical storage areas; never returns secrets.',
+      inputSchema:z.object({}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>this.safeTool(()=>this.storage.capacity()));
+
+    server.registerTool('nyx_job_status',{
+      title:'Check NYX storage job status',
+      description:'Read an existing private NYX storage job and its verification result. Does not create, alter or cancel jobs.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async({id})=>this.safeTool(async()=>{
+      const job=await this.jobs.get(id);
+      if(!job)throw new Error('JOB_NOT_FOUND');
+      return {job};
     }));
 
     server.registerTool(
