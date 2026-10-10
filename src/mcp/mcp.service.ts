@@ -29,6 +29,12 @@ export class McpService {
   }
 
   async handle(req: Request, res: Response, parsedBody: unknown) {
+    // Legacy MCP tools still resolve global storage roots and credentials.
+    // Public mode must not expose them before per-user routing is complete.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      res.status(503).json({ error: 'public_storage_migration_incomplete' });
+      return;
+    }
     await this.ownerContext.run(`oauth:${res.locals.nyxSubject}`, () => this.nodeHandler(req, res, parsedBody));
   }
 
