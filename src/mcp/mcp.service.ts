@@ -229,6 +229,30 @@ export class McpService {
     },async({id,repo,path,ref})=>this.safeTool(()=>
       this.readConnectionApi(id,()=>this.github.fileText(this.connectorOwner(),id,repo,path,ref))));
 
+    server.registerTool('nyx_connection_github_branches',{
+      title:'List branches through authorized GitHub API',
+      description:'Read-only, bounded GitHub REST branch metadata. Branch-scoped access cannot enumerate unrestricted branches.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.readConnectionApi(id,()=>this.github.branches(this.connectorOwner(),id,repo))));
+
+    server.registerTool('nyx_connection_github_commits',{
+      title:'Read recent commits on an allowed GitHub branch',
+      description:'Bounded summaries only; per-repository and per-branch permissions enforced.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().min(1).max(120)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,branch})=>this.safeTool(()=>
+      this.readConnectionApi(id,()=>this.github.commits(this.connectorOwner(),id,repo,branch))));
+
+    server.registerTool('nyx_connection_github_releases',{
+      title:'Read GitHub releases through authorized API',
+      description:'Read-only, bounded release metadata without downloads or deployment.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.readConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
+
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
       description:'Read-only Actions API; owner, installation, selected repository and provider grants checked.',
