@@ -29,13 +29,16 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .controls{display:flex;flex-wrap:wrap;gap:7px}
 </style></head>
 <body><header><h1>⚙️ NestNyx connections</h1>
-<p class="muted">GitHub development permissions and your configured Google Drive / MEGA Rclone accounts. No billing, infrastructure control, or credential editing.</p>
+<p class="muted">Multiple owner-scoped GitHub and Rclone accounts. Account metadata uses the existing Neon PostgreSQL connection registry; provider credentials never enter this panel.</p>
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
 <section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
-<p class="muted">Google Drive and MEGA remotes in the private Rclone configuration. Test account access per remote without exposing credentials or file contents. Adding, deleting and reauthorizing Rclone credentials still require private server administration.</p>
+<p class="muted">Google Drive and MEGA remotes in the private Rclone configuration. Link each existing remote under an editable name; then test its account access below. Provider reauthorization and credential removal remain private server administration.</p>
 <div id="rclone-list" aria-live="polite">Loading configured drives…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
+<h2>Linked Rclone accounts (Neon)</h2>
+<p class="muted">Each link has its own immutable connection ID, editable name, and authenticated owner. Links are metadata only: unlinking does not remove an Rclone remote or revoke its provider token.</p>
+<div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
 </section>
 <section><h2>Add GitHub connection</h2><form id="new-form" class="row">
 <span>Provider: <strong>GitHub</strong></span>
@@ -51,6 +54,8 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 'use strict';
 const root=document.getElementById('connection-list');
 const rcloneRoot=document.getElementById('rclone-list');
+const rcloneLinkedRoot=document.getElementById('rclone-linked-list');
+let boundRcloneKeys=new Set();let lastRcloneInventory=null;
 const rcloneStatus=document.getElementById('rclone-status');
 const status=document.getElementById('message');
 const pending=new Map();let rpcId=0,connecting;
@@ -105,6 +110,7 @@ function renderRclone(data){
  const entries=data.remotes.filter(x=>x &&
    ['google-drive','mega'].includes(x.provider) &&
    typeof x.name==='string' && Array.isArray(x.aliases));
+ lastRcloneInventory=data;
  if(!entries.length){
   rcloneRoot.append(el('p','No Google Drive or MEGA remotes were reported by private Rclone.'));
   return;
@@ -121,18 +127,20 @@ function renderRclone(data){
    line.append(el('strong',remote.name),el('span','Configured in Rclone'));
    line.lastChild.className='badge';
    if(remote.aliases.length)line.append(el('small','Areas: '+remote.aliases.join(', ')));
-   const checkStatus=el('small','Not checked');
-   line.append(button('Test access',async()=>{
-     checkStatus.textContent='Checking…';
-     try{
-       const result=await call('nyx_rclone_connection_test',{provider:remote.provider,name:remote.name});
-       if(result?.schema!=='nyx.storage.rclone.probe.v1'||result.name!==remote.name||
-          result.provider!==remote.provider||!['reachable','unverified'].includes(result.status)){
-         throw Error('Invalid Rclone probe result');
-       }
-       checkStatus.textContent=result.status==='reachable'?'Provider access confirmed':'Not verified (unavailable or unsupported)';
-     }catch(e){checkStatus.textContent='Check failed';show(e.message,true);}
-   }),checkStatus);
+   const bound=boundRcloneKeys.has(remote.provider+':'+remote.name);
+   if(bound){
+     line.append(el('small','Linked to your account registry'));
+   }else{
+     const chosenName=input(remote.name.slice(0,80));
+     chosenName.placeholder='Connection label';
+     line.append(chosenName,button('Link account',async()=>{
+       await call('nyx_rclone_connection_link',{
+         provider:remote.provider,remoteName:remote.name,name:chosenName.value.trim()
+       });
+       await refresh();
+       show('Account reference saved to Neon. Provider credentials are unchanged.');
+     }));
+   }
    group.append(line);
   }
   rcloneRoot.append(group);
@@ -144,6 +152,7 @@ async function refreshRclone(){
   const data=await call('nyx_rclone_connections_list',{});
   renderRclone(data);
  }catch(e){
+  lastRcloneInventory=null;
   rcloneRoot.replaceChildren(el('p','Rclone inventory unavailable. Private NYX authorization and the configured Rclone runtime are required.'));
   rcloneStatus.textContent=e?.message||'Unable to read configured remotes';
   rcloneStatus.className='error';
@@ -151,8 +160,46 @@ async function refreshRclone(){
 }
 function render(connections){
  root.replaceChildren();
- if(!connections.length){root.append(el('p','No connections yet. Add one above.'));return;}
- for(const c of connections.filter(c=>c.provider==='github')){
+ const linked=connections.filter(c=>['google-drive','mega'].includes(c.provider)&&c.status!=='revoked');
+ boundRcloneKeys=new Set(linked.map(c=>c.provider+':'+c.externalAccountId));
+ if(lastRcloneInventory)renderRclone(lastRcloneInventory);
+ rcloneLinkedRoot.replaceChildren();
+ if(!linked.length)rcloneLinkedRoot.append(el('p','No Rclone accounts linked yet. Link an existing configured remote above.'));
+ for(const c of linked){
+   const box=el('div');box.className='card';
+   const title=el('div');title.className='row';
+   title.append(el('strong',c.displayName),el('span',c.provider),
+     el('span','Remote: '+c.externalAccountId),el('small','Reference only · not OAuth verified'));
+   box.append(title);
+   const edit=el('div');edit.className='row';
+   const name=input(c.displayName);
+   edit.append(name,button('Rename',async()=>{
+     await call('nyx_connection_rename',{id:c.id,name:name.value.trim()});
+     await refresh();
+   }));
+   const probe=el('small','Not checked');
+   edit.append(button('Test access',async()=>{
+     probe.textContent='Checking…';
+     try{
+       const result=await call('nyx_rclone_connection_test',{id:c.id});
+       if(result?.connectionId!==c.id||result?.schema!=='nyx.storage.rclone.probe.v1'||
+          !['reachable','unverified'].includes(result.status))throw Error('Invalid Rclone probe result');
+       probe.textContent=result.status==='reachable'?'Provider reachable':'Not verified (provider failure or unsupported operation)';
+     }catch(e){probe.textContent='Check failed';show(e.message,true);}
+   }),probe);
+   edit.append(button('Unlink',async()=>{
+     if(!confirm('Unlink this account reference in Neon? Provider credentials and the Rclone configuration will remain unchanged.'))return;
+     await call('nyx_connection_disconnect',{id:c.id});
+     await refresh();
+     show('Account reference revoked in Neon; provider credentials remain configured.');
+   }));
+   box.append(edit);
+   rcloneLinkedRoot.append(box);
+ }
+
+ const github=connections.filter(c=>c.provider==='github'&&c.status!=='revoked');
+ if(!github.length)root.append(el('p','No GitHub connections yet. Add one above.'));
+ for(const c of github){
   const box=el('div');box.className='card';
   const title=el('div');title.className='row';
   title.append(el('strong',c.displayName),el('span',c.provider),el('span',c.status));
