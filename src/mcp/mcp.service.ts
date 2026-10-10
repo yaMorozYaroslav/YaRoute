@@ -9,6 +9,7 @@ import { InitService } from '../init/init.service';
 import { JobStoreService } from '../storage/job-store.service';
 import { StorageService } from '../storage/storage.service';
 import { CopyJobPayload } from '../storage/storage.types';
+import { assessPotentialFinancialLoss } from '../connectors/financial-risk-preflight';
 
 @Injectable()
 export class McpService {
@@ -65,8 +66,32 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file'],
+        auxiliaryTools: ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
+      })),
+    );
+
+    server.registerTool(
+      'nyx_risk_preview',
+      {
+        title: 'Preview potential financial and operational loss (no execution)',
+        description: 'Read-only conservative risk preview. Warns about CI, deployments, transfers, growth, recurring jobs, outages, data loss, and forbidden financial actions. Input metadata is unverified and no billing details are accessed. This tool NEVER grants permission or executes an operation.',
+        inputSchema: z.object({
+          provider: z.enum(['github','gitlab','google-drive','mega','heroku','neon','other']),
+          operation: z.string().min(1).max(80),
+          paths: z.array(z.string().min(1).max(2048)).max(500).optional(),
+          estimatedCalls: z.number().int().nonnegative().optional(),
+          estimatedBytes: z.number().int().nonnegative().optional(),
+          recurring: z.boolean().optional(),
+          crossProvider: z.boolean().optional(),
+        }),
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async input => this.safeTool(async () => ({
+        ...assessPotentialFinancialLoss(input),
+        sourceVerification: 'unverified_caller_preview',
+        executed: false,
+        message: 'This preview does not authorize or execute an operation. The executor must independently verify risk, provider restrictions, and release gates.',
       })),
     );
 
