@@ -38,14 +38,19 @@ test('MCP-facing GitHub connector service rejects pending write/CI execution fea
  assert.equal(result.availableCapabilities.includes('ci:dispatch'),false);
 });
 
-test('MCP-facing Heroku connector service refuses deployment, scale and secret edits',async()=>{
+test('Legacy Heroku connector rows stay inert, not exposed in live GitHub-only MCP',async()=>{
  const {service,id}=svcFor('heroku');
- for(const permission of ['heroku:deploy','heroku:apps:restart',
-  'heroku:config:write','heroku:apps:create']){
-  await assert.rejects(()=>service.permissions('oauth:alice',id,[permission]),
-    /CONNECTOR_API_CAPABILITY_NOT_READY/);
- }
- const view=await service.permissions('oauth:alice',id,['heroku:apps:read']);
- assert.ok(view.availableCapabilities.includes('heroku:apps:read'));
- assert.equal(view.availableCapabilities.includes('heroku:deploy'),false);
+ await assert.rejects(()=>service.create('oauth:alice','heroku','Blocked'),
+   /CONNECTOR_PROVIDER_NOT_READY/);
+ await assert.rejects(()=>service.rename('oauth:alice',id,'Blocked'),
+   /CONNECTOR_PROVIDER_DISABLED/);
+ await assert.rejects(()=>service.permissions('oauth:alice',id,['heroku:apps:read']),
+   /CONNECTOR_PROVIDER_DISABLED/);
+ await assert.rejects(()=>service.resources('oauth:alice',id,[]),
+   /CONNECTOR_PROVIDER_DISABLED/);
+ await assert.rejects(()=>service.consumeQuota('oauth:alice',id),
+   /CONNECTOR_PROVIDER_DISABLED/);
+ await assert.rejects(()=>service.disconnect('oauth:alice',id),
+   /CONNECTOR_PROVIDER_DISABLED/);
+ assert.deepEqual(await service.list('oauth:alice'),[]);
 });
