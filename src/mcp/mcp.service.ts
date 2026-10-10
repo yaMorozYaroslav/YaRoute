@@ -81,7 +81,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_test','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -126,7 +126,7 @@ export class McpService {
 
     server.registerTool('nyx_connections_panel',{
       title:'Manage NestNyx connections',
-      description:'Open the GitHub-only NestNyx connections panel to authorize GitHub App and select repository permissions. This is an MCP auxiliary tool, not a Yaro CLI command.',
+      description:'Open the NestNyx MCP Apps panel: manage GitHub App connections, inspect Google Drive/MEGA Rclone remotes and run private read-only connectivity probes. Rclone credential editing is not supported. This is an MCP auxiliary tool, not a Yaro CLI command.',
       inputSchema:z.object({}),
       _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
@@ -336,6 +336,20 @@ export class McpService {
     },async()=>this.safeTool(()=>{
       this.connectorOwner();
       return this.storage.rcloneConnections();
+    }));
+
+    server.registerTool('nyx_rclone_connection_test',{
+      title:'Check an existing Google Drive or MEGA Rclone connection',
+      description:'Private, read-only provider connectivity probe for a remote already configured in Rclone. Returns a sanitized status and never modifies credentials or configuration. This is an auxiliary MCP Apps action, not a Yaro CLI command.',
+      inputSchema:z.object({
+        provider:z.enum(['google-drive','mega']),
+        name:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
+      }),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({provider,name})=>this.safeTool(()=>{
+      this.connectorOwner();
+      return this.storage.testRcloneConnection(provider,name);
     }));
 
     // Private-only operational tools. These are MCP auxiliaries and must not
