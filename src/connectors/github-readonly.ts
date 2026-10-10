@@ -90,7 +90,7 @@ export class GithubReadonlyConnector {
     if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
     return body.slice(0,25).map(x=>({
       sha:x.sha,summary:typeof x.commit?.message==='string'?
-        x.commit.message.slice(0,300).split('\\n')[0]:undefined,
+        x.commit.message.slice(0,300).split('\n')[0]:undefined,
       date:x.commit?.committer?.date,url:x.html_url,
     }));
   }
