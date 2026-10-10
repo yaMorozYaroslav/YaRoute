@@ -133,9 +133,9 @@ export class GithubAppService {
    * user-selected repo AND one read permission. No token is persisted.
    */
   async tokenFor(ownerId:string,connectionId:string,installationId:string,
-    repo:string,capability:ConnectorCapability):Promise<string> {
+    repo:string,capability:ConnectorCapability,boundary?:{branch?:string;path?:string}):Promise<string> {
     const c=await this.connections.registryPolicy().requireResource(ownerId,connectionId,capability,{
-      kind:'repository',id:repo,
+      kind:'repository',id:repo,...boundary,
     });
     if(c.provider!=='github'||c.installationId!==installationId) throw new Error('GITHUB_INSTALLATION_MISMATCH');
     if(!/^[\w.-]+\/[\w.-]+$/.test(repo)||repo.includes('..')) throw new Error('GITHUB_REPOSITORY_INVALID');
