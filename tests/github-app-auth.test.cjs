@@ -44,7 +44,9 @@ test('GitHub OAuth linking verifies the user-accessible installation and never s
   activateGithub:async(...args)=>{
     assert.deepEqual(args.slice(0,4),['oauth:user','pending-id','987','research-org']);
     assert.ok(args[4].includes('ci:read'));assert.ok(args[4].includes('issues:read'));
-    assert.equal(args[4].includes('issues:write'),false);
+    assert.equal(args[4].includes('issues:write'),true);
+    assert.equal(args[4].includes('contents:write'),false);
+    assert.equal(args[4].includes('pulls:write'),false);
     assert.deepEqual(args[5],['research-org/project']);
     assert.equal(JSON.stringify(args).includes('ghu_'),false);
     return{id:'pending-id',status:'active'};
