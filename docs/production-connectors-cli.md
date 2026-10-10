@@ -155,6 +155,14 @@ fail-closed preview and machine-readable warnings for:
 - unknown operations and invalid workload estimates;
 - outright forbidden finance and provisioning operations (never approvable).
 
+**Existing preview and monitor building blocks:** The new `nyx_risk_preview`
+MCP tool is strictly advisory and non-executing; its caller-supplied inputs
+are not authorization evidence. The `technical-usage-watchdog.ts` library
+detects unusual job/CI/deploy/API/transfer/storage behavior and recommends
+warnings or suspension. It does not currently monitor jobs in production,
+deliver notifications or stop workers. Its thresholds are technical defaults,
+not provider billing limits or guarantees of zero charges.
+
 **Execution policy**: a risk preview is not permission to execute. The Git and
 Heroku planners attach it to their non-executable plan responses. Workers, when
 implemented, MUST recompute risk using trusted job data, enforce the hard deny
