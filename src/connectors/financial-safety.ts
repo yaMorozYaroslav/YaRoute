@@ -23,20 +23,22 @@ const prohibitedCapabilities = new Set([
 /** Reject BOTH reads and writes to financial/payment/billing surfaces. */
 const forbiddenSegments = new Set([
   'billing', 'bill', 'billable', 'payment', 'payments', 'pay',
-  'paymentmethods', 'creditcards', 'cards', 'invoices', 'invoice',
+  'paymentmethods', 'paymentmethod', 'creditcards', 'creditcard', 'cards', 'card',
+  'finance', 'financial', 'stripe', 'paypal', 'adyen', 'paddle', 'braintree',
+  'invoices', 'invoice',
   'subscription', 'subscriptions', 'subscribe', 'purchase', 'purchases',
   'checkout', 'charges', 'charge', 'refund', 'refunds',
   'tariff', 'tariffs', 'pricing', 'priceplan', 'rateplan', 'plan', 'plans', 'tier', 'tiers',
   'paidplans', 'paidplan', 'planupgrade', 'planchanges',
   'addon', 'addons', 'add-on', 'marketplace', 'formation',
-  'dynosize', 'dynotype', 'scale', 'scaling',
+  'dynosize', 'dynotype', 'scale', 'scaling', 'paid', 'metered', 'quota',
+  'upgrade', 'downgrade', 'renew', 'recur', 'recurring',
   'provision', 'provisioning', 'costlimit', 'spendinglimit',
   'creditline', 'credits', 'costs', 'spend', 'spending',
 ]);
 
 function segments(action: string): string[] {
-  return action.toLowerCase()
-    .replace(/([a-z])([A-Z])/g, '$1:$2')
+  return action.replace(/([a-z])([A-Z])/g, '$1:$2').toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
 }
