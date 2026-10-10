@@ -1,28 +1,62 @@
 import { ConnectorRegistry, type ConnectorCapability } from './connector-registry';
+import { assertNoFinancialAccess, validateNonFinancialAction } from './financial-safety';
 
-/** Heroku administration requires app-scoped authorization and an approval receipt. */
+/**
+ * Heroku operations must NEVER include billing, plan changes, dyno scaling,
+ * paid resource creation or unrestricted configuration writes.
+ * A ChatGPT permission toggle cannot override this policy.
+ */
 export const HEROKU_OPERATIONS = {
- 'app.info':'heroku:apps:read',
- 'app.releases':'heroku:releases:read',
- 'app.logs':'heroku:logs:read',
- 'config.names':'heroku:config:names',
- 'config.set':'heroku:config:write',
- 'app.deploy':'heroku:deploy',
- 'app.restart':'heroku:apps:restart',
- 'app.create':'heroku:apps:create',
+  'app.info': 'heroku:apps:read',
+  'app.releases': 'heroku:releases:read',
+  'app.logs': 'heroku:logs:read',
+  'config.names': 'heroku:config:names',
+  'app.deploy': 'heroku:deploy',
+  'app.restart': 'heroku:apps:restart',
 } as const satisfies Record<string, ConnectorCapability>;
 
 export type HerokuOperation = keyof typeof HEROKU_OPERATIONS;
+
+/** Operations removed from the initial roadmap because of financial exposure. */
+export const FORBIDDEN_HEROKU_OPERATIONS = [
+  'app.create',
+  'config.set', // Unrestricted config writes may enable billable services.
+  'app.scale',
+  'app.plan',
+  'app.upgrade',
+  'addon.create',
+  'addon.change',
+  'payment.read',
+  'payment.update',
+  'billing.read',
+  'billing.update',
+] as const;
+
 export class HerokuOperationPlanner {
- constructor(private readonly registry: ConnectorRegistry) {}
- async plan(ownerId:string, connectionId:string, operation:HerokuOperation, resourceId:string) {
-  if (!Object.prototype.hasOwnProperty.call(HEROKU_OPERATIONS,operation)) throw new Error('HEROKU_OPERATION_UNSUPPORTED');
-  const accountOperation = operation === 'app.create';
-  const kind = accountOperation ? 'heroku-account' as const : 'heroku-app' as const;
-  const capability = HEROKU_OPERATIONS[operation];
-  await this.registry.requireResource(ownerId,connectionId,capability,{kind,id:resourceId});
-  return {operation,connectionId,resourceId,capability,approvalRequired:
-   ['config.set','app.deploy','app.restart','app.create'].includes(operation),
-   executor:'heroku-platform-api',executable:false};
- }
+  constructor(private readonly registry: ConnectorRegistry) {}
+
+  async plan(ownerId: string, connectionId: string, operation: string, resourceId: string) {
+    if ((FORBIDDEN_HEROKU_OPERATIONS as readonly string[]).includes(operation)) {
+      throw new Error('NYX_FINANCIAL_ACCESS_PERMANENTLY_FORBIDDEN');
+    }
+    // Also deny future financial operation names not on the known blacklist.
+    assertNoFinancialAccess(operation);
+    const allowed = validateNonFinancialAction(operation, Object.keys(HEROKU_OPERATIONS) as HerokuOperation[]);
+    const capability = HEROKU_OPERATIONS[allowed];
+    assertNoFinancialAccess(capability);
+    await this.registry.requireResource(ownerId, connectionId, capability, {
+      kind: 'heroku-app', id: resourceId,
+    });
+    // This ONLY returns a plan: there is no Heroku administration executor.
+    // Deployment/restart must be explicitly approved and separately screened.
+    return {
+      operation: allowed,
+      connectionId,
+      resourceId,
+      capability,
+      approvalRequired: ['app.deploy', 'app.restart'].includes(allowed),
+      executor: 'heroku-platform-api' as const,
+      executable: false as const,
+    };
+  }
 }
