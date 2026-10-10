@@ -176,6 +176,21 @@ technical metrics ONLY; provider billing, plans, pricing and cost settings
 are not connected to NYX. Budget caps/spending alerts at the provider remain
 manual owner actions outside NYX.
 
+**Committed pure watchdog:** `technical-usage-watchdog.ts` detects abnormal
+rates of CI runs, deployments, failed deploys, retries, provider API calls,
+data transfer, storage growth, file deletions and active automations.
+It recommends a warning or freezing further automations based on
+conservative PROVISIONAL technical thresholds; it does not fetch bills,
+change external spend caps, deliver notifications or actually stop jobs.
+Those interfaces remain P0 wiring tasks. Owner retains sole responsibility
+for configuring any provider-side financial controls.
+
+**New MCP surface:** `nyx_risk_preview` is a non-executing advisory tool.
+It accepts operation metadata and returns risks, warnings and manual
+prerequisites. Values supplied through ChatGPT are NOT trusted evidence,
+and the tool never authorizes an operation. The backend must regenerate
+preflight from trusted execution plans after integrating the worker.
+
 **Release blockers:** runtime dispatch gate, provider-specific restricted
 credentials, external broker isolation, end-to-end alert delivery, load tests,
 failure simulation, protected branch/workflow policies and post-execution
