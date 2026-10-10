@@ -40,6 +40,12 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       expires_at timestamptz NOT NULL
     )`);
     await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_link_expiry_idx ON nyx_connector_link_states(expires_at)');
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_connector_request_limits (
+      owner_id text NOT NULL,
+      window_hour timestamptz NOT NULL,
+      count integer NOT NULL,
+      PRIMARY KEY(owner_id,window_hour)
+    )`);
     this.registry = new ConnectorRegistry(this.repository);
   }
   async onModuleDestroy() { await this.pool?.end(); }
@@ -110,6 +116,21 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       [ownerId,id]);
     return {id,status:'revoked',providerUninstallRequired:true};
   }
+  /** Atomic owner-level hourly request budget across all NestJS instances. */
+  async consumeQuota(ownerId:string, id:string) {
+    await this.owned(ownerId,id);
+    const result=await this.db().query(`
+      INSERT INTO nyx_connector_request_limits(owner_id,window_hour,count)
+      VALUES($1,date_trunc('hour',now()),1)
+      ON CONFLICT(owner_id,window_hour)
+      DO UPDATE SET count=nyx_connector_request_limits.count+1
+      WHERE nyx_connector_request_limits.count < 60
+      RETURNING count
+    `,[ownerId]);
+    if(result.rowCount!==1)throw new Error('CONNECTOR_API_HOURLY_LIMIT');
+    return result.rows[0].count as number;
+  }
+
   async getOwned(ownerId:string, id:string) { return this.owned(this.owner(ownerId), id); }
   /**
    * Lazy repository wrapper: Nest constructs provider factories before onModuleInit.
