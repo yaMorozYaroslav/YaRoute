@@ -10,7 +10,13 @@ to Head require the user's approval and a separate verified generation.
 
 - MCP Apps resource `ui://nestnyx/connections/v2.html` with tool
   `nyx_connections_panel` and ChatGPT UI compatibility metadata.
-- Only GitHub appears in the panel and connection creation API. Old Heroku
+- The panel contains GitHub connection management plus a separate,
+  **read-only private Rclone inventory** of configured Google Drive and MEGA
+  remotes. Rclone names and logical area aliases are shown, without credentials,
+  remote options, drive paths or file contents. Presence in configuration is
+  **not** a live provider availability test. The Rclone inventory tool is
+  absent in public multi-user mode and requires the private Auth0 subject.
+- Only GitHub connections may be created in the panel. Old Heroku
   connections stay inert in the PostgreSQL database; no Heroku credentials
   or hosting access are granted by this integration.
 - GitHub repo metadata, files, issues, pull requests, Actions logs, branches,
@@ -66,10 +72,13 @@ the provider grant snapshot; do not copy provider secrets into ChatGPT.
    `NYX_PRIVATE_OAUTH_SUBJECTS`, `DATABASE_URL` and OAuth settings.
 5. In ChatGPT Settings → Plugins, refresh/reconnect NestNyx MCP at
    `https://dev-nest-nyx-0df80c227630.herokuapp.com/mcp`.
-6. Invoke `nyx_connections_panel`. Authenticate via Auth0; create a GitHub
-   connection using the numeric installation ID; choose repositories and
-   capabilities explicitly. Check that the UI renders.
-7. First test a read and then an innocuous `nyx/*` review branch.
+6. Invoke `nyx_connections_panel`. Authenticate via Auth0. Verify the
+   **Rclone storage connections** section lists your configured Google Drive
+   and MEGA remotes (no credential fields). If a remote does not appear,
+   check the private Rclone configuration; do not paste credentials into chat.
+7. Create a GitHub connection using the numeric installation ID; choose
+   repositories and capabilities explicitly. Check that the UI renders.
+8. First test a read and then an innocuous `nyx/*` review branch.
    Verify that direct default-branch changes are rejected.
 
 **Separate trust boundaries:** the connected ChatGPT GitHub plugin already
@@ -79,3 +88,14 @@ NestNyx GitHub App. Only the GitHub owner can authorize App permissions.
 **Not proved by code alone:** ChatGPT client discovery, MCP iframe rendering,
 OAuth round trip, Neon metadata initialization, live App write grant, or
 Heroku runtime deployment. Verify each after merging/redeploying.
+
+## Rclone visibility and trust boundary
+
+The new auxiliary tool `nyx_rclone_connections_list` (not a Yaro CLI
+command) enumerates only `rclone listremotes --type drive --exact` and
+`--type mega --exact` through the existing private `RcloneService`. The
+result contains provider, remote name, optional configured area aliases and
+`configured` status. It never reads files, provider account lists,
+OAuth credentials, Rclone config text or quotas. In public mode the tool
+is not registered and `StorageService.rcloneConnections()` fails closed.
+Other Rclone provider types are intentionally omitted for now.
