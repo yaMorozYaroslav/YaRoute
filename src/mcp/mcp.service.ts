@@ -12,8 +12,6 @@ import { CopyJobPayload } from '../storage/storage.types';
 import { assessPotentialFinancialLoss } from '../connectors/financial-risk-preflight';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
-import { HerokuReadonlyConnector } from '../connectors/heroku-readonly';
-import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 
@@ -30,8 +28,6 @@ export class McpService {
     private readonly commands: NyxCommandExecutor,
     private readonly connections: ConnectorsService,
     private readonly github: GithubReadonlyConnector,
-    private readonly heroku: HerokuReadonlyConnector,
-    private readonly herokuBroker: HerokuBrokerClient,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -53,7 +49,7 @@ export class McpService {
   private buildServer() {
     const server = new McpServer({
       name: 'NestNyx',
-      version: '0.8.0',
+      version: '0.8.1',
     });
 
     // Capability discovery is advisory: canonical Head/nyxcli.json defines semantics.
@@ -109,7 +105,7 @@ export class McpService {
     // MCP Apps connection manager. It is an authenticated UI resource, NOT an
     // alternate backend API or a way to bypass per-user MCP authorization.
     server.registerResource(
-      'NestNyx Connections', CONNECTIONS_PANEL_URI,
+      'NestNyx GitHub Connections', CONNECTIONS_PANEL_URI,
       {mimeType:'text/html;profile=mcp-app'},
       async () => ({contents:[{
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
@@ -122,9 +118,9 @@ export class McpService {
 
     server.registerTool('nyx_connections_panel',{
       title:'Manage NestNyx connections',
-      description:'Open the interactive NestNyx panel. Select names, permissions and resources; connect GitHub through its OAuth flow. No CLI, payments, billing or credentials in ChatGPT.',
+      description:'Open the GitHub-only NestNyx connections panel to authorize GitHub App and select repository permissions. This is an MCP auxiliary tool, not a Yaro CLI command.',
       inputSchema:z.object({}),
-      _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI}},
+      _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       schema:'nyx.connections.panel.v1',
@@ -132,9 +128,8 @@ export class McpService {
       connections:await this.connections.list(this.connectorOwner()),
       providers:[
         {id:'github',availability:'oauth_ready_if_configured'},
-        {id:'heroku',availability:'external_broker_required'},
       ],
-      note:'Connection panel prepared. OAuth and broker configuration are needed before external accounts work.',
+      note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
     })));
 
     server.registerTool('nyx_connections_list',{
@@ -148,8 +143,8 @@ export class McpService {
 
     server.registerTool('nyx_connection_create',{
       title:'Create a named connection',
-      description:'Create a PENDING GitHub or Heroku connection. No provider access is granted until verified external authorization.',
-      inputSchema:z.object({provider:z.enum(['github','heroku']),name:z.string().min(1).max(80)}),
+      description:'Create a PENDING GitHub App connection. No provider access is granted until verified GitHub authorization.',
+      inputSchema:z.object({provider:z.literal('github'),name:z.string().min(1).max(80)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
     },async ({provider,name})=>this.safeTool(()=>
       this.connections.create(this.connectorOwner(),provider,name)));
@@ -174,7 +169,7 @@ export class McpService {
       title:'Select resources of my connection',
       description:'Allow selected repositories or applications. Provider authorization is independently enforced.',
       inputSchema:z.object({id:z.string().uuid(),resources:z.array(z.object({
-        kind:z.enum(['repository','drive','folder','mega-root','heroku-app','heroku-account']),
+        kind:z.literal('repository'),
         id:z.string().min(1).max(512),
         capabilities:z.array(z.string().max(60)).max(40),
         pathPrefix:z.string().max(2048).optional(),
@@ -276,35 +271,6 @@ export class McpService {
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,runId})=>this.safeTool(()=>
       this.readConnectionApi(id,()=>this.github.jobs(this.connectorOwner(),id,repo,runId))));
-
-    server.registerTool('nyx_connection_verify_heroku',{
-      title:'Verify an existing Heroku app using the read-only external broker',
-      description:'Broker must independently authorize owner, connection and app; never accepts Heroku credentials or billing APIs.',
-      inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
-      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    },async({id,app})=>this.safeTool(async()=>{
-      const connection=await this.connections.getOwned(this.connectorOwner(),id);
-      if(connection.provider!=='heroku'||connection.status!=='pending')throw new Error('HEROKU_CONNECTION_NOT_PENDING');
-      const inspected=await this.herokuBroker.appInfo(this.connectorOwner(),id,app);
-      if(inspected.name!==app)throw new Error('HEROKU_BROKER_IDENTITY_MISMATCH');
-      return this.connections.activateVerifiedHerokuApp(this.connectorOwner(),id,app);
-    }));
-
-    server.registerTool('nyx_connection_heroku_info',{
-      title:'Read metadata for a selected Heroku app',
-      description:'Calls external finance-blind broker only. No Heroku token in NestNyx.',
-      inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
-      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    },async({id,app})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.heroku.appInfo(this.connectorOwner(),id,app))));
-
-    server.registerTool('nyx_connection_heroku_releases',{
-      title:'Read recent releases from a selected Heroku app',
-      description:'Fixed read-only broker operation; never accesses billing or configuration values.',
-      inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
-      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    },async({id,app})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.heroku.releases(this.connectorOwner(),id,app))));
 
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
