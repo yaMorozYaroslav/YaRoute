@@ -167,6 +167,18 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       installationId:String(result.rows[0].installation_id),
     };
   }
+  async activateVerifiedHerokuApp(ownerId:string,id:string,app:string) {
+    const connection=await this.owned(ownerId,id);
+    if(connection.provider!=='heroku'||connection.status!=='pending') throw new Error('HEROKU_CONNECTION_NOT_PENDING');
+    if(!/^[a-z][a-z0-9-]{1,28}[a-z0-9]$/.test(app))throw new Error('HEROKU_APP_INVALID');
+    const updated:ConnectorConnection={...connection,status:'active',
+      externalAccountId:'heroku:'+app,
+      providerCapabilities:['heroku:apps:read','heroku:releases:read'],
+      capabilities:[],resources:[]};
+    await this.repository!.save(updated);
+    return this.view(updated);
+  }
+
   async activateGithub(ownerId:string,id:string,installationId:string,account:string,
     grants:ConnectorCapability[],repos:string[]) {
     const c=await this.owned(ownerId,id);
