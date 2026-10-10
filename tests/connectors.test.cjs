@@ -64,3 +64,10 @@ test('GitHub CI reads use owner-bound installation token', async () => {
   await assert.rejects(() => api.runs('bob', 'conn1', 'org/repo'), /CONNECTOR_NOT_FOUND/);
   await assert.rejects(() => api.runs('alice', 'conn1', '../repo'), /GITHUB_REPOSITORY_INVALID/);
 });
+
+test('optional legacy labels suggested in order', () => {
+  const { suggestConnectionName } = require('../dist/connectors/connector-registry');
+  assert.equal(suggestConnectionName('google-drive', []), 'google_main');
+  assert.equal(suggestConnectionName('google-drive', ['google_main']), 'google_work');
+  assert.equal(suggestConnectionName('github', ['GitHub']), 'GitHub 2');
+});
