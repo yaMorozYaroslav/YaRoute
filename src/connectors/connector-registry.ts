@@ -5,6 +5,8 @@ export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:r
   'storage:write', 'storage:copy', 'storage:move', 'storage:delete',
   'git:inspect', 'git:clone', 'git:fetch', 'git:diff', 'git:branch',
   'git:commit', 'git:push', 'git:tag',
+  'git:checkout', 'git:merge', 'git:rebase', 'git:cherry-pick', 'git:revert',
+  'git:stash', 'git:reset', 'git:clean', 'git:worktree',
   'repository:metadata', 'pulls:read', 'pulls:write', 'issues:read', 'issues:write',
   'releases:read', 'releases:write',
   'heroku:apps:read', 'heroku:config:names', 'heroku:releases:read', 'heroku:logs:read',
