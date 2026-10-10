@@ -150,7 +150,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     if (!/^[1-9][0-9]{0,19}$/.test(installationId)) throw new Error('GITHUB_INSTALLATION_INVALID');
     const clientId = process.env.NYX_GITHUB_CLIENT_ID;
     const publicUrl = process.env.NYX_PUBLIC_URL;
-    if (!clientId || !/^[a-zA-Z0-9_-]+$/.test(clientId) ||
+    if (!clientId || !/^[a-zA-Z0-9_.-]+$/.test(clientId) ||
       !publicUrl || !/^https:\/\/[a-z0-9.-]+(?::443)?$/i.test(publicUrl.replace(/\/$/,''))) {
       throw new Error('GITHUB_OAUTH_NOT_CONFIGURED');
     }
