@@ -41,13 +41,19 @@ export class KeyEngine {
       if (!old || item.confidence > old.confidence) merged.set(key, item);
     }
     const all = [...merged.values()].sort((a,b) => b.confidence - a.confidence || a.id.localeCompare(b.id));
-    const active = all.length > 10 ? all.filter(x => x.blocked || x.confidence < 0.8).slice(0,5) : all;
-    const archived = all.length > 10 ? all.filter(x => !active.includes(x)) : [];
+    // Never silently discard uncertain or blocked candidates to meet a display cap.
+    // Archive only explicitly high-confidence, unblocked entries, retaining a full ledger.
+    const pending = all.filter(x => x.blocked || x.confidence < 0.8);
+    const ready = all.filter(x => !x.blocked && x.confidence >= 0.8);
+    const active = all.length > 10 ? [...pending, ...ready.slice(0, Math.max(0, 5 - pending.length))] : all;
+    const archived = all.length > 10 ? ready.filter(x => !active.includes(x)) : [];
     const next = legacy ? appendLegacyProposals(original, input.candidates, input.transactionId) : JSON.stringify({ ...parsed, candidates: active, archived: [...((parsed as any).archived ?? []), ...archived] }, null, 2) + '\n';
     const base = input.seedDirectory.replace(/\/$/, '') + '/key_' + input.transactionId;
     const mutations: { path: string; sha256: string }[] = [];
     const commit = async (path: string, value: string) => {
-      await this.store.writeNew(path, value);
+      const existing = await this.store.read(path);
+      if (existing !== null && existing !== value) throw new Error('KEY_TRANSACTION_CONFLICT');
+      if (existing === null) await this.store.writeNew(path, value);
       if (await this.store.read(path) !== value) throw new Error('KEY_READBACK_FAILED');
       mutations.push({ path, sha256: hash(value) });
     };
@@ -55,6 +61,7 @@ export class KeyEngine {
     await commit(base + '.temp_key.json', next);
     if (input.stage === 'oS') {
       for (const target of ['head','body','footer'] as const) {
+        // These are proposals only; no canonical seed is promoted without Footer validation.
         const items = all.filter(x => x.target === target && !x.blocked);
         if (!items.length) continue;
         await commit(base + '.' + target + '.seed.json', JSON.stringify({
@@ -70,7 +77,7 @@ export class KeyEngine {
       dispositions: { active: active.map(x=>x.id), archived: archived.map(x=>x.id) },
       diff: { before: original, after: next },
     }, null, 2) + '\n');
-    // Does not overwrite active temp_key: promotion must be a separate verified CAS operation.
+    // Does not overwrite active temp_key: promotion requires provider-backed CAS and Footer checkpoint.
     return { status: 'STAGED', stage: input.stage, mutations, activeCount: active.length, archivedCount: archived.length };
   }
 }
