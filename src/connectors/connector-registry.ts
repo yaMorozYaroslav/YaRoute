@@ -1,16 +1,18 @@
 /** Provider-neutral multi-tenant connection metadata. No credentials are stored here. */
-export type ConnectorProvider = 'github' | 'google-drive' | 'gitlab' | 'mega';
+export type ConnectorProvider = 'github' | 'google-drive' | 'gitlab' | 'mega' | 'heroku';
 export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:read', 'ci:dispatch',
   'storage:list', 'storage:stat', 'storage:read', 'storage:capacity', 'storage:index',
   'storage:write', 'storage:copy', 'storage:move', 'storage:delete',
   'git:inspect', 'git:clone', 'git:fetch', 'git:diff', 'git:branch',
   'git:commit', 'git:push', 'git:tag',
   'repository:metadata', 'pulls:read', 'pulls:write', 'issues:read', 'issues:write',
-  'releases:read', 'releases:write'] as const;
+  'releases:read', 'releases:write',
+  'heroku:apps:read', 'heroku:config:names', 'heroku:releases:read', 'heroku:logs:read',
+  'heroku:config:write', 'heroku:deploy', 'heroku:apps:create', 'heroku:apps:restart'] as const;
 export type ConnectorCapability = typeof CONNECTOR_CAPABILITIES[number];
 
 /** The user chooses a label and enabled permissions; provider grants are verified separately. */
-export type ConnectorResourceKind = 'repository' | 'drive' | 'folder' | 'mega-root';
+export type ConnectorResourceKind = 'repository' | 'drive' | 'folder' | 'mega-root' | 'heroku-app' | 'heroku-account';
 /** Explicit user-selected resource boundary. Provider grants are checked separately. */
 export interface ConnectorResourceRule {
   kind: ConnectorResourceKind;
@@ -44,20 +46,22 @@ function validCapabilities(values: readonly ConnectorCapability[]): boolean {
 const gitProviders = new Set<ConnectorProvider>(['github','gitlab']);
 export function supportsCapability(provider: ConnectorProvider, capability: ConnectorCapability): boolean {
   if (/^(git:|repository:|pulls:|issues:|releases:|ci:)/.test(capability)) return gitProviders.has(provider);
+  if (capability.startsWith('heroku:')) return provider === 'heroku';
   if (capability.startsWith('storage:')) return provider === 'google-drive' || provider === 'mega';
   return true;
 }
 export function validateResourceRules(provider: ConnectorProvider, rules: ConnectorResourceRule[]): ConnectorResourceRule[] {
   if (!Array.isArray(rules) || rules.length > 500) throw new Error('CONNECTOR_RESOURCES_INVALID');
   return rules.map(rule => {
-    if (!rule || !['repository','drive','folder','mega-root'].includes(rule.kind) ||
+    if (!rule || !['repository','drive','folder','mega-root','heroku-app','heroku-account'].includes(rule.kind) ||
       typeof rule.id !== 'string' || !rule.id || rule.id.length > 512 ||
       !Array.isArray(rule.capabilities) || !rule.capabilities.every(c => (CONNECTOR_CAPABILITIES as readonly string[]).includes(c) && supportsCapability(provider,c))) {
       throw new Error('CONNECTOR_RESOURCES_INVALID');
     }
     if (gitProviders.has(provider) !== (rule.kind === 'repository') ||
       (provider === 'google-drive' && !['drive','folder'].includes(rule.kind)) ||
-      (provider === 'mega' && rule.kind !== 'mega-root')) throw new Error('CONNECTOR_RESOURCE_PROVIDER_MISMATCH');
+      (provider === 'mega' && rule.kind !== 'mega-root') ||
+      (provider === 'heroku' && !['heroku-app','heroku-account'].includes(rule.kind))) throw new Error('CONNECTOR_RESOURCE_PROVIDER_MISMATCH');
     if (rule.kind === 'repository' && (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(rule.id) || rule.id.includes('..'))) throw new Error('CONNECTOR_REPOSITORY_INVALID');
     if (rule.pathPrefix !== undefined && (!rule.pathPrefix || rule.pathPrefix.startsWith('/') ||
       rule.pathPrefix.includes('\\') || rule.pathPrefix.length > 2048 ||
@@ -76,7 +80,7 @@ export const LEGACY_NAME_HINTS: Partial<Record<ConnectorProvider,readonly string
 export function suggestConnectionName(provider: ConnectorProvider, existingNames: string[]): string {
   const used = new Set(existingNames.map(n => n.trim().toLowerCase()));
   for (const hint of LEGACY_NAME_HINTS[provider] ?? []) if (!used.has(hint.toLowerCase())) return hint;
-  const base = {github:'GitHub',gitlab:'GitLab',mega:'MEGA','google-drive':'Google Drive'}[provider];
+  const base = {github:'GitHub',gitlab:'GitLab',mega:'MEGA',heroku:'Heroku','google-drive':'Google Drive'}[provider];
   let name = base, n = 1;
   while (used.has(name.toLowerCase())) name = base + ' ' + ++n;
   return name;
