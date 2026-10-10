@@ -1,0 +1,9 @@
+{
+  "name": "nestnyx-heroku-read-broker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Independently deployed finance-blind Heroku read-only API broker",
+  "engines": {"node": "22.x"},
+  "scripts": {"start": "node heroku-readonly.mjs"}
+}
