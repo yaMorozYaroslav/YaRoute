@@ -31,3 +31,28 @@ MCP Apps resource: \`ui://nestnyx/connections/v3.html\`. Entrypoint: \`nyx_conne
 4. Refresh the NestNyx MCP connection and open the **v3** panel.
 5. Confirm authenticated GitHub operations and Rclone inventory; test a non-critical Rclone remote. Confirm public mode rejects the private tool and that no secrets appear in responses.
 6. Treat missing app rendering, grants, backend deployment or OAuth as \`UNVERIFIED\`, not success.
+
+## Existing Neon/PostgreSQL multi-account template (this PR)
+
+The backend uses its existing \`DATABASE_URL\`, which may point to the owner's existing Neon project; it does **not** create or provision another database. This code change does not verify the contents of Neon, its connection string, or whether the running Heroku app currently has a healthy DB connection.
+
+The existing \`nyx_connector_connections\` table is the single metadata registry for both GitHub and private Rclone account references. It already stores immutable \`id\`, \`owner_id\`, \`provider\`, \`display_name\`, \`external_account_id\`, capabilities, resource restrictions, status and modification time. This PR adds a partial unique index on \`(owner_id, provider, external_account_id)\` for non-revoked Rclone references. Therefore, one OAuth owner can link multiple distinct Google Drive and MEGA remotes and give each its own label, while duplicate active bindings of the same remote are rejected. Previously revoked records remain historical, and legacy \`nyx_user_connections\` fixed slots are **not** auto-migrated or deleted.
+
+The panel supports **Link account**, **Rename**, **Test access** and **Unlink** for private Rclone references. \`nyx_rclone_connection_link\` persists a metadata row after verifying that the selected remote is in the currently configured private inventory. \`nyx_rclone_connection_test\` now accepts an **owned connection ID** instead of an arbitrary remote name and reads the provider and remote from the owner's persisted row. \`nyx_connection_disconnect\` revokes the owner record, but does **not** remove a remote from \`rclone.conf\` or revoke its provider credential. New bindings have \`pending\` status, empty effective/provider capabilities and zero selected resources; configured does **not** mean provider OAuth granted.
+
+### Separation of identity and secrets
+
+- Every MCP operation obtains its owner from verified OAuth JWT context; callers cannot set an \`owner_id\`. Repository queries and mutations are owner-scoped.
+- This is a **private, single-operator Rclone model**. Multiple accounts are for the same trusted operator. In the current runtime, Rclone credentials and roots are process-wide, so distinct allowed OAuth subjects must not be treated as isolated storage tenants. True public multi-user Rclone remains disabled.
+- Database rows contain only remote names and metadata. No Rclone config, tokens, passwords or encryption keys are written into Neon. The existing \`StorageConnectionsService\` encrypted fixed-slot schema is retained for compatibility, not used by this feature.
+- Full multi-tenant operation must first implement per-user encrypted provider credentials, per-user Rclone config execution, owner-bound jobs, migration of legacy tools, and reviewed credential rotation/revocation. Do not lift the public Rclone rejection gate before these are verified.
+- A database URL alone does not grant provider authorization, restore deleted credentials, or establish tenant isolation.
+
+### Acceptance checks
+
+1. Existing \`DATABASE_URL\` points to the intended Neon database; verify manually on the deployed app without disclosing its value.
+2. PostgreSQL table/index migration completes without overwriting existing rows.
+3. Two Rclone remotes of the same provider are stored under distinct stable IDs; owner-scoped list and rename/test/revoke are verified.
+4. An OAuth subject cannot operate on a connection ID owned by another subject.
+5. Public mode rejects operator-wide Rclone linking and probes; configured-only provider status is not represented as verified OAuth.
+6. After approved deploy, verify \`/health.commit\`, panel v3 UI, GitHub API behavior, database rows and private Rclone probe.
