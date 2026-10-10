@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Post, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { NyxKeyService } from './key.service';
 import { NyxCommandExecutor } from './command-executor.service';
 import { CommandRequest } from './runtime.schema';
@@ -33,6 +33,7 @@ export class NyxController {
 
   @Post('key')
   async key(@Body() input: { stage: 'oF' | 'oS'; scope?: 'local' | 'global'; transactionId: string; candidates?: Array<{ id: string; target: 'head' | 'body' | 'footer'; description: string; confidence: number; source: string; blocked?: boolean }> }) {
+    if (process.env.NYX_KEY_HTTP_ENABLED !== 'true') throw new ServiceUnavailableException('KEY_ENDPOINT_DISABLED_PENDING_AUTH_AND_CANONICAL_VALIDATION');
     try {
       if (!input || !['oF','oS'].includes(input.stage) || !/^[a-zA-Z0-9_-]{1,80}$/.test(input.transactionId) || (input.scope && !['local','global'].includes(input.scope)) || (input.candidates && (!Array.isArray(input.candidates) || input.candidates.length > 100))) throw new Error('KEY_REQUEST_INVALID');
       return await this.keys.execute(input);
