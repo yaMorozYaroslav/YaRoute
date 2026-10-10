@@ -1,16 +1,72 @@
-# Multi-user connectors (foundation)
+# Multi-user connector framework (foundation)
 
-ConnectorRegistry is a provider-neutral authorization boundary. Each connection is owned by a NestNyx user, and capabilities are checked before a provider adapter is invoked. The GitHub adapter currently supports **read-only Actions workflow, run and job metadata**.
+The new connector model has **no fixed slots, default account names, or default per-user permissions**.
 
-This is a library foundation, **not a deployed, user-connectable integration**. No routes, MCP tools, database migrations, OAuth callbacks, GitHub App registration or secrets are enabled by this commit.
+A user connects as many supported provider accounts as needed, chooses each connection's
+`displayName`, and selects the capabilities to enable. Connection IDs stay stable when
+names change. Each connection is scoped to an authenticated owner. Names are unique per
+owner (case-insensitive) at the PostgreSQL layer.
 
-## Production requirements (not yet implemented)
+## Separate three levels of permission
 
-1. Persist connection metadata in a tenant-scoped database with uniqueness and ownership constraints; never store tokens in Head/Body or ordinary records.
-2. Complete GitHub App installation/OAuth authorization, CSRF/state validation and installation-to-user access checks.
-3. Supply `GithubInstallationCredentials` through a secrets vault that issues short-lived installation tokens. Never accept client-provided bearer tokens.
-4. Resolve `ownerId` exclusively from verified NestNyx auth; never from request arguments. Check access to installation and repository on every operation.
-5. Add rate limits, pagination, audit events, token redaction, timeouts, and bounded API responses before exposing MCP tools.
-6. Keep writes and CI dispatch disabled until explicit scopes and approval flows exist.
+1. **Provider authorization:** What Google/GitHub actually granted, verified by the provider.
+   Stored as `providerCapabilities` metadata. Only trusted authorization/refresh code may
+   update it (a user-facing API must NEVER accept this field).
+2. **User-enabled permissions:** The subset the user wants NestNyx to perform, stored as
+   `capabilities`. Users can choose read-only or enable other supported actions. If they
+   select a capability that has not been granted externally, it is saved as a request but
+   cannot run; `setPermissions` reports `authorizationRequired`.
+3. **Action-specific authorization:** The backend must still verify user identity, resource
+   access, provider API permissions, and approvals for writes/destructive actions.
 
-Drive and Git share connector identity and permission management, **not** identical file semantics. Canonical Head command contracts remain authoritative.
+A permission selection in NestNyx **cannot grant Google scopes or GitHub App permissions**.
+Broader access requires the provider's consent/installation flow. Never imply that a
+requested capability is active before verification.
+
+## User-visible experience (planned)
+
+- Add connection: select provider, authenticate with OAuth/App installation, choose a name,
+  choose available permissions.
+- Manage: list, rename, enable/disable individual capabilities, verify, reconnect, disconnect.
+- Multiple connections may use the same provider and the same external account; identities
+  remain distinct and separately authorized.
+- All UI/MCP actions derive `ownerId` from verified NestNyx authentication, never user input.
+- Display names are labels only; use stable connection IDs for credentials and audit trails.
+
+There will be **no fixed `google_main`, `google_a`, etc. in the new connection manager**.
+Existing `PUBLIC_STORAGE_SCHEMA` slots remain temporarily as **legacy compatibility**.
+We will migrate their contents via verified user-owned mappings before retiring that code;
+do not delete existing Rclone remotes or rewrite current storage routes prematurely.
+
+## Code already committed
+
+- `ConnectorRegistry`: per-owner access, rename, permission selection, checking both
+  user-enabled capability and independently verified provider permission.
+- `PostgresConnectorRepository`: per-owner connection metadata, user-defined display names,
+  case-insensitive unique names, additive migration for early connector records.
+  Existing records gain a temporary name derived from their stable ID and empty provider
+  grants (fail-closed), requiring re-verification.
+- `GithubReadonlyConnector`: read-only Actions workflows, runs, and job metadata.
+
+## Not yet implemented or deployed
+
+These are library building blocks, not a connected multi-user interface. The database
+repository is not yet wired to NestJS; there are no connector routes, MCP tools, UI,
+OAuth callbacks, connection creation endpoints, credential vault, or GitHub App token
+issuer. New tests are committed but CI success has not yet been verified.
+
+Production prerequisites:
+
+1. Integrate authenticated user identity and persistent repository in NestJS.
+2. Implement authorized Google OAuth/GitHub App onboarding, callback state/CSRF checks,
+   refresh/installation tokens, encrypted storage and revocation.
+3. Derive provider grants from independently verified authorization responses; enforce
+   and periodically refresh grants and selected repository/resource access.
+4. Enforce per-user ownership on all operations, handle duplicate-name violations and
+   concurrent updates, rate limits, pagination, auditing, bounded API responses and errors.
+5. Verify read-only flows, then use explicit opt-in and approvals for write/delete/dispatch.
+6. Migrate legacy slot-based storage with readback verification before removing anything.
+
+Google Drive and Git share connector ownership and permission concepts but retain
+provider-specific resource semantics. Canonical Head remains authoritative for Yaro
+command behavior; this code is not a canonical core-bundle generation.
