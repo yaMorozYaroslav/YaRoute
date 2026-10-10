@@ -48,7 +48,7 @@ export function isFinanciallyProhibited(action: unknown): boolean {
   if (typeof action !== 'string' || !action.trim()) return true;
   const normalized = action.toLowerCase();
   if (prohibitedCapabilities.has(normalized)) return true;
-  const parts = segments(normalized);
+  const parts = segments(action); // Preserve camelCase boundaries before lowercasing.
   if (parts.some(part => forbiddenSegments.has(part))) return true;
 
   // Explicit compound spellings often used for billing APIs.
