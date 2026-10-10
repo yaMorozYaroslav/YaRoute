@@ -197,6 +197,37 @@ export class McpService {
     },async({id,installationId})=>this.safeTool(()=>
       this.connections.beginGithub(this.connectorOwner(),id,installationId)));
 
+    server.registerTool('nyx_connection_github_repository',{
+      title:'Inspect an authorized GitHub repository',
+      description:'Read-only GitHub REST repository metadata with repo-scoped App token.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.github.repository(this.connectorOwner(),id,repo)));
+
+    server.registerTool('nyx_connection_github_issues',{
+      title:'List open issues in my authorized repository',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.github.issues(this.connectorOwner(),id,repo)));
+
+    server.registerTool('nyx_connection_github_pulls',{
+      title:'List open pull requests in my authorized repository',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.github.pullRequests(this.connectorOwner(),id,repo)));
+
+    server.registerTool('nyx_connection_github_file',{
+      title:'Read a bounded text file from my authorized GitHub repository',
+      description:'Read-only Contents REST API. Limits files to 64 KiB and validates path and branch.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        path:z.string().min(1).max(600),ref:z.string().min(1).max(120)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,path,ref})=>this.safeTool(()=>
+      this.github.fileText(this.connectorOwner(),id,repo,path,ref)));
+
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
       description:'Read-only Actions API; owner, installation, selected repository and provider grants checked.',
