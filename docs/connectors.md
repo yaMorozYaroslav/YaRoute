@@ -1,3 +1,5 @@
+> **Superseded decision (2026-10-10):** No Git CLI or Heroku CLI access for NYX. Use scoped provider APIs only. See [API-only connector architecture](api-only-connectors.md). Earlier CLI-worker proposals below are historical and MUST NOT be implemented.
+
 # Multi-user connector framework (foundation)
 
 The new connector model has **no fixed slots, default account names, or default per-user permissions**.
