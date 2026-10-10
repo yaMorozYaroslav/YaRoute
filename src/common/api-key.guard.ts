@@ -13,6 +13,12 @@ export class ApiKeyGuard implements CanActivate {
       context.getClass(),
     ]);
     if (isPublic) return true;
+    // Never expose legacy process-wide Rclone/NYX endpoints, not even with a
+    // legacy API key, when the deployment accepts public OAuth tenants.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true') {
+      throw new UnauthorizedException('Legacy HTTP API disabled in public connector mode');
+    }
 
     const expected = process.env.NYX_API_KEY;
     if (!expected) throw new UnauthorizedException('NYX_API_KEY is not configured');
