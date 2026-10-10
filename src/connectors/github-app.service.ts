@@ -54,6 +54,7 @@ function verifiedGrants(permissions:Record<string,string>):ConnectorCapability[]
   const values=new Set<ConnectorCapability>(['repository:metadata']);
   if(['read','write'].includes(permissions.actions)) values.add('ci:read');
   if(['read','write'].includes(permissions.contents)) values.add('resources:read');
+  if(['read','write'].includes(permissions.contents)) values.add('releases:read');
   if(['read','write'].includes(permissions.issues)) values.add('issues:read');
   if(['read','write'].includes(permissions.pull_requests)) values.add('pulls:read');
   // Writes deliberately never inferred, regardless of broad installation grant.
@@ -63,6 +64,7 @@ const permissionsFor=(capability:ConnectorCapability):Record<string,'read'>=>{
   switch(capability) {
     case 'ci:read':return {metadata:'read',actions:'read'};
     case 'resources:read':return {metadata:'read',contents:'read'};
+    case 'releases:read':return {metadata:'read',contents:'read'};
     case 'issues:read':return {metadata:'read',issues:'read'};
     case 'pulls:read':return {metadata:'read',pull_requests:'read'};
     case 'repository:metadata':return {metadata:'read'};
