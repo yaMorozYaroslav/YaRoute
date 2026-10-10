@@ -116,6 +116,26 @@ Security is multi-layered: (1) typed operation allowlists, (2) registry denial,
 controls outside NYX. Never claim protection for a new provider without verifying
 the whole path. Billing settings must be managed manually outside NestNyx.
 
+### Financial controls are owner-only, outside NYX
+
+The owner explicitly requires that **all financial administration be performed
+manually by the owner on the external provider's own website/app**.
+This includes payment methods, purchases, billing access, subscriptions, tariffs,
+new paid apps, resource provisioning, spend budgets/caps, financial alerts and
+usage-based charging configuration. No MCP tool, CLI job, automation, internal UI
+button or interactive approval may authorize these operations.
+
+Owner approval for ordinary non-financial writes does not override the financial
+deny policy. NYX may apply static internal job-count/rate/time quotas and report
+technical resource usage (non-billing metadata); only the owner may establish or
+change provider-side spending limits and financial alerts.
+
+GitHub CI/deploy and Heroku runtime operations can incur indirect charges despite
+not being financial endpoints. Deny or gate those operations until restricted
+credentials, isolated execution, approved targets, and independent provider-side
+budget protections are verified. Never promise a zero-cost guarantee merely from
+denying named billing endpoints.
+
 ## Release gates
 
 1. Confirm current CI and security audit runs on the intended exact commit.
