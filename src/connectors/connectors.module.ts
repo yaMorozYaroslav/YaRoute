@@ -20,6 +20,6 @@ import { GithubOAuthController } from './github-oauth.controller';
         new HerokuReadonlyConnector(connections.registryPolicy(),broker),
       inject:[ConnectorsService,HerokuBrokerClient]},
   ],
-  exports:[ConnectorsService,GithubAppService,GithubReadonlyConnector,HerokuReadonlyConnector],
+  exports:[ConnectorsService,GithubAppService,GithubReadonlyConnector,HerokuReadonlyConnector,HerokuBrokerClient],
 })
 export class ConnectorsModule {}
