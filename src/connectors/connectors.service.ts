@@ -6,7 +6,7 @@ import { PostgresConnectorRepository } from './postgres-connector-repository';
 
 /** Production connectors are intentionally read-only until risk-enforced writes exist. */
 export const ENABLED_PROVIDER_API_CAPABILITIES = {
-  github: ['repository:metadata','resources:read','ci:read','issues:read','pulls:read','releases:read'],
+  github: ['repository:metadata','resources:read','contents:write','ci:read','issues:read','issues:write','pulls:read','pulls:write','releases:read'],
 } as const;
 
 import {
