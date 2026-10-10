@@ -27,7 +27,9 @@ test('MCP Apps panel has local operations and no external credential forms',()=>
  assert.match(CONNECTIONS_PANEL_HTML,/nyx_connection_verify_heroku/);
  assert.doesNotMatch(CONNECTIONS_PANEL_HTML,/type="password"/);
  assert.doesNotMatch(CONNECTIONS_PANEL_HTML,/https:\/\/cdn\./);
- const panelScript=CONNECTIONS_PANEL_HTML.match(/<script>([\\s\\S]*?)<\\/script>/)?.[1];
+ const scriptStart=CONNECTIONS_PANEL_HTML.indexOf('<script>')+8;
+ const scriptEnd=CONNECTIONS_PANEL_HTML.indexOf('</script>',scriptStart);
+ const panelScript=CONNECTIONS_PANEL_HTML.slice(scriptStart,scriptEnd);
  assert.ok(panelScript);
  assert.doesNotThrow(()=>new (require('node:vm').Script)(panelScript));
 });
