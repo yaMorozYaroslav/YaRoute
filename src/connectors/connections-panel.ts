@@ -160,7 +160,7 @@ function render(connections){
     box.append(field);
   }
   box.append(button('Disconnect',async()=>{
-    if(!confirm('Disconnect this account from NestNyx? GitHub App uninstall must be done separately in GitHub.'))return;
+    if(!confirm('Disconnect from NestNyx? You must separately revoke the GitHub App installation or external Heroku broker grant in the provider settings.'))return;
     await call('nyx_connection_disconnect',{id:c.id});await refresh();show('Connection revoked in NestNyx.');
   }));
   root.append(box);
