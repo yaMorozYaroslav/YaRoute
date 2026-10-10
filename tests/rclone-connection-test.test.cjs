@@ -61,7 +61,8 @@ test('Rclone probe stays private and app-only; panel renders results as text', (
   const panel = fs.readFileSync(path.join(__dirname, '../src/connectors/connections-panel.ts'), 'utf8');
   assert.ok(mcp.indexOf("server.registerTool('nyx_rclone_connection_test'") >
     mcp.indexOf("if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;"));
-  assert.match(mcp, /this\.storage\.testRcloneConnection\(provider,name\)/);
+  assert.match(mcp, /this\.connections\.testRclone\(this\.connectorOwner\(\),id\)/);
+  assert.match(mcp, /server\.registerTool\('nyx_rclone_connection_link'/);
   assert.match(mcp, /visibility:\['app'\]/);
   assert.match(panel, /Test access/);
   assert.match(panel, /nyx_rclone_connection_test/);
