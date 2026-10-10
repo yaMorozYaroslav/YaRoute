@@ -27,8 +27,9 @@ and one or more typed resource rules. A user may add many connections of one pro
 change a label, and choose effective permissions without gaining extra provider scopes.
 
 Resource rules can restrict Git to selected repositories and branches, Drive to a selected
-drive or folder root, MEGA to selected roots, and Heroku to selected apps or an account
-for explicit app creation. Empty resource selection means **no resource access**.
+drive or folder root, MEGA to selected roots, and Heroku to already-existing apps.
+Heroku account-level app creation is **permanently prohibited** due to financial risk.
+Empty resource selection means **no resource access**.
 
 All new functionality MUST check the intersection:
 verified authenticated owner + user enabled capability + provider grant +
@@ -65,22 +66,55 @@ Heroku supports a Platform API and CLI. Use the API for connection management;
 keep CLI/deployment jobs in a separate control plane so self-redeploy does not
 terminate the HTTP request holding authorization state.
 
-The committed `HerokuReadonlyConnector` supports app info, releases and config
-variable **names** only. The `HerokuOperationPlanner` names future operations:
-app info, releases, logs, config names, config set, app deploy/restart/create.
-Planning objects are never executable approvals.
+The committed `HerokuReadonlyConnector` is now **broker-backed**, not a
+Heroku bearer-token client. It exposes app info, releases and config variable **names**
+only. A separate restricted read broker must supply results and MUST never send token
+or config variable VALUES to NestNyx. There is no connected production broker yet.
 
-Production authorization must include separate Heroku user OAuth or scoped admin
-credentials, allowed apps, a secure secret vault, expiry and revocation.
-A connected Heroku account must not automatically imply app creation,
-billing changes, secret-value reads, or production deployment rights.
+The `HerokuOperationPlanner` supports read plans and future reviewed deploy/restart
+plans for already-existing approved apps. Plans are **not executable approvals**.
 
-Heroku admin writes require explicit approvals with non-replayable action receipts.
-`config.set` takes secret references entered via a secure UI or vault, never credential
-values in LLM-visible MCP arguments. Never return config values to ChatGPT.
+**Permanently prohibited:** payments, billing reads/writes, cards, invoices,
+subscriptions, upgrades/downgrades of tariffs or pricing, dyno scaling/formation,
+add-ons, purchases, marketplace buys, new paid resources, and automatic Heroku app
+creation. The old `heroku:apps:create` capability remains in the metadata type only
+to recognize legacy records; it is unavailable in selection and fail-closed at runtime.
+General `heroku:config:write` is also forbidden because it can activate billable
+integrations; a future narrow per-key secure operator may exist but must never
+support spend-affecting changes. This restriction is **not overrideable** by owner,
+automation, plugin settings, ChatGPT prompt, or a wider OAuth grant.
+
+The backend MUST NOT hold a broadly privileged Heroku API token with billing access.
+Only an independently isolated credential broker, with payment/billing routes denied
+and minimum provider permissions, may hold a token. If the provider cannot issue or
+broker a genuinely non-financial credential, leave that integration disconnected.
+Never connect billing accounts or credit cards to the NYX plugin.
+
+Heroku deployments and Git pushes can still indirectly create metered usage even
+without billing API access. Therefore require human review, approved release SHA,
+provider-side spend controls where available, rate/cost ceilings and restricted CI
+permissions. There is no truthful guarantee of zero indirect spend merely from
+blocking billing endpoints.
 Use GitHub Actions deployment workflow to deploy a reviewed SHA (already in repository,
 currently manual dispatch only), or an independently verified deployment worker.
 Log release IDs and health-check receipts, support rollback. Do not deploy automatically.
+
+## Immutable financial access boundary
+
+This is a standing, project-wide restriction for **all future connectors**, not just
+Heroku. NYX must never read payment details or initiate any immediate or recurring
+charge, change tariffs, pricing tiers, subscriptions or payment settings, buy add-ons,
+scale billable infrastructure, or provision paid resources.
+
+The `financial-safety.ts` policy rejects known finance operations even if a legacy
+record says permission is enabled and granted externally. The UI capability list
+excludes them and both connection and resource authorization fail closed.
+
+Security is multi-layered: (1) typed operation allowlists, (2) registry denial,
+(3) independent broker-side denial, (4) no broad payment-capable credentials,
+(5) no arbitrary shell for Git/Heroku/Drive, and (6) provider-side billing/spend
+controls outside NYX. Never claim protection for a new provider without verifying
+the whole path. Billing settings must be managed manually outside NestNyx.
 
 ## Release gates
 
