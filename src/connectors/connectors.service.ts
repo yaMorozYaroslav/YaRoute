@@ -1,7 +1,8 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { StorageService } from '../storage/storage.service';
+import { RcloneCredentialVaultService } from '../storage/rclone-credential-vault.service';
 import { ConnectorRegistry } from './connector-registry';
 import { PostgresConnectorRepository } from './postgres-connector-repository';
 
@@ -22,7 +23,8 @@ import {
  */
 @Injectable()
 export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
-  constructor(private readonly storage: StorageService) {}
+  constructor(private readonly storage: StorageService,
+    @Optional() private readonly vault?: RcloneCredentialVaultService) {}
 
   private pool?: Pool;
   private registry?: ConnectorRegistry;
@@ -93,8 +95,9 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       resources: resources ?? [], status,
       availableCapabilities: this.enabledCapabilities(provider),
       ...(provider === 'google-drive' || provider === 'mega'
-        ? { connectionType: 'private-rclone-reference', configurationChanged: false,
-            verification: 'configured_not_live_verified' } : {}),
+        ? { connectionType: this.vault?.isEnabled() ? 'isolated-credential-vault' : 'private-rclone-reference',
+            configurationChanged: false,
+            verification: this.vault?.isEnabled() ? 'credentials_unverified' : 'configured_not_live_verified' } : {}),
     };
   }
   private enabledCapabilities(provider: ConnectorProvider): ConnectorCapability[] {
@@ -136,9 +139,11 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
         typeof remoteName !== 'string' || !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName)) {
       throw new Error('RCLONE_REMOTE_INVALID');
     }
-    const inventory = await this.storage.rcloneConnections();
-    if (!inventory.remotes.some(remote => remote.provider === provider && remote.name === remoteName)) {
-      throw new Error('RCLONE_REMOTE_NOT_CONFIGURED');
+    if (!this.vault?.isEnabled()) {
+      const inventory = await this.storage.rcloneConnections();
+      if (!inventory.remotes.some(remote => remote.provider === provider && remote.name === remoteName)) {
+        throw new Error('RCLONE_REMOTE_NOT_CONFIGURED');
+      }
     }
     const existing = await this.policy().list(owner);
     if (existing.filter(c => c.status !== 'revoked').length >= 30) {
@@ -163,6 +168,16 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     if (connection.status === 'revoked' ||
         (connection.provider !== 'google-drive' && connection.provider !== 'mega')) {
       throw new Error('RCLONE_CONNECTION_NOT_AVAILABLE');
+    }
+    if (this.vault?.isEnabled()) {
+      const profile=await this.vault.load(ownerId,connection.id,connection.provider,
+        connection.externalAccountId);
+      if (!profile) return {connectionId:connection.id,
+        schema:'nyx.storage.rclone.probe.v1',provider:connection.provider,
+        name:connection.externalAccountId,status:'unverified',
+        reason:'ISOLATED_CREDENTIAL_NOT_PROVISIONED',configurationChanged:false};
+      return {connectionId:connection.id,...await this.storage.testIsolatedRcloneConnection(
+        connection.provider,connection.externalAccountId,profile)};
     }
     return { connectionId: connection.id,
       ...await this.storage.testRcloneConnection(connection.provider, connection.externalAccountId) };
@@ -210,6 +225,9 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     );
     await this.db().query('DELETE FROM nyx_connector_link_states WHERE owner_id=$1 AND connection_id=$2',
       [ownerId,id]);
+    if (previous.provider === 'google-drive' || previous.provider === 'mega') {
+      await this.vault?.revoke(ownerId,id);
+    }
     return {id,status:'revoked',externalRevocationRequired:true,provider:previous.provider,
       configurationChanged:false, metadataOnly:previous.provider !== 'github'};
   }
