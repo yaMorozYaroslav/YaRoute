@@ -1,5 +1,6 @@
 import { ConnectorRegistry, type ConnectorCapability } from './connector-registry';
 import { assertNoFinancialAccess, validateNonFinancialAction } from './financial-safety';
+import { assessPotentialFinancialLoss } from './financial-risk-preflight';
 
 /**
  * Heroku operations must NEVER include billing, plan changes, dyno scaling,
@@ -47,6 +48,8 @@ export class HerokuOperationPlanner {
     await this.registry.requireResource(ownerId, connectionId, capability, {
       kind: 'heroku-app', id: resourceId,
     });
+    const financialRisk = assessPotentialFinancialLoss({provider: 'heroku', operation: 'heroku:' + allowed});
+    if (financialRisk.decision === 'deny') throw new Error('NYX_FINANCIAL_RISK_BLOCKED');
     // This ONLY returns a plan: there is no Heroku administration executor.
     // Deployment/restart must be explicitly approved and separately screened.
     return {
@@ -54,7 +57,8 @@ export class HerokuOperationPlanner {
       connectionId,
       resourceId,
       capability,
-      approvalRequired: ['app.deploy', 'app.restart'].includes(allowed),
+      approvalRequired: financialRisk.mustNotify || ['app.deploy', 'app.restart'].includes(allowed),
+      financialRisk,
       executor: 'heroku-platform-api' as const,
       executable: false as const,
     };
