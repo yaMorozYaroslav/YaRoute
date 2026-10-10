@@ -1,9 +1,24 @@
 /** Provider-neutral multi-tenant connection metadata. No credentials are stored here. */
-export type ConnectorProvider = 'github' | 'google-drive' | 'gitlab';
-export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:read', 'ci:dispatch'] as const;
+export type ConnectorProvider = 'github' | 'google-drive' | 'gitlab' | 'mega';
+export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:read', 'ci:dispatch',
+  'storage:list', 'storage:stat', 'storage:read', 'storage:capacity', 'storage:index',
+  'storage:write', 'storage:copy', 'storage:move', 'storage:delete',
+  'git:inspect', 'git:clone', 'git:fetch', 'git:diff', 'git:branch',
+  'git:commit', 'git:push', 'git:tag',
+  'repository:metadata', 'pulls:read', 'pulls:write', 'issues:read', 'issues:write',
+  'releases:read', 'releases:write'] as const;
 export type ConnectorCapability = typeof CONNECTOR_CAPABILITIES[number];
 
 /** The user chooses a label and enabled permissions; provider grants are verified separately. */
+export type ConnectorResourceKind = 'repository' | 'drive' | 'folder' | 'mega-root';
+/** Explicit user-selected resource boundary. Provider grants are checked separately. */
+export interface ConnectorResourceRule {
+  kind: ConnectorResourceKind;
+  id: string;
+  capabilities: ConnectorCapability[];
+  pathPrefix?: string;
+  branches?: string[];
+}
 export interface ConnectorConnection {
   id: string; // Stable internal identity: never use the user-visible name as a credential key.
   ownerId: string;
@@ -12,6 +27,7 @@ export interface ConnectorConnection {
   externalAccountId: string;
   capabilities: ConnectorCapability[]; // User-enabled permissions (not OAuth scopes).
   providerCapabilities: ConnectorCapability[]; // Verified external grants; never client-editable.
+  resources?: ConnectorResourceRule[]; // No selected resources means deny resource operations.
   status: 'pending' | 'active' | 'revoked';
   installationId?: string;
 }
@@ -24,6 +40,46 @@ export interface ConnectorRepository {
 function validCapabilities(values: readonly ConnectorCapability[]): boolean {
   return Array.isArray(values) &&
     values.every(value => (CONNECTOR_CAPABILITIES as readonly string[]).includes(value));
+}
+const gitProviders = new Set<ConnectorProvider>(['github','gitlab']);
+export function supportsCapability(provider: ConnectorProvider, capability: ConnectorCapability): boolean {
+  if (/^(git:|repository:|pulls:|issues:|releases:|ci:)/.test(capability)) return gitProviders.has(provider);
+  if (capability.startsWith('storage:')) return provider === 'google-drive' || provider === 'mega';
+  return true;
+}
+export function validateResourceRules(provider: ConnectorProvider, rules: ConnectorResourceRule[]): ConnectorResourceRule[] {
+  if (!Array.isArray(rules) || rules.length > 500) throw new Error('CONNECTOR_RESOURCES_INVALID');
+  return rules.map(rule => {
+    if (!rule || !['repository','drive','folder','mega-root'].includes(rule.kind) ||
+      typeof rule.id !== 'string' || !rule.id || rule.id.length > 512 ||
+      !Array.isArray(rule.capabilities) || !rule.capabilities.every(c => (CONNECTOR_CAPABILITIES as readonly string[]).includes(c) && supportsCapability(provider,c))) {
+      throw new Error('CONNECTOR_RESOURCES_INVALID');
+    }
+    if (gitProviders.has(provider) !== (rule.kind === 'repository') ||
+      (provider === 'google-drive' && !['drive','folder'].includes(rule.kind)) ||
+      (provider === 'mega' && rule.kind !== 'mega-root')) throw new Error('CONNECTOR_RESOURCE_PROVIDER_MISMATCH');
+    if (rule.kind === 'repository' && (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(rule.id) || rule.id.includes('..'))) throw new Error('CONNECTOR_REPOSITORY_INVALID');
+    if (rule.pathPrefix !== undefined && (!rule.pathPrefix || rule.pathPrefix.startsWith('/') ||
+      rule.pathPrefix.includes('\\') || rule.pathPrefix.length > 2048 ||
+      rule.pathPrefix.split('/').some(p => !p || p === '.' || p === '..'))) throw new Error('CONNECTOR_PATH_INVALID');
+    if (rule.branches !== undefined && (rule.kind !== 'repository' || !Array.isArray(rule.branches) ||
+      !rule.branches.length || rule.branches.length > 50 ||
+      rule.branches.some(b => !/^[A-Za-z0-9_.\/-]{1,120}$/.test(b) || b.includes('..') || b.startsWith('-')))) throw new Error('CONNECTOR_BRANCHES_INVALID');
+    return {...rule,capabilities:[...new Set(rule.capabilities)]};
+  });
+}
+/** Old fixed slots may be offered as editable suggestions, never enforced. */
+export const LEGACY_NAME_HINTS: Partial<Record<ConnectorProvider,readonly string[]>> = {
+  'google-drive':['google_main','google_work','google_a','google_b','google_c','google_d'],
+  mega:['mega_main','mega_work'],
+};
+export function suggestConnectionName(provider: ConnectorProvider, existingNames: string[]): string {
+  const used = new Set(existingNames.map(n => n.trim().toLowerCase()));
+  for (const hint of LEGACY_NAME_HINTS[provider] ?? []) if (!used.has(hint.toLowerCase())) return hint;
+  const base = {github:'GitHub',gitlab:'GitLab',mega:'MEGA','google-drive':'Google Drive'}[provider];
+  let name = base, n = 1;
+  while (used.has(name.toLowerCase())) name = base + ' ' + ++n;
+  return name;
 }
 export function validateConnectionName(value: string): string {
   if (typeof value !== 'string') throw new Error('CONNECTOR_NAME_INVALID');
@@ -67,7 +123,7 @@ export class ConnectorRegistry {
     authorizationRequired: ConnectorCapability[];
   }> {
     const connection = await this.owned(ownerId, connectionId);
-    if (!validCapabilities(capabilities)) throw new Error('CONNECTOR_PERMISSIONS_INVALID');
+    if (!validCapabilities(capabilities) || capabilities.some(c => !supportsCapability(connection.provider,c))) throw new Error('CONNECTOR_PERMISSIONS_INVALID');
     const selected = [...new Set(capabilities)];
     const updated = { ...connection, capabilities: selected };
     await this.repository.save(updated);
@@ -77,11 +133,32 @@ export class ConnectorRegistry {
     };
   }
 
+  async setResources(ownerId: string, connectionId: string, resources: ConnectorResourceRule[]): Promise<ConnectorConnection> {
+    const connection = await this.owned(ownerId, connectionId);
+    const updated = {...connection,resources:validateResourceRules(connection.provider,resources)};
+    await this.repository.save(updated);
+    return updated;
+  }
   async require(ownerId: string, connectionId: string, capability: ConnectorCapability): Promise<ConnectorConnection> {
     const connection = await this.owned(ownerId, connectionId);
     if (connection.status !== 'active') throw new Error('CONNECTOR_INACTIVE');
-    if (!connection.capabilities.includes(capability)) throw new Error('CONNECTOR_FORBIDDEN');
+    if (!supportsCapability(connection.provider,capability) || !connection.capabilities.includes(capability)) throw new Error('CONNECTOR_FORBIDDEN');
     if (!connection.providerCapabilities.includes(capability)) throw new Error('CONNECTOR_PROVIDER_PERMISSION_REQUIRED');
+    return connection;
+  }
+  async requireResource(ownerId: string, connectionId: string, capability: ConnectorCapability,
+    resource: {kind: ConnectorResourceKind; id: string; path?: string; branch?: string}): Promise<ConnectorConnection> {
+    const connection = await this.require(ownerId,connectionId,capability);
+    if (resource.path !== undefined && (resource.path.startsWith('/') || resource.path.includes('\\') ||
+      resource.path.split('/').some(p => p === '.' || p === '..'))) throw new Error('CONNECTOR_PATH_INVALID');
+    if (!(connection.resources ?? []).some(rule =>
+      rule.kind === resource.kind && rule.id.toLowerCase() === resource.id.toLowerCase() &&
+      rule.capabilities.includes(capability) &&
+      (!rule.pathPrefix || (resource.path !== undefined &&
+        (resource.path === rule.pathPrefix || resource.path.startsWith(rule.pathPrefix + '/')))) &&
+      (!rule.branches?.length || (resource.branch !== undefined && rule.branches.includes(resource.branch))))) {
+      throw new Error('CONNECTOR_RESOURCE_FORBIDDEN');
+    }
     return connection;
   }
 }
