@@ -106,12 +106,16 @@ test('Git operation plans include risk warnings and remain nonexecutable', async
       capabilities:['git:inspect','git:push']}],
   });
   const planner = new GitOperationPlanner(github);
-  const push = await planner.plan('oauth:user','g','push','team/service');
-  assert.equal(push.financialRisk.decision, 'warn-and-hold');
-  assert.equal(push.requiresApproval, true);
-  assert.equal(push.executable, false);
-  const status = await planner.plan('oauth:user','g','status','team/service');
-  assert.equal(status.financialRisk.decision, 'allow-low-risk-read');
+  await assert.rejects(
+    () => planner.plan('oauth:user','g','push','team/service'),
+    /NYX_GIT_CLI_DISABLED_USE_PROVIDER_API/,
+  );
+  await assert.rejects(
+    () => planner.plan('oauth:user','g','status','team/service'),
+    /NYX_GIT_CLI_DISABLED_USE_PROVIDER_API/,
+  );
+  const apiRisk = preview('github', 'git:push');
+  assert.equal(apiRisk.decision, 'warn-and-hold');
 });
 
 test('Heroku deployment plans include warnings and never authorize billing actions', async () => {
