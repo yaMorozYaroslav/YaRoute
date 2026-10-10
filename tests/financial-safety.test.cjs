@@ -39,7 +39,8 @@ test('financial deny policy is non-overridable and keeps safe reads', async () =
     'subscription:renew', 'plan:upgrade', 'plans:change',
     'invoices:list', 'payment-method:add', 'pricing:tier',
     '/apps/sample-app/formation', '/account/billing',
-    'purchase.subscription', 'addon:create',
+    'purchase.subscription', 'addon:create', 'Stripe:refund', 'PayPal:checkout',
+    'changePlan', 'changeTier', 'upgradeQuota', 'createPaidResource',
   ]) {
     assert.equal(isFinanciallyProhibited(action), true, action);
     assert.throws(() => assertNoFinancialAccess(action),
