@@ -128,3 +128,40 @@ connection has been tested end-to-end.
 - Test production deployment rollback without touching finances.
 - Legacy Rclone/global storage MCP tools must never be exposed to public
   users; database and operational credentials must remain private.
+
+## Implementation update — GitHub REST coverage and release boundaries
+
+The GitHub read-only connector now additionally supports **branches, recent
+commits on a selected branch, and release metadata**. These are available as
+`nyx_connection_github_branches`, `nyx_connection_github_commits`, and
+`nyx_connection_github_releases` MCP tools. The production user-selectable
+API capabilities remain **read-only**: repository metadata, contents,
+Actions inspection, issues, pull requests, and releases. Selecting a branch
+restriction prevents unbounded branch enumeration and all calls require
+matching user, GitHub installation, selected repository and capabilities.
+
+The NestNyx **Connections Panel is implemented and registered in source** through
+`nyx_connections_panel` and the MCP Apps UI resource. It has not been
+verified visually in the live ChatGPT application until a manual, reviewed
+Heroku deployment and plugin reconnection happen. Both GitHub and Heroku
+brokers remain disabled without provider configuration.
+
+Security tests cover branch/path restrictions, denial of cross-tenant GitHub
+reads, OAuth installation and read-only token permissions, Heroku broker
+denial of financial operations, the production API write-capability gate,
+and the historical Git CLI denial.
+
+**Do not grant the GitHub App repository Contents write, Actions write,
+Workflows write, secrets access or administration rights for initial testing.**
+The existing Heroku deployment workflow should remain manually dispatched.
+No shell, Git CLI or Heroku CLI is exposed by new connectors.
+
+Never share App ID/client secret/private-key PEM, Heroku OAuth token, OAuth
+subject, broker secret, connection credential, Rclone config, or database
+password through ChatGPT. Identifier values such as App ID may be non-secret,
+but keeping all configuration within your own provider settings avoids mistakes.
+
+The provider-billing and resource-sizing protections remain outside NestNyx
+and under your personal manual control. Creating the separate Heroku broker
+may itself incur infrastructure charges; choose and authorize its host
+manually before provisioning anything.
