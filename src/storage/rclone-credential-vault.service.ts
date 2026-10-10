@@ -69,15 +69,13 @@ export class RcloneCredentialVaultService implements OnModuleInit, OnModuleDestr
     assertSingleRcloneProfile(provider,remote,profile);
     const iv=randomBytes(12);
     const enc=createCipheriv('aes-256-gcm',this.key!,iv);enc.setAAD(aad);
-    const packed=Buffer.concat([iv,enc.getAuthTag ? Buffer.alloc(0) : Buffer.alloc(0)]);
     // Finalize before reading the GCM tag.
     const ct=Buffer.concat([enc.update(profile,'utf8'),enc.final()]);
     const sealed=Buffer.concat([iv,enc.getAuthTag(),ct]).toString('base64');
-    packed.fill(0);
     const sql=[
       'INSERT INTO nyx_rclone_credential_vault(owner_id,connection_id,provider,remote_name,ciphertext)',
       'SELECT $1,$2,$3,$4,$5 FROM nyx_connector_connections c',
-      "WHERE c.owner_id=$1 AND c.id=$2 AND c.provider=$3 AND c.external_account_id=$4 AND c.status <> 'revoked'",
+      "WHERE c.owner_id=$1 AND c.id=$2::text AND c.provider=$3 AND c.external_account_id=$4 AND c.status <> 'revoked'",
       'ON CONFLICT(owner_id,connection_id) DO UPDATE SET provider=EXCLUDED.provider,',
       'remote_name=EXCLUDED.remote_name,ciphertext=EXCLUDED.ciphertext,updated_at=now()',
       'RETURNING connection_id',
@@ -90,7 +88,7 @@ export class RcloneCredentialVaultService implements OnModuleInit, OnModuleDestr
     const db=this.db(),aad=this.aad(owner,id,provider,remote);
     const sql=[
       'SELECT v.ciphertext FROM nyx_rclone_credential_vault v',
-      'JOIN nyx_connector_connections c ON c.id=v.connection_id',
+      'JOIN nyx_connector_connections c ON c.id=v.connection_id::text',
       'WHERE v.owner_id=$1 AND v.connection_id=$2 AND v.provider=$3 AND v.remote_name=$4',
       "AND c.owner_id=$1 AND c.provider=$3 AND c.external_account_id=$4 AND c.status <> 'revoked'",
     ].join(' ');
