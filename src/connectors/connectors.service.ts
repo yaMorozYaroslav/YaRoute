@@ -107,7 +107,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     return this.view(await this.policy().setResources(this.owner(ownerId), id, rules));
   }
   async disconnect(ownerId: string, id: string) {
-    await this.owned(ownerId,id);
+    const previous=await this.owned(ownerId,id);
     await this.db().query(
       `UPDATE nyx_connector_connections SET status='revoked',
        capabilities='[]'::jsonb, provider_capabilities='[]'::jsonb,
@@ -117,7 +117,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     );
     await this.db().query('DELETE FROM nyx_connector_link_states WHERE owner_id=$1 AND connection_id=$2',
       [ownerId,id]);
-    return {id,status:'revoked',providerUninstallRequired:true};
+    return {id,status:'revoked',externalRevocationRequired:true,provider:previous.provider};
   }
   /** Atomic owner-level hourly request budget across all NestJS instances. */
   async consumeQuota(ownerId:string, id:string) {
