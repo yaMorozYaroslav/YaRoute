@@ -66,5 +66,7 @@ test('Rclone probe stays private and app-only; panel renders results as text', (
   assert.match(mcp, /visibility:\['app'\]/);
   assert.match(panel, /Test access/);
   assert.match(panel, /nyx_rclone_connection_test/);
-  assert.match(panel, /checkStatus\.textContent/);
+  assert.match(panel, /probe\.textContent/);
+  assert.match(panel, /nyx_rclone_connection_link/);
+  assert.match(panel, /rclone-linked-list/);
 });
