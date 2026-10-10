@@ -19,11 +19,12 @@ export class StorageConnectionsService implements OnModuleInit, OnModuleDestroy 
   async onModuleInit() {
     if (process.env.NYX_DEPLOYMENT_MODE !== 'public') return;
     const encoded = process.env.NYX_STORAGE_ENCRYPTION_KEY || '';
+    if (!/^[A-Za-z0-9+/]{43}=$/.test(encoded)) throw new Error('NYX_STORAGE_ENCRYPTION_KEY must be canonical base64');
     const key = Buffer.from(encoded, 'base64');
     if (key.length !== 32) throw new Error('NYX_STORAGE_ENCRYPTION_KEY must be a base64-encoded 32-byte key');
     if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required for public storage');
     this.key = key;
-    this.pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: true } });
+    this.pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_user_connections (
       owner text NOT NULL,
       slot text NOT NULL,
