@@ -24,11 +24,13 @@ test('oS generates target-specific proposal with provenance', async () => {
  assert.equal(seed.status,'pending_validation');
  assert.equal(seed.candidates[0].source,'conversation');
 });
-test('repeat transaction cannot overwrite immutable artifacts', async () => {
+test('identical transaction retry reuses verified immutable artifacts', async () => {
  const store = new MemoryStore(); const engine=new KeyEngine(store);
  const req={stage:'oF',scope:'local',keyPath:'temp_key.json',seedDirectory:'transactions',candidates:[candidate],transactionId:'t003'};
  await engine.execute(req);
- await assert.rejects(()=>engine.execute(req),/KEY_ALREADY_EXISTS/);
+ const retried=await engine.execute(req);
+ assert.equal(retried.status,'STAGED');
+ assert.equal(retried.mutations.length,2);
 });
 test('missing temp KEY fails closed', async () => {
  await assert.rejects(()=>new KeyEngine(new MemoryStore()).execute({stage:'oF',scope:'local',keyPath:'absent',seedDirectory:'transactions',candidates:[],transactionId:'t004'}),/KEY_SOURCE_MISSING/);
