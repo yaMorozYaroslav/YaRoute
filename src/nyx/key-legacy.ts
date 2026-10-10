@@ -1,4 +1,4 @@
-import { KeyCandidate } from './key-engine';
+import type { KeyCandidate } from './key-engine';
 
 /** Parse legacy plain-text KEY without discarding its provenance or surrounding sections. */
 export function parseLegacyKey(text: string): { items: KeyCandidate[]; raw: string } {
@@ -19,9 +19,10 @@ export function parseLegacyKey(text: string): { items: KeyCandidate[]; raw: stri
 /** Append a distinct proposal section; never reinterpret legacy items as ready-to-merge seeds. */
 export function appendLegacyProposals(raw: string, proposals: KeyCandidate[], transactionId: string): string {
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(transactionId)) throw new Error('KEY_TRANSACTION_INVALID');
+  if (!proposals.length) return raw;
   const lines = proposals.map(item => {
-    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(item.id) || !['head','body','footer'].includes(item.target) || !item.description || /[\r\n]/.test(item.description)) throw new Error('KEY_CANDIDATE_INVALID');
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(item.id) || !['head','body','footer'].includes(item.target) || !item.description || /[\r\n]/.test(item.description) || !item.source || /[\r\n]/.test(item.source)) throw new Error('KEY_CANDIDATE_INVALID');
     return '- [' + item.target.toUpperCase() + '] ' + item.id + ': ' + item.description + ' (source: ' + item.source + ')';
   });
-  return raw.replace(/\s*$/, '') + '\n\nPending KEY proposals — ' + transactionId + '\n' + lines.join('\n') + '\n';
+  return raw + (raw.endsWith('\n') ? '\n' : '\n\n') + 'Pending KEY proposals — ' + transactionId + '\n' + lines.join('\n') + '\n';
 }
