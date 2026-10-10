@@ -2,7 +2,7 @@ import { ConnectorRegistry, type ConnectorCapability } from './connector-registr
 
 /** Implementations must obtain short-lived installation tokens from a secure vault. */
 export interface GithubInstallationCredentials {
-  tokenFor(ownerId: string, connectionId: string, installationId: string, repo: string, capability: ConnectorCapability): Promise<string>;
+  tokenFor(ownerId: string, connectionId: string, installationId: string, repo: string, capability: ConnectorCapability, boundary?: {branch?:string; path?:string}): Promise<string>;
 }
 export type GithubHttp = (url: string, init: RequestInit) => Promise<Response>;
 export class GithubReadonlyConnector {
@@ -11,11 +11,11 @@ export class GithubReadonlyConnector {
     private readonly credentials: GithubInstallationCredentials,
     private readonly http: GithubHttp = fetch,
   ) {}
-  private async request(ownerId: string, connectionId: string, repo: string, suffix: string, capability: ConnectorCapability = 'ci:read') {
+  private async request(ownerId: string, connectionId: string, repo: string, suffix: string, capability: ConnectorCapability = 'ci:read', boundary?: {branch?:string; path?:string}) {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..')) throw new Error('GITHUB_REPOSITORY_INVALID');
-    const connection = await this.registry.requireResource(ownerId, connectionId, capability, {kind: 'repository', id: repo});
+    const connection = await this.registry.requireResource(ownerId, connectionId, capability, {kind: 'repository', id: repo, ...boundary});
     if (connection.provider !== 'github' || !connection.installationId) throw new Error('GITHUB_INSTALLATION_REQUIRED');
-    const token = await this.credentials.tokenFor(ownerId, connectionId, connection.installationId, repo, capability);
+    const token = await this.credentials.tokenFor(ownerId, connectionId, connection.installationId, repo, capability, boundary);
     if (!token) throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
     const response = await this.http('https://api.github.com/repos/' + repo + suffix, {
       method: 'GET',
@@ -60,7 +60,7 @@ export class GithubReadonlyConnector {
        ref.includes('..')||ref.startsWith('-'))throw new Error('GITHUB_BRANCH_INVALID');
     const safePath=path.split('/').map(encodeURIComponent).join('/');
     const body=await this.request(ownerId,connectionId,repo,
-      '/contents/'+safePath+'?ref='+encodeURIComponent(ref),'resources:read');
+      '/contents/'+safePath+'?ref='+encodeURIComponent(ref),'resources:read', {path,branch:ref});
     if(body.type!=='file'||typeof body.size!=='number'||body.size>65536||
        body.encoding!=='base64'||typeof body.content!=='string') {
        throw new Error('GITHUB_FILE_UNSUPPORTED_OR_TOO_LARGE');
@@ -70,12 +70,48 @@ export class GithubReadonlyConnector {
     return {path:body.path,sha:body.sha,size:decoded.length,text:decoded.toString('utf8')};
   }
 
+  /** Read-only branch metadata. A branch-scoped rule cannot enumerate every branch. */
+  async branches(ownerId:string,connectionId:string,repo:string) {
+    const body=await this.request(ownerId,connectionId,repo,
+      '/branches?per_page=30','resources:read');
+    if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
+    return body.slice(0,30).map(x=>({
+      name:x.name,protected:x.protected,sha:x.commit?.sha,
+    }));
+  }
+
+  async commits(ownerId:string,connectionId:string,repo:string,branch:string) {
+    if(typeof branch!=='string'||!branch||branch.length>120||
+      !/^[A-Za-z0-9_./-]+$/.test(branch)||branch.includes('..')||branch.startsWith('-')||
+      branch.startsWith('/'))throw new Error('GITHUB_BRANCH_INVALID');
+    const body=await this.request(ownerId,connectionId,repo,
+      '/commits?per_page=25&sha='+encodeURIComponent(branch),
+      'resources:read',{branch});
+    if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
+    return body.slice(0,25).map(x=>({
+      sha:x.sha,summary:typeof x.commit?.message==='string'?
+        x.commit.message.slice(0,300).split('\\n')[0]:undefined,
+      date:x.commit?.committer?.date,url:x.html_url,
+    }));
+  }
+
+  async releases(ownerId:string,connectionId:string,repo:string) {
+    const body=await this.request(ownerId,connectionId,repo,
+      '/releases?per_page=25','releases:read');
+    if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
+    return body.slice(0,25).map(x=>({
+      id:x.id,name:typeof x.name==='string'?x.name.slice(0,160):undefined,
+      tag:x.tag_name,draft:x.draft,prerelease:x.prerelease,
+      publishedAt:x.published_at,url:x.html_url,
+    }));
+  }
+
   async workflows(ownerId: string, connectionId: string, repo: string) {
     return this.request(ownerId, connectionId, repo, '/actions/workflows?per_page=30');
   }
   async runs(ownerId: string, connectionId: string, repo: string, branch = 'master') {
     if (!/^[A-Za-z0-9_./-]{1,120}$/.test(branch) || branch.includes('..')) throw new Error('GITHUB_BRANCH_INVALID');
-    return this.request(ownerId, connectionId, repo, '/actions/runs?per_page=30&branch=' + encodeURIComponent(branch));
+    return this.request(ownerId, connectionId, repo, '/actions/runs?per_page=30&branch=' + encodeURIComponent(branch),'ci:read',{branch});
   }
   async jobs(ownerId: string, connectionId: string, repo: string, runId: number) {
     if (!Number.isSafeInteger(runId) || runId < 1) throw new Error('GITHUB_RUN_INVALID');
