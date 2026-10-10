@@ -6,7 +6,8 @@ const { GithubReadonlyConnector } = require('../dist/connectors/github-readonly'
 const item = {
   id: 'conn1', ownerId: 'alice', displayName: 'Personal GitHub',
   provider: 'github', externalAccountId: 'org', installationId: '123',
-  capabilities: ['ci:read'], providerCapabilities: ['ci:read', 'contents:write'], status: 'active',
+  capabilities: ['ci:read'], providerCapabilities: ['ci:read', 'contents:write'],
+  resources: [{kind:'repository',id:'org/repo',capabilities:['ci:read']}], status: 'active',
 };
 const repository = {
   get: async id => id === item.id ? { ...item, capabilities: [...item.capabilities] } : null,
