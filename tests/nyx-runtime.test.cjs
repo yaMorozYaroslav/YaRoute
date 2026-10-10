@@ -15,7 +15,7 @@ const ref = path => ({ area: 'MAIN', path });
 const locator = { schema: 'nyx.bootstrap.v1', cli: ref('authority.json'), paths: { basic: ref('paths.md'), normal: ref('n_paths.json'), deep: ref('d_paths.json') }, canonical: { head: 'head_fixture.zip', body: 'body_fixture.zip', footer: 'footer_fixture.zip' } };
 const source = (key, visible = true) => ({ key, visible, required: true });
 const contract = () => ({ adapter: 'context.initialize.v1', depth: { default: 'basic', allowed: ['basic', 'normal', 'deep'] }, arguments: { targets: true, maxTargets: 4 }, pathsVisible: true, sources: { basic: [source('maps'), { ...source('todo'), when: 'targeted' }, { ...source('area:{target}:state'), perTarget: true }, { ...source('area:{target}:config'), perTarget: true }], normal: [source('normal')], deep: [source('deep')] }, mutation: 'conversation-artifact', handoffsKey: 'handoffs', verification: { sourceRead: true, artifactReadback: true }, response: 'nyx.context.v1' });
-const makeCli = () => cliSchema.parse({ schema: 'nyx.yarocli.v1', version: 'test-v1', commands: { begin: { aliases: ['start'], execution: contract() } } });
+const makeCli = () => cliSchema.parse({ schema: 'nyx.yarocli.v1', version: 'test-v1', commands: { begin: { purpose: 'Start a verified runtime context', aliases: ['start'], execution: contract() } } });
 class MemoryResources {
   constructor(files = {}) { this.files = new Map(Object.entries(files)); this.reads = []; this.writes = []; this.stats = 0; }
   async stat(r) { this.stats++; const data = this.files.get(r.path); if (data === undefined) throw new Error('RESOURCE_STAT_FAILED'); return { Size: Buffer.byteLength(data), Hashes: { sha256: sha256(data) } }; }
