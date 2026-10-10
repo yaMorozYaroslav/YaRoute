@@ -42,7 +42,20 @@ export class McpAuthService {
         return false;
       }
 
-      if (!payload.sub) throw new Error('Missing subject');
+      if (typeof payload.sub !== 'string' || !payload.sub.trim()) throw new Error('Missing subject');
+      // The current rclone configuration is process-wide, not scoped to the OAuth subject.
+      // Until per-user storage connections exist, explicitly allow only private owners.
+      // Fail closed if NYX_PRIVATE_OAUTH_SUBJECTS is unset or empty.
+      const allowedSubjects = new Set(
+        (process.env.NYX_PRIVATE_OAUTH_SUBJECTS || '')
+          .split(',')
+          .map((subject) => subject.trim())
+          .filter(Boolean),
+      );
+      if (!allowedSubjects.has(payload.sub)) {
+        res.status(403).json({ error: 'access_denied', error_description: 'Private NYX instance: user not authorized' });
+        return false;
+      }
       res.locals.nyxSubject = payload.sub;
       return true;
     } catch (error) {
