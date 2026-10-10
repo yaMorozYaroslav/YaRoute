@@ -1,4 +1,5 @@
 import { ConnectorRegistry, type ConnectorCapability } from './connector-registry';
+import { assessPotentialFinancialLoss } from './financial-risk-preflight';
 
 /** Typed operation planning only: no arbitrary CLI strings and no process spawning. */
 export const GIT_OPERATION_CAPABILITIES = {
@@ -15,8 +16,10 @@ export class GitOperationPlanner {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || repo.includes('..')) throw new Error('GIT_REPOSITORY_INVALID');
   if (branch && (!/^[\w.\/-]{1,120}$/.test(branch) || branch.includes('..'))) throw new Error('GIT_BRANCH_INVALID');
   const capability=GIT_OPERATION_CAPABILITIES[operation];
-  await this.registry.requireResource(ownerId,connectionId,capability,{kind:'repository',id:repo,branch});
-  return {operation,repo,branch,connectionId,capability,requiresApproval:['branch','commit','push','tag'].includes(operation),
+  const connection = await this.registry.requireResource(ownerId,connectionId,capability,{kind:'repository',id:repo,branch});
+  const financialRisk = assessPotentialFinancialLoss({provider: connection.provider, operation: 'git:' + operation});
+  return {operation,repo,branch,connectionId,capability,requiresApproval:financialRisk.mustNotify || ['branch','commit','push','tag'].includes(operation),
+    financialRisk,
     executor:'isolated-git-worker',executable:false};
  }
 }
