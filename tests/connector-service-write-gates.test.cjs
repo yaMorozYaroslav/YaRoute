@@ -22,20 +22,29 @@ function svcFor(provider){
  return {service,id:connection.id,connection};
 }
 
-test('MCP-facing GitHub connector service rejects pending write/CI execution features',async()=>{
- const {service,id}=svcFor('github');
- for(const permission of ['ci:dispatch','contents:write','pulls:write','issues:write',
-  'releases:write','git:push']){
+test('MCP-facing GitHub exposes only reviewed API writes, never CI dispatch or Git CLI',async()=>{
+ const {service,id,connection}=svcFor('github');
+ for(const permission of ['ci:dispatch','releases:write','git:push']){
   await assert.rejects(()=>service.permissions('oauth:alice',id,[permission]),
     /CONNECTOR_API_CAPABILITY_NOT_READY/);
  }
- await assert.rejects(()=>service.resources('oauth:alice',id,[{
-  kind:'repository',id:'someone/repo',capabilities:['contents:write'],
- }]),/CONNECTOR_API_CAPABILITY_NOT_READY/);
- const result=await service.permissions('oauth:alice',id,['resources:read']);
- assert.deepEqual(result.authorizationRequired,['resources:read']);
+ const requested=['resources:read','contents:write','pulls:write','issues:write'];
+ const result=await service.permissions('oauth:alice',id,requested);
+ assert.deepEqual(result.authorizationRequired,requested);
  assert.equal(result.status,'active');
+ assert.equal(result.availableCapabilities.includes('contents:write'),true);
+ assert.equal(result.availableCapabilities.includes('pulls:write'),true);
+ assert.equal(result.availableCapabilities.includes('issues:write'),true);
  assert.equal(result.availableCapabilities.includes('ci:dispatch'),false);
+ assert.equal(result.availableCapabilities.includes('releases:write'),false);
+ assert.ok(connection.capabilities.includes('contents:write'));
+ const resource=await service.resources('oauth:alice',id,[{
+  kind:'repository',id:'someone/repo',capabilities:['contents:write','pulls:write'],
+ }]);
+ assert.equal(resource.resources[0].id,'someone/repo');
+ await assert.rejects(()=>service.resources('oauth:alice',id,[{
+  kind:'repository',id:'someone/repo',capabilities:['ci:dispatch'],
+ }]),/CONNECTOR_API_CAPABILITY_NOT_READY/);
 });
 
 test('Legacy Heroku connector rows stay inert, not exposed in live GitHub-only MCP',async()=>{
