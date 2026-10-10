@@ -20,11 +20,10 @@ test('Git plans require resource grants and never execute themselves',async()=>{
  capabilities:['git:inspect'],providerCapabilities:['git:inspect'],
  resources:[{kind:'repository',id:'org/repo',capabilities:['git:inspect'],branches:['master']}]});
  const p=new GitOperationPlanner(r);
- const plan=await p.plan('oauth:u','g','status','org/repo','master');
- assert.equal(plan.executable,false);
- await assert.rejects(()=>p.plan('oauth:u','g','status','org/repo','dev'),/CONNECTOR_RESOURCE_FORBIDDEN/);
- await assert.rejects(()=>p.plan('oauth:u','g','push','org/repo','master'),/CONNECTOR_FORBIDDEN/);
- await assert.rejects(()=>p.plan('oauth:other','g','status','org/repo','master'),/CONNECTOR_NOT_FOUND/);
+ await assert.rejects(()=>p.plan('oauth:u','g','status','org/repo','master'),
+  /NYX_GIT_CLI_DISABLED_USE_PROVIDER_API/);
+ await assert.rejects(()=>p.plan('oauth:u','g','push','org/repo','master'),
+  /NYX_GIT_CLI_DISABLED_USE_PROVIDER_API/);
 });
 test('Heroku planning separates read-only and approval-required actions',async()=>{
  const item={id:'h',ownerId:'oauth:u',displayName:'Heroku',provider:'heroku',
