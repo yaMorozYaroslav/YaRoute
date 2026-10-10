@@ -126,6 +126,7 @@ export class McpService {
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       schema:'nyx.connections.panel.v1',
+      ownerId:this.connectorOwner(),
       connections:await this.connections.list(this.connectorOwner()),
       providers:[
         {id:'github',availability:'oauth_ready_if_configured'},
