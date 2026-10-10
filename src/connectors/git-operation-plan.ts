@@ -1,25 +1,28 @@
 import { ConnectorRegistry, type ConnectorCapability } from './connector-registry';
-import { assessPotentialFinancialLoss } from './financial-risk-preflight';
 
-/** Typed operation planning only: no arbitrary CLI strings and no process spawning. */
+/**
+ * COMPATIBILITY-ONLY. Owner explicitly chose API connectors instead of Git/Heroku
+ * CLI access. These identifiers remain for historical records, but planning and
+ * execution are permanently disabled. Use individually authorized GitHub/GitLab
+ * REST or GraphQL API adapters instead.
+ */
 export const GIT_OPERATION_CAPABILITIES = {
- status:'git:inspect', log:'git:inspect', show:'git:inspect',
- diff:'git:diff', clone:'git:clone', fetch:'git:fetch',
- branch:'git:branch', commit:'git:commit', push:'git:push', tag:'git:tag'
+  status: 'git:inspect', log: 'git:inspect', show: 'git:inspect',
+  diff: 'git:diff', clone: 'git:clone', fetch: 'git:fetch',
+  branch: 'git:branch', commit: 'git:commit', push: 'git:push', tag: 'git:tag',
 } as const satisfies Record<string, ConnectorCapability>;
-
 export type GitOperation = keyof typeof GIT_OPERATION_CAPABILITIES;
+
+/** No implementation of this class may spawn Git or produce an executable plan. */
 export class GitOperationPlanner {
- constructor(private readonly registry: ConnectorRegistry) {}
- async plan(ownerId:string, connectionId:string, operation:GitOperation, repo:string, branch?:string) {
-  if (!Object.prototype.hasOwnProperty.call(GIT_OPERATION_CAPABILITIES,operation)) throw new Error('GIT_OPERATION_UNSUPPORTED');
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || repo.includes('..')) throw new Error('GIT_REPOSITORY_INVALID');
-  if (branch && (!/^[\w.\/-]{1,120}$/.test(branch) || branch.includes('..'))) throw new Error('GIT_BRANCH_INVALID');
-  const capability=GIT_OPERATION_CAPABILITIES[operation];
-  const connection = await this.registry.requireResource(ownerId,connectionId,capability,{kind:'repository',id:repo,branch});
-  const financialRisk = assessPotentialFinancialLoss({provider: connection.provider, operation: 'git:' + operation});
-  return {operation,repo,branch,connectionId,capability,requiresApproval:financialRisk.mustNotify || ['branch','commit','push','tag'].includes(operation),
-    financialRisk,
-    executor:'isolated-git-worker',executable:false};
- }
+  constructor(_registry: ConnectorRegistry) {}
+  async plan(
+    _ownerId: string,
+    _connectionId: string,
+    _operation: GitOperation,
+    _repo: string,
+    _branch?: string,
+  ): Promise<never> {
+    throw new Error('NYX_GIT_CLI_DISABLED_USE_PROVIDER_API');
+  }
 }
