@@ -17,3 +17,15 @@ test('legacy proposal staging preserves every original byte', () => {
 test('malformed legacy content fails closed', () => {
  assert.throws(() => parseLegacyKey('not a KEY'), /KEY_LEGACY_SECTION_MISSING/);
 });
+
+test('empty proposal list is a no-op', () => {
+ assert.equal(appendLegacyProposals(sample, [], 'tx_empty'), sample);
+});
+test('legacy proposal append retains original trailing whitespace', () => {
+ const original = sample + '\n  ';
+ const updated = appendLegacyProposals(original, [{id:'p2',target:'body',description:'Preserve data',confidence:0.5,source:'conversation'}], 'tx2');
+ assert.ok(updated.startsWith(original));
+});
+test('multiline proposal source is rejected', () => {
+ assert.throws(() => appendLegacyProposals(sample, [{id:'p3',target:'head',description:'Valid',confidence:0.5,source:'bad\\nsource'}], 'tx3'), /KEY_CANDIDATE_INVALID/);
+});
