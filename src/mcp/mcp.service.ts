@@ -203,21 +203,21 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.github.repository(this.connectorOwner(),id,repo)));
+      this.readConnectionApi(id,()=>this.github.repository(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_issues',{
       title:'List open issues in my authorized repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.github.issues(this.connectorOwner(),id,repo)));
+      this.readConnectionApi(id,()=>this.github.issues(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_pulls',{
       title:'List open pull requests in my authorized repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.github.pullRequests(this.connectorOwner(),id,repo)));
+      this.readConnectionApi(id,()=>this.github.pullRequests(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_file',{
       title:'Read a bounded text file from my authorized GitHub repository',
@@ -226,7 +226,7 @@ export class McpService {
         path:z.string().min(1).max(600),ref:z.string().min(1).max(120)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,path,ref})=>this.safeTool(()=>
-      this.github.fileText(this.connectorOwner(),id,repo,path,ref)));
+      this.readConnectionApi(id,()=>this.github.fileText(this.connectorOwner(),id,repo,path,ref))));
 
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
@@ -234,21 +234,21 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.github.workflows(this.connectorOwner(),id,repo)));
+      this.readConnectionApi(id,()=>this.github.workflows(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_runs',{
       title:'Read Actions runs in my authorized GitHub repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().max(120).optional()}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
-      this.github.runs(this.connectorOwner(),id,repo,branch)));
+      this.readConnectionApi(id,()=>this.github.runs(this.connectorOwner(),id,repo,branch))));
 
     server.registerTool('nyx_connection_github_jobs',{
       title:'Read jobs of an authorized GitHub Actions run',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),runId:z.number().int().positive()}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,runId})=>this.safeTool(()=>
-      this.github.jobs(this.connectorOwner(),id,repo,runId)));
+      this.readConnectionApi(id,()=>this.github.jobs(this.connectorOwner(),id,repo,runId))));
 
     server.registerTool('nyx_connection_verify_heroku',{
       title:'Verify an existing Heroku app using the read-only external broker',
@@ -269,7 +269,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,app})=>this.safeTool(()=>
-      this.heroku.appInfo(this.connectorOwner(),id,app)));
+      this.readConnectionApi(id,()=>this.heroku.appInfo(this.connectorOwner(),id,app))));
 
     server.registerTool('nyx_connection_heroku_releases',{
       title:'Read recent releases from a selected Heroku app',
@@ -277,7 +277,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,app})=>this.safeTool(()=>
-      this.heroku.releases(this.connectorOwner(),id,app)));
+      this.readConnectionApi(id,()=>this.heroku.releases(this.connectorOwner(),id,app))));
 
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
@@ -487,6 +487,12 @@ export class McpService {
     );
 
     return server;
+  }
+
+  private async readConnectionApi<T>(connectionId:string,fn:()=>Promise<T>):Promise<T> {
+    const owner=this.connectorOwner();
+    await this.connections.consumeQuota(owner,connectionId);
+    return fn();
   }
 
   private connectorOwner():string {
