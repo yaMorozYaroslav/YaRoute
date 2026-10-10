@@ -51,7 +51,9 @@ export class GithubWriteConnector {
     if(conn.provider!=='github'||!conn.installationId) throw new Error('GITHUB_INSTALLATION_REQUIRED');
     const token=await this.credentials.tokenFor(owner,id,conn.installationId,repo,capability,boundary);
     if(!token)throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
-    if(!suffix.startsWith('/') || suffix.includes('..') ||
+    // Empty suffix is the safe GET repository-metadata endpoint only.
+    if((suffix==='' && method!=='GET') ||
+       (suffix!=='' && !suffix.startsWith('/')) || suffix.includes('..') ||
        /[?#]/.test(suffix)) throw new Error('GITHUB_API_PATH_INVALID');
     const response=await this.http('https://api.github.com/repos/'+repo+suffix,{
       method,headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
