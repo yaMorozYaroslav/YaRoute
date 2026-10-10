@@ -3,6 +3,13 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { ConnectorRegistry } from './connector-registry';
 import { PostgresConnectorRepository } from './postgres-connector-repository';
+
+/** Production connectors are intentionally read-only until risk-enforced writes exist. */
+export const ENABLED_PROVIDER_API_CAPABILITIES = {
+  github: ['repository:metadata','resources:read','ci:read','issues:read','pulls:read'],
+  heroku: ['heroku:apps:read','heroku:releases:read'],
+} as const;
+
 import {
   type ConnectorConnection, type ConnectorCapability, type ConnectorProvider,
   type ConnectorResourceRule, SELECTABLE_CONNECTOR_CAPABILITIES,
@@ -78,8 +85,18 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     return {
       id, displayName, provider, externalAccountId, capabilities, providerCapabilities,
       resources: resources ?? [], status,
-      availableCapabilities: SELECTABLE_CONNECTOR_CAPABILITIES.filter(x => supportsCapability(provider,x)),
+      availableCapabilities: this.enabledCapabilities(provider),
     };
+  }
+  private enabledCapabilities(provider: ConnectorProvider): ConnectorCapability[] {
+    const enabled = ENABLED_PROVIDER_API_CAPABILITIES[provider as 'github'|'heroku'];
+    if (!enabled) return [];
+    return [...enabled].filter(cap => SELECTABLE_CONNECTOR_CAPABILITIES.includes(cap) && supportsCapability(provider,cap));
+  }
+  private assertProductionPermissions(provider: ConnectorProvider, capabilities: ConnectorCapability[]) {
+    if (!Array.isArray(capabilities) || capabilities.some(cap => !this.enabledCapabilities(provider).includes(cap))) {
+      throw new Error('CONNECTOR_API_CAPABILITY_NOT_READY');
+    }
   }
   async create(ownerId: string, provider: ConnectorProvider, name: string) {
     this.owner(ownerId);
@@ -100,11 +117,19 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     return this.view(await this.policy().rename(this.owner(ownerId), id, name));
   }
   async permissions(ownerId: string, id: string, capabilities: ConnectorCapability[]) {
-    const result = await this.policy().setPermissions(this.owner(ownerId), id, capabilities);
+    const connection = await this.owned(this.owner(ownerId),id);
+    this.assertProductionPermissions(connection.provider,capabilities);
+    const result = await this.policy().setPermissions(ownerId, id, capabilities);
     return {...this.view(result.connection), authorizationRequired: result.authorizationRequired};
   }
   async resources(ownerId: string, id: string, rules: ConnectorResourceRule[]) {
-    return this.view(await this.policy().setResources(this.owner(ownerId), id, rules));
+    const connection = await this.owned(this.owner(ownerId),id);
+    if (!Array.isArray(rules) || rules.some(rule =>
+       !rule || !Array.isArray(rule.capabilities) ||
+       rule.capabilities.some(cap => !this.enabledCapabilities(connection.provider).includes(cap)))) {
+      throw new Error('CONNECTOR_API_CAPABILITY_NOT_READY');
+    }
+    return this.view(await this.policy().setResources(ownerId, id, rules));
   }
   async disconnect(ownerId: string, id: string) {
     const previous=await this.owned(ownerId,id);
