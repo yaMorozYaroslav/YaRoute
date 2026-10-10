@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, BadRequestException } from '@nestjs/common';
+import { NyxKeyService } from './key.service';
 import { NyxCommandExecutor } from './command-executor.service';
 import { CommandRequest } from './runtime.schema';
 import { NyxBootstrapService } from './bootstrap.service';
@@ -12,6 +13,7 @@ export class NyxController {
     private readonly bootstrap: NyxBootstrapService,
     private readonly registry: NyxCliRegistryService,
     private readonly head: NyxHeadLibraryService,
+    private readonly keys: NyxKeyService,
   ) {}
 
   @Get('head')
@@ -27,6 +29,18 @@ export class NyxController {
       source_of_truth: 'canonical Head bundle',
       mutation: 'read-only runtime cache; canonical Head lifecycle remains separate',
     };
+  }
+
+  @Post('key')
+  async key(@Body() input: { stage: 'oF' | 'oS'; scope?: 'local' | 'global'; transactionId: string; candidates?: Array<{ id: string; target: 'head' | 'body' | 'footer'; description: string; confidence: number; source: string; blocked?: boolean }> }) {
+    try {
+      if (!input || !['oF','oS'].includes(input.stage) || !/^[a-zA-Z0-9_-]{1,80}$/.test(input.transactionId) || (input.scope && !['local','global'].includes(input.scope)) || (input.candidates && (!Array.isArray(input.candidates) || input.candidates.length > 100))) throw new Error('KEY_REQUEST_INVALID');
+      return await this.keys.execute(input);
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : '';
+      const message = /^[A-Z][A-Z_]+$/.test(raw) ? raw : 'KEY_OPERATION_FAILED';
+      throw new BadRequestException({ status: 'FAILED', message });
+    }
   }
 
   @Post('execute')
