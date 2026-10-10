@@ -136,6 +136,52 @@ credentials, isolated execution, approved targets, and independent provider-side
 budget protections are verified. Never promise a zero-cost guarantee merely from
 denying named billing endpoints.
 
+## Predict and warn about potential losses BEFORE execution
+
+Owner request: NYX should proactively identify **all reasonably foreseeable** ways an
+operation might cause immediate or delayed financial harm, warn before it happens,
+and hold/block actions when the risk cannot be bounded. Absolute prediction of
+all future costs is impossible; do NOT report an invented monetary estimate or
+claim access to billing accounts.
+
+**Committed library**: `financial-risk-preflight.ts` offers a deterministic,
+fail-closed preview and machine-readable warnings for:
+- Git push/commit/merge/deploy workflows triggering CI or ongoing infrastructure;
+  protected changes to workflow, dependency, infrastructure, secrets and safety files;
+- Heroku deploy/restart causing build, uptime, metered usage or outages;
+- Google Drive/MEGA transfer, copying, indexing, growing storage, cross-provider
+  network egress, deleting/moving data and recovery costs;
+- high-volume/recurring API requests, transfers and automated operations;
+- unknown operations and invalid workload estimates;
+- outright forbidden finance and provisioning operations (never approvable).
+
+**Execution policy**: a risk preview is not permission to execute. The Git and
+Heroku planners attach it to their non-executable plan responses. Workers, when
+implemented, MUST recompute risk using trusted job data, enforce the hard deny
+before scheduling, and re-evaluate if changes, resource grant, size, or scope
+change. No model/UI-supplied `severity`, estimated prices, cost-control flags,
+or signed-off warnings can authorize a blocked action.
+
+Warnings must be shown **before** a high-risk operation and include impact,
+why it could lead to costs or economic loss (now or later), unknowns, manual
+checks needed in the provider portal, exact target, and the availability of a
+rollback. A risk of money loss must not be buried in logs. Stop on uncertain
+chargeability; do not silently downgrade to an information notice.
+
+**Continuous controls for future workers**: finite job quotas, rate limits,
+bytes/time limits, CI-dispatch ceilings, retries bounded and deduplicated,
+workspace cleanup, cancellation/kill switch, immutable receipts, and alerts
+on abnormal usage growth or repeated failures. These controls operate on
+technical metrics ONLY; provider billing, plans, pricing and cost settings
+are not connected to NYX. Budget caps/spending alerts at the provider remain
+manual owner actions outside NYX.
+
+**Release blockers:** runtime dispatch gate, provider-specific restricted
+credentials, external broker isolation, end-to-end alert delivery, load tests,
+failure simulation, protected branch/workflow policies and post-execution
+monitoring are NOT implemented by this library. No automatic deployment is
+authorized based on this planning code alone.
+
 ## Release gates
 
 1. Confirm current CI and security audit runs on the intended exact commit.
