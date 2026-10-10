@@ -1,3 +1,4 @@
+import { NyxKeyService } from './key.service';
 import { NyxCliWarmupService } from './cli-warmup.service';
 import { NyxExecutionProfileService } from './execution-profile.service';
 import { Module } from '@nestjs/common';
@@ -11,5 +12,5 @@ import { HandoffStore } from './handoff-store.service';
 import { NyxCommandExecutor } from './command-executor.service';
 import { NyxHeadLibraryService } from './head-library.service';
 import { NyxController } from './nyx.controller';
-@Module({ imports: [StorageModule], controllers: [NyxController], providers: [NyxCliWarmupService, NyxExecutionProfileService, NyxBootstrapService, NyxHeadLibraryService, NyxCliRegistryService, NyxCommandResolver, NyxResourceResolver, NyxResourceStore, HandoffStore, NyxCommandExecutor], exports: [NyxCommandExecutor, NyxBootstrapService, NyxCliRegistryService, NyxHeadLibraryService] })
+@Module({ imports: [StorageModule], controllers: [NyxController], providers: [NyxCliWarmupService, NyxExecutionProfileService, NyxBootstrapService, NyxHeadLibraryService, NyxCliRegistryService, NyxCommandResolver, NyxResourceResolver, NyxResourceStore, HandoffStore, NyxKeyService, NyxCommandExecutor], exports: [NyxCommandExecutor, NyxBootstrapService, NyxCliRegistryService, NyxHeadLibraryService] })
 export class NyxModule {}
