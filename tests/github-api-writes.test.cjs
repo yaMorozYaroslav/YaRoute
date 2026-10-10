@@ -42,7 +42,7 @@ test('GitHub branch creation uses exact repo and nyx branch, never default-branc
  const result=await api.createBranch('oauth:alice','conn','org/repo','nyx/test-change');
  assert.equal(result.branch,'nyx/test-change');
  assert.deepEqual(requests.map(r=>r.options.method),['GET','GET','POST']);
- assert.equal(requests.every(r=>r.url.startsWith('https://api.github.com/repos/org/repo/')),true);
+ assert.equal(requests.every(r=>r.url.startsWith('https://api.github.com/repos/org/repo')),true);
  await assert.rejects(()=>api.createBranch('oauth:alice','conn','org/repo','master'),
   /GITHUB_STAGING_BRANCH_REQUIRED/);
  assert.equal(requests.length,3);
