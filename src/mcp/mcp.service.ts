@@ -525,7 +525,7 @@ export class McpService {
     return server;
   }
 
-  private async readConnectionApi<T>(connectionId:string,fn:()=>Promise<T>):Promise<T> {
+  private async limitedConnectionApi<T>(connectionId:string,fn:()=>Promise<T>):Promise<T> {
     const owner=this.connectorOwner();
     await this.connections.consumeQuota(owner,connectionId);
     return fn();
