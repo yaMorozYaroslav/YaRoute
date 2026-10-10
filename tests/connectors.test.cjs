@@ -85,9 +85,10 @@ test('owner selected resource restricts GitHub access', async () => {
 test('Git planner never executes and checks scoped repository',async()=>{
  const {GitOperationPlanner}=require('../dist/connectors/git-operation-plan');
  const planner=new GitOperationPlanner(new ConnectorRegistry(repository));
- const plan=await planner.plan('alice','conn1','status','org/repo');
- assert.equal(plan.executable,false);
- await assert.rejects(()=>planner.plan('alice','conn1','status','someone/else'),/CONNECTOR_FORBIDDEN|CONNECTOR_RESOURCE_FORBIDDEN/);
+ await assert.rejects(()=>planner.plan('alice','conn1','status','org/repo'),
+  /NYX_GIT_CLI_DISABLED_USE_PROVIDER_API/);
+ await assert.rejects(()=>planner.plan('alice','conn1','status','someone/else'),
+  /NYX_GIT_CLI_DISABLED_USE_PROVIDER_API/);
 });
 test('Old Google names are optional suggestions',()=>{
  const {suggestConnectionName}=require('../dist/connectors/connector-registry');
