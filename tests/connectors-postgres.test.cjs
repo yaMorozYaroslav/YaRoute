@@ -5,7 +5,8 @@ const { PostgresConnectorRepository } = require('../dist/connectors/postgres-con
 const connection = {
   id: 'a', ownerId: 'oauth:alice', displayName: 'Research Drive',
   provider: 'google-drive', externalAccountId: 'account-1',
-  capabilities: ['resources:read'], providerCapabilities: ['resources:read', 'contents:write'], status: 'pending',
+  capabilities: ['resources:read'], providerCapabilities: ['resources:read', 'contents:write'],
+  resources: [{kind:'drive',id:'drive-example',capabilities:['resources:read']}], status: 'pending',
 };
 
 test('connection metadata is persisted with owner-scoped upsert and user-chosen name', async () => {
@@ -20,6 +21,7 @@ test('connection metadata is persisted with owner-scoped upsert and user-chosen 
   assert.equal(queries.at(-1).values[1], 'oauth:alice');
   assert.equal(queries.at(-1).values[2], 'Research Drive');
   assert.equal(queries.at(-1).values[7], '["resources:read","contents:write"]');
+  assert.equal(JSON.parse(queries.at(-1).values[8])[0].id, 'drive-example');
   assert.ok(queries.some(q => /UNIQUE INDEX/.test(q.sql) && /lower\(display_name\)/.test(q.sql)));
   assert.ok(queries.every(q => !JSON.stringify(q).includes('private_key')));
 });
