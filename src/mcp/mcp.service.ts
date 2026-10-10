@@ -114,7 +114,9 @@ export class McpService {
       async () => ({contents:[{
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_PANEL_HTML,
-        _meta:{ui:{prefersBorder:true}},
+        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
+          'openai/widgetCSP':{redirect_domains:['https://github.com']},
+          'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
       }]}),
     );
 
