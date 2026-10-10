@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import {
   CONNECTOR_CAPABILITIES,
   validateConnectionName,
+  validateResourceRules,
 } from './connector-registry';
 import type { ConnectorConnection, ConnectorRepository, ConnectorProvider, ConnectorCapability } from './connector-registry';
 
@@ -19,6 +20,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       installation_id text,
       capabilities jsonb NOT NULL,
       provider_capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+      resources jsonb NOT NULL DEFAULT '[]'::jsonb,
       status text NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now(),
       CONSTRAINT nyx_connector_owner CHECK (length(owner_id) > 0),
@@ -28,6 +30,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     // immutable IDs temporarily, so the user can rename them later without changing IDs.
     await this.pool.query('ALTER TABLE nyx_connector_connections ADD COLUMN IF NOT EXISTS display_name text');
     await this.pool.query("ALTER TABLE nyx_connector_connections ADD COLUMN IF NOT EXISTS provider_capabilities jsonb NOT NULL DEFAULT '[]'::jsonb");
+    await this.pool.query("ALTER TABLE nyx_connector_connections ADD COLUMN IF NOT EXISTS resources jsonb NOT NULL DEFAULT '[]'::jsonb");
     await this.pool.query('UPDATE nyx_connector_connections SET display_name = id WHERE display_name IS NULL');
     await this.pool.query('ALTER TABLE nyx_connector_connections ALTER COLUMN display_name SET NOT NULL');
     await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_connector_owner_idx ON nyx_connector_connections(owner_id)');
@@ -44,6 +47,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       installationId: row.installation_id == null ? undefined : String(row.installation_id),
       capabilities: row.capabilities as ConnectorCapability[],
       providerCapabilities: (row.provider_capabilities ?? []) as ConnectorCapability[],
+      resources: (row.resources ?? []) as ConnectorConnection['resources'],
       status: row.status as ConnectorConnection['status'],
     };
   }
@@ -61,7 +65,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
   async save(connection: ConnectorConnection): Promise<void> {
     const known = CONNECTOR_CAPABILITIES as readonly string[];
     if (!connection.id || !connection.ownerId || !connection.externalAccountId ||
-      !['github','google-drive','gitlab'].includes(connection.provider) ||
+      !['github','google-drive','gitlab','mega'].includes(connection.provider) ||
       !['pending','active','revoked'].includes(connection.status) ||
       !Array.isArray(connection.capabilities) ||
       !connection.capabilities.every(value => known.includes(value)) ||
@@ -70,20 +74,22 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       throw new Error('CONNECTOR_INVALID');
     }
     const displayName = validateConnectionName(connection.displayName);
+    const resources = validateResourceRules(connection.provider,connection.resources ?? []);
     const result = await this.pool.query(`INSERT INTO nyx_connector_connections
-      (id,owner_id,display_name,provider,external_account_id,installation_id,capabilities,provider_capabilities,status)
-      VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9)
+      (id,owner_id,display_name,provider,external_account_id,installation_id,capabilities,provider_capabilities,resources,status)
+      VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10)
       ON CONFLICT (id) DO UPDATE SET
         display_name=EXCLUDED.display_name,
         provider=EXCLUDED.provider,external_account_id=EXCLUDED.external_account_id,
         installation_id=EXCLUDED.installation_id,capabilities=EXCLUDED.capabilities,
         provider_capabilities=EXCLUDED.provider_capabilities,
+        resources=EXCLUDED.resources,
         status=EXCLUDED.status,updated_at=now()
       WHERE nyx_connector_connections.owner_id=EXCLUDED.owner_id
       RETURNING id`,
       [connection.id,connection.ownerId,displayName,connection.provider,connection.externalAccountId,
         connection.installationId ?? null,JSON.stringify(connection.capabilities),
-        JSON.stringify(connection.providerCapabilities),connection.status]);
+        JSON.stringify(connection.providerCapabilities),JSON.stringify(resources),connection.status]);
     if (!result.rowCount) throw new Error('CONNECTOR_OWNER_CONFLICT');
   }
 }
