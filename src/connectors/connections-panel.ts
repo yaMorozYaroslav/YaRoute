@@ -129,7 +129,7 @@ function render(connections){
     const group=el('fieldset');group.append(el('legend','Allowed API operations'));
     const grid=el('div');grid.className='capabilities';const checks=[];
     const allowed=(c.availableCapabilities||[]).filter(x=>c.provider==='github'?
-      ['repository:metadata','resources:read','ci:read','issues:read','pulls:read'].includes(x):
+      ['repository:metadata','resources:read','ci:read','issues:read','pulls:read','releases:read'].includes(x):
       ['heroku:apps:read','heroku:releases:read'].includes(x));
     for(const cap of allowed){
       const label=el('label');const check=el('input');check.type='checkbox';
