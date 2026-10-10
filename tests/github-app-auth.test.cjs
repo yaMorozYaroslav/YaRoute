@@ -4,9 +4,9 @@ const {generateKeyPairSync}=require('node:crypto');
 const {GithubAppService}=require('../dist/connectors/github-app.service');
 const {CONNECTIONS_PANEL_HTML,CONNECTIONS_PANEL_URI}=require('../dist/connectors/connections-panel');
 
-const key=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({
+const key=Buffer.from(generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({
  type:'pkcs8',format:'pem',
-}).toString('base64');
+}),'utf8').toString('base64');
 const backupKeys=['NYX_GITHUB_APP_ID','NYX_GITHUB_APP_PRIVATE_KEY_B64',
  'NYX_GITHUB_CLIENT_ID','NYX_GITHUB_CLIENT_SECRET','NYX_PUBLIC_URL'];
 function configured(){
