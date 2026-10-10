@@ -6,8 +6,8 @@ const { GithubReadonlyConnector } = require('../dist/connectors/github-readonly'
 const item = {
   id: 'conn1', ownerId: 'alice', displayName: 'Personal GitHub',
   provider: 'github', externalAccountId: 'org', installationId: '123',
-  capabilities: ['ci:read'], providerCapabilities: ['ci:read', 'contents:write'],
-  resources: [{kind:'repository',id:'org/repo',capabilities:['ci:read']}], status: 'active',
+  capabilities: ['ci:read','git:inspect'], providerCapabilities: ['ci:read', 'contents:write','git:inspect'],
+  resources: [{kind:'repository',id:'org/repo',capabilities:['ci:read','git:inspect']}], status: 'active',
 };
 const repository = {
   get: async id => id === item.id ? { ...item, capabilities: [...item.capabilities] } : null,
@@ -80,4 +80,17 @@ test('owner selected resource restricts GitHub access', async () => {
  await scoped.setResources('alice','conn1',[{kind:'repository',id:'org/repo',capabilities:['ci:read'],branches:['master']}]);
  assert.equal(saved.resources[0].branches[0],'master');
  await assert.rejects(() => new ConnectorRegistry({...repository,get:async()=>saved}).requireResource('alice','conn1','ci:read',{kind:'repository',id:'org/repo',branch:'dev'}), /CONNECTOR_RESOURCE_FORBIDDEN/);
+});
+
+test('Git planner never executes and checks scoped repository',async()=>{
+ const {GitOperationPlanner}=require('../dist/connectors/git-operation-plan');
+ const planner=new GitOperationPlanner(new ConnectorRegistry(repository));
+ const plan=await planner.plan('alice','conn1','status','org/repo');
+ assert.equal(plan.executable,false);
+ await assert.rejects(()=>planner.plan('alice','conn1','status','someone/else'),/CONNECTOR_FORBIDDEN|CONNECTOR_RESOURCE_FORBIDDEN/);
+});
+test('Old Google names are optional suggestions',()=>{
+ const {suggestConnectionName}=require('../dist/connectors/connector-registry');
+ assert.equal(suggestConnectionName('google-drive',[]),'google_main');
+ assert.equal(suggestConnectionName('google-drive',['google_main']),'google_work');
 });
