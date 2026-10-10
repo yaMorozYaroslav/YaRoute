@@ -15,6 +15,10 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit() {
+    // Legacy global-storage jobs may contain unscoped Rclone roots; do not
+    // process them alongside public multi-user connector traffic.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true') return;
     if (process.env.NYX_GLOBAL_INDEX_ON_BOOT === 'true') {
       const job = await this.jobs.createGlobalIndex({ snapshot: true });
       this.logger.log(`Queued boot global-index job ${job.id}`);
