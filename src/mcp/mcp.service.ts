@@ -13,6 +13,7 @@ import { assessPotentialFinancialLoss } from '../connectors/financial-risk-prefl
 import { ConnectorsService } from '../connectors/connectors.service';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { HerokuReadonlyConnector } from '../connectors/heroku-readonly';
+import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 
@@ -30,6 +31,7 @@ export class McpService {
     private readonly connections: ConnectorsService,
     private readonly github: GithubReadonlyConnector,
     private readonly heroku: HerokuReadonlyConnector,
+    private readonly herokuBroker: HerokuBrokerClient,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -216,6 +218,19 @@ export class McpService {
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,runId})=>this.safeTool(()=>
       this.github.jobs(this.connectorOwner(),id,repo,runId)));
+
+    server.registerTool('nyx_connection_verify_heroku',{
+      title:'Verify an existing Heroku app using the read-only external broker',
+      description:'Broker must independently authorize owner, connection and app; never accepts Heroku credentials or billing APIs.',
+      inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,app})=>this.safeTool(async()=>{
+      const connection=await this.connections.getOwned(this.connectorOwner(),id);
+      if(connection.provider!=='heroku'||connection.status!=='pending')throw new Error('HEROKU_CONNECTION_NOT_PENDING');
+      const inspected=await this.herokuBroker.appInfo(this.connectorOwner(),id,app);
+      if(inspected.name!==app)throw new Error('HEROKU_BROKER_IDENTITY_MISMATCH');
+      return this.connections.activateVerifiedHerokuApp(this.connectorOwner(),id,app);
+    }));
 
     server.registerTool('nyx_connection_heroku_info',{
       title:'Read metadata for a selected Heroku app',
