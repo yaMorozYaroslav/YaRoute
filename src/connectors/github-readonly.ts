@@ -1,8 +1,8 @@
-import { ConnectorRegistry } from './connector-registry';
+import { ConnectorRegistry, type ConnectorCapability } from './connector-registry';
 
 /** Implementations must obtain short-lived installation tokens from a secure vault. */
 export interface GithubInstallationCredentials {
-  tokenFor(ownerId: string, connectionId: string, installationId: string): Promise<string>;
+  tokenFor(ownerId: string, connectionId: string, installationId: string, repo: string, capability: ConnectorCapability): Promise<string>;
 }
 export type GithubHttp = (url: string, init: RequestInit) => Promise<Response>;
 export class GithubReadonlyConnector {
@@ -15,12 +15,13 @@ export class GithubReadonlyConnector {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..')) throw new Error('GITHUB_REPOSITORY_INVALID');
     const connection = await this.registry.requireResource(ownerId, connectionId, 'ci:read', {kind: 'repository', id: repo});
     if (connection.provider !== 'github' || !connection.installationId) throw new Error('GITHUB_INSTALLATION_REQUIRED');
-    const token = await this.credentials.tokenFor(ownerId, connectionId, connection.installationId);
+    const token = await this.credentials.tokenFor(ownerId, connectionId, connection.installationId, repo, 'ci:read');
     if (!token) throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
     const response = await this.http('https://api.github.com/repos/' + repo + suffix, {
       method: 'GET',
       headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
       redirect: 'error',
+      signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) throw new Error(response.status === 404 ? 'GITHUB_NOT_FOUND' : 'GITHUB_API_FAILED');
     return response.json();
