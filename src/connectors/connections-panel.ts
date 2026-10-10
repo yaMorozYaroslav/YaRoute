@@ -30,7 +30,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 </style></head>
 <body><header><h1>⚙️ NestNyx GitHub connections</h1>
 <p class="muted">Manage GitHub repositories through verified, repository-scoped API permissions. No infrastructure, billing, CLI, or payment access.</p>
-<div class="warn">GitHub read-only APIs are available now. GitHub writes require separate implementation and approved scopes. No Heroku or Vercel connection is available.</div>
+<div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
 <section><h2>Add connection</h2><form id="new-form" class="row">
 <span>Provider: <strong>GitHub</strong></span>
@@ -116,7 +116,7 @@ function render(connections){
     const group=el('fieldset');group.append(el('legend','Allowed API operations'));
     const grid=el('div');grid.className='capabilities';const checks=[];
     const allowed=(c.availableCapabilities||[]).filter(x=>
-      ['repository:metadata','resources:read','ci:read','issues:read','pulls:read','releases:read'].includes(x));
+      ['repository:metadata','resources:read','contents:write','ci:read','issues:read','issues:write','pulls:read','pulls:write','releases:read'].includes(x));
     for(const cap of allowed){
       const label=el('label');const check=el('input');check.type='checkbox';
       check.checked=(c.capabilities||[]).includes(cap);
@@ -142,6 +142,39 @@ function render(connections){
       await refresh();
     }));
     box.append(field);
+    const ops=el('fieldset');ops.append(el('legend','GitHub development'));
+    ops.append(el('p','All file writes stay on nyx/* review branches. Direct main/master changes, workflow or infrastructure files, and merging are not available here.'));
+    const opRepo=input((c.resources||[]).find(x=>x.kind==='repository')?.id||'');
+    opRepo.placeholder='owner/repository';
+    const opBranch=input('nyx/my-change');opBranch.placeholder='nyx/my-change';
+    const target=el('div');target.className='row';
+    target.append(el('span','Repository'),opRepo,el('span','Review branch'),opBranch);
+    ops.append(target);
+    const commands=el('div');commands.className='controls';
+    commands.append(button('Create review branch',async()=>{
+      const result=await call('nyx_connection_github_branch_create',{
+        id:c.id,repo:opRepo.value.trim(),branch:opBranch.value.trim()
+      });show('Review branch created: '+result.branch);
+    }));
+    const prTitle=input('');prTitle.placeholder='Draft PR title';
+    const prRow=el('div');prRow.className='row';prRow.append(prTitle,
+      button('Open draft PR',async()=>{
+        const result=await call('nyx_connection_github_draft_pr',{
+          id:c.id,repo:opRepo.value.trim(),branch:opBranch.value.trim(),
+          title:prTitle.value.trim()
+        });
+        show('Draft PR #'+result.number+' created. Review it in GitHub before merging.');
+      }));
+    ops.append(commands,prRow);
+    const issueTitle=input('');issueTitle.placeholder='Issue title';
+    const issueRow=el('div');issueRow.className='row';issueRow.append(issueTitle,
+      button('Create issue',async()=>{
+        const result=await call('nyx_connection_github_issue_create',{
+          id:c.id,repo:opRepo.value.trim(),title:issueTitle.value.trim()
+        });show('GitHub issue #'+result.number+' created.');
+      }));
+    ops.append(issueRow);
+    box.append(ops);
   }
   box.append(button('Disconnect',async()=>{
     if(!confirm('Disconnect from NestNyx? To revoke GitHub authorization completely, also uninstall the GitHub App in GitHub settings.'))return;
