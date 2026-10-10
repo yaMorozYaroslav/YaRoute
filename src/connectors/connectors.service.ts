@@ -6,8 +6,7 @@ import { PostgresConnectorRepository } from './postgres-connector-repository';
 
 /** Production connectors are intentionally read-only until risk-enforced writes exist. */
 export const ENABLED_PROVIDER_API_CAPABILITIES = {
-  github: ['repository:metadata','resources:read','ci:read','issues:read','pulls:read','releases:read'],
-  heroku: ['heroku:apps:read','heroku:releases:read'],
+  github: ['repository:metadata','resources:read','contents:write','ci:read','issues:read','issues:write','pulls:read','pulls:write','releases:read'],
 } as const;
 
 import {
@@ -77,7 +76,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   async list(ownerId: string) {
     this.owner(ownerId);
-    return (await this.policy().list(ownerId)).map(connection => this.view(connection));
+    return (await this.policy().list(ownerId)).filter(c => c.provider === 'github').map(connection => this.view(connection));
   }
   view(c: ConnectorConnection) {
     const { id, displayName, provider, externalAccountId,
@@ -89,7 +88,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     };
   }
   private enabledCapabilities(provider: ConnectorProvider): ConnectorCapability[] {
-    const enabled = ENABLED_PROVIDER_API_CAPABILITIES[provider as 'github'|'heroku'];
+    const enabled = provider === 'github' ? ENABLED_PROVIDER_API_CAPABILITIES.github : undefined;
     if (!enabled) return [];
     return [...enabled].filter(cap => SELECTABLE_CONNECTOR_CAPABILITIES.includes(cap) && supportsCapability(provider,cap));
   }
@@ -100,7 +99,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   async create(ownerId: string, provider: ConnectorProvider, name: string) {
     this.owner(ownerId);
-    if (!['github','heroku'].includes(provider)) throw new Error('CONNECTOR_PROVIDER_NOT_READY');
+    if (provider !== 'github') throw new Error('CONNECTOR_PROVIDER_NOT_READY');
     const connection: ConnectorConnection = {
       id: randomUUID(), ownerId, provider,
       displayName: validateConnectionName(name), externalAccountId: 'pending',
@@ -114,16 +113,20 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     return this.view(connection);
   }
   async rename(ownerId: string, id: string, name: string) {
-    return this.view(await this.policy().rename(this.owner(ownerId), id, name));
+    const connection=await this.owned(this.owner(ownerId),id);
+    if(connection.provider!=='github')throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    return this.view(await this.policy().rename(ownerId, id, name));
   }
   async permissions(ownerId: string, id: string, capabilities: ConnectorCapability[]) {
     const connection = await this.owned(this.owner(ownerId),id);
+    if(connection.provider!=='github')throw new Error('CONNECTOR_PROVIDER_DISABLED');
     this.assertProductionPermissions(connection.provider,capabilities);
     const result = await this.policy().setPermissions(ownerId, id, capabilities);
     return {...this.view(result.connection), authorizationRequired: result.authorizationRequired};
   }
   async resources(ownerId: string, id: string, rules: ConnectorResourceRule[]) {
     const connection = await this.owned(this.owner(ownerId),id);
+    if(connection.provider!=='github')throw new Error('CONNECTOR_PROVIDER_DISABLED');
     if (!Array.isArray(rules) || rules.some(rule =>
        !rule || !Array.isArray(rule.capabilities) ||
        rule.capabilities.some(cap => !this.enabledCapabilities(connection.provider).includes(cap)))) {
@@ -133,6 +136,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   async disconnect(ownerId: string, id: string) {
     const previous=await this.owned(ownerId,id);
+    if(previous.provider!=='github')throw new Error('CONNECTOR_PROVIDER_DISABLED');
     await this.db().query(
       `UPDATE nyx_connector_connections SET status='revoked',
        capabilities='[]'::jsonb, provider_capabilities='[]'::jsonb,
@@ -146,7 +150,8 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   /** Atomic owner-level hourly request budget across all NestJS instances. */
   async consumeQuota(ownerId:string, id:string) {
-    await this.owned(ownerId,id);
+    const connection=await this.owned(ownerId,id);
+    if(connection.provider!=='github')throw new Error('CONNECTOR_PROVIDER_DISABLED');
     const result=await this.db().query(`
       INSERT INTO nyx_connector_request_limits(owner_id,window_hour,count)
       VALUES($1,date_trunc('hour',now()),1)
@@ -217,18 +222,6 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       installationId:String(result.rows[0].installation_id),
     };
   }
-  async activateVerifiedHerokuApp(ownerId:string,id:string,app:string) {
-    const connection=await this.owned(ownerId,id);
-    if(connection.provider!=='heroku'||connection.status!=='pending') throw new Error('HEROKU_CONNECTION_NOT_PENDING');
-    if(!/^[a-z][a-z0-9-]{1,28}[a-z0-9]$/.test(app))throw new Error('HEROKU_APP_INVALID');
-    const updated:ConnectorConnection={...connection,status:'active',
-      externalAccountId:'heroku:'+app,
-      providerCapabilities:['heroku:apps:read','heroku:releases:read'],
-      capabilities:[],resources:[]};
-    await this.repository!.save(updated);
-    return this.view(updated);
-  }
-
   async activateGithub(ownerId:string,id:string,installationId:string,account:string,
     grants:ConnectorCapability[],repos:string[]) {
     const c=await this.owned(ownerId,id);

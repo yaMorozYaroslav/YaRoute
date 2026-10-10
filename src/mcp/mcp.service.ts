@@ -12,8 +12,7 @@ import { CopyJobPayload } from '../storage/storage.types';
 import { assessPotentialFinancialLoss } from '../connectors/financial-risk-preflight';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
-import { HerokuReadonlyConnector } from '../connectors/heroku-readonly';
-import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
+import { GithubWriteConnector } from '../connectors/github-writes';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 
@@ -30,8 +29,7 @@ export class McpService {
     private readonly commands: NyxCommandExecutor,
     private readonly connections: ConnectorsService,
     private readonly github: GithubReadonlyConnector,
-    private readonly heroku: HerokuReadonlyConnector,
-    private readonly herokuBroker: HerokuBrokerClient,
+    private readonly githubWrites: GithubWriteConnector,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -53,7 +51,7 @@ export class McpService {
   private buildServer() {
     const server = new McpServer({
       name: 'NestNyx',
-      version: '0.8.0',
+      version: '0.8.1',
     });
 
     // Capability discovery is advisory: canonical Head/nyxcli.json defines semantics.
@@ -77,7 +75,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -109,7 +107,7 @@ export class McpService {
     // MCP Apps connection manager. It is an authenticated UI resource, NOT an
     // alternate backend API or a way to bypass per-user MCP authorization.
     server.registerResource(
-      'NestNyx Connections', CONNECTIONS_PANEL_URI,
+      'NestNyx GitHub Connections', CONNECTIONS_PANEL_URI,
       {mimeType:'text/html;profile=mcp-app'},
       async () => ({contents:[{
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
@@ -122,9 +120,9 @@ export class McpService {
 
     server.registerTool('nyx_connections_panel',{
       title:'Manage NestNyx connections',
-      description:'Open the interactive NestNyx panel. Select names, permissions and resources; connect GitHub through its OAuth flow. No CLI, payments, billing or credentials in ChatGPT.',
+      description:'Open the GitHub-only NestNyx connections panel to authorize GitHub App and select repository permissions. This is an MCP auxiliary tool, not a Yaro CLI command.',
       inputSchema:z.object({}),
-      _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI}},
+      _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       schema:'nyx.connections.panel.v1',
@@ -132,9 +130,8 @@ export class McpService {
       connections:await this.connections.list(this.connectorOwner()),
       providers:[
         {id:'github',availability:'oauth_ready_if_configured'},
-        {id:'heroku',availability:'external_broker_required'},
       ],
-      note:'Connection panel prepared. OAuth and broker configuration are needed before external accounts work.',
+      note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
     })));
 
     server.registerTool('nyx_connections_list',{
@@ -148,8 +145,8 @@ export class McpService {
 
     server.registerTool('nyx_connection_create',{
       title:'Create a named connection',
-      description:'Create a PENDING GitHub or Heroku connection. No provider access is granted until verified external authorization.',
-      inputSchema:z.object({provider:z.enum(['github','heroku']),name:z.string().min(1).max(80)}),
+      description:'Create a PENDING GitHub App connection. No provider access is granted until verified GitHub authorization.',
+      inputSchema:z.object({provider:z.literal('github'),name:z.string().min(1).max(80)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
     },async ({provider,name})=>this.safeTool(()=>
       this.connections.create(this.connectorOwner(),provider,name)));
@@ -174,7 +171,7 @@ export class McpService {
       title:'Select resources of my connection',
       description:'Allow selected repositories or applications. Provider authorization is independently enforced.',
       inputSchema:z.object({id:z.string().uuid(),resources:z.array(z.object({
-        kind:z.enum(['repository','drive','folder','mega-root','heroku-app','heroku-account']),
+        kind:z.literal('repository'),
         id:z.string().min(1).max(512),
         capabilities:z.array(z.string().max(60)).max(40),
         pathPrefix:z.string().max(2048).optional(),
@@ -206,21 +203,21 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.repository(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.repository(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_issues',{
       title:'List open issues in my authorized repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.issues(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.issues(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_pulls',{
       title:'List open pull requests in my authorized repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.pullRequests(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.pullRequests(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_file',{
       title:'Read a bounded text file from my authorized GitHub repository',
@@ -229,7 +226,7 @@ export class McpService {
         path:z.string().min(1).max(600),ref:z.string().min(1).max(120)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,path,ref})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.fileText(this.connectorOwner(),id,repo,path,ref))));
+      this.limitedConnectionApi(id,()=>this.github.fileText(this.connectorOwner(),id,repo,path,ref))));
 
     server.registerTool('nyx_connection_github_branches',{
       title:'List branches through authorized GitHub API',
@@ -237,7 +234,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.branches(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.branches(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_commits',{
       title:'Read recent commits on an allowed GitHub branch',
@@ -245,7 +242,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().min(1).max(120)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.commits(this.connectorOwner(),id,repo,branch))));
+      this.limitedConnectionApi(id,()=>this.github.commits(this.connectorOwner(),id,repo,branch))));
 
     server.registerTool('nyx_connection_github_releases',{
       title:'Read GitHub releases through authorized API',
@@ -253,7 +250,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
@@ -261,54 +258,79 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.workflows(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.workflows(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_runs',{
       title:'Read Actions runs in my authorized GitHub repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().max(120).optional()}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.runs(this.connectorOwner(),id,repo,branch))));
+      this.limitedConnectionApi(id,()=>this.github.runs(this.connectorOwner(),id,repo,branch))));
 
     server.registerTool('nyx_connection_github_jobs',{
       title:'Read jobs of an authorized GitHub Actions run',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),runId:z.number().int().positive()}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,runId})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.jobs(this.connectorOwner(),id,repo,runId))));
+      this.limitedConnectionApi(id,()=>this.github.jobs(this.connectorOwner(),id,repo,runId))));
 
-    server.registerTool('nyx_connection_verify_heroku',{
-      title:'Verify an existing Heroku app using the read-only external broker',
-      description:'Broker must independently authorize owner, connection and app; never accepts Heroku credentials or billing APIs.',
-      inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
-      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    },async({id,app})=>this.safeTool(async()=>{
-      const connection=await this.connections.getOwned(this.connectorOwner(),id);
-      if(connection.provider!=='heroku'||connection.status!=='pending')throw new Error('HEROKU_CONNECTION_NOT_PENDING');
-      const inspected=await this.herokuBroker.appInfo(this.connectorOwner(),id,app);
-      if(inspected.name!==app)throw new Error('HEROKU_BROKER_IDENTITY_MISMATCH');
-      return this.connections.activateVerifiedHerokuApp(this.connectorOwner(),id,app);
-    }));
+    // GitHub API writes are restricted to owner-selected repositories and
+    // review-only nyx/* branches. No workflow dispatch, merges or hosting API.
+    server.registerTool('nyx_connection_github_branch_create',{
+      title:'Create a NYX GitHub review branch',
+      description:'Create a nyx/* branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        branch:z.string().min(5).max(100)}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,branch})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.createBranch(this.connectorOwner(),id,repo,branch))));
 
-    server.registerTool('nyx_connection_heroku_info',{
-      title:'Read metadata for a selected Heroku app',
-      description:'Calls external finance-blind broker only. No Heroku token in NestNyx.',
-      inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
-      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    },async({id,app})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.heroku.appInfo(this.connectorOwner(),id,app))));
+    server.registerTool('nyx_connection_github_commit_file',{
+      title:'Commit one file on a NYX review branch',
+      description:'Create or update one UTF-8 file on an existing nyx/* branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        branch:z.string().min(5).max(100),path:z.string().min(1).max(400),
+        content:z.string().max(65536),message:z.string().min(1).max(160),
+        sha:z.string().regex(/^[a-f0-9]{40}$/).optional()}),
+      annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,branch,path,content,message,sha})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.commitFile(this.connectorOwner(),id,repo,branch,path,content,message,sha))));
 
-    server.registerTool('nyx_connection_heroku_releases',{
-      title:'Read recent releases from a selected Heroku app',
-      description:'Fixed read-only broker operation; never accesses billing or configuration values.',
-      inputSchema:z.object({id:z.string().uuid(),app:z.string().min(3).max(30)}),
-      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    },async({id,app})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.heroku.releases(this.connectorOwner(),id,app))));
+    server.registerTool('nyx_connection_github_draft_pr',{
+      title:'Open a draft PR for a NYX branch',
+      description:'Open a draft pull request from a nyx/* branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        branch:z.string().min(5).max(100),title:z.string().min(1).max(200),
+        body:z.string().max(10000).optional()}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,branch,title,body})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.draftPull(this.connectorOwner(),id,repo,branch,title,body))));
+
+    server.registerTool('nyx_connection_github_issue_create',{
+      title:'Create an issue in an authorized GitHub repository',
+      description:'Create an issue through the GitHub API with an installation-scoped issues:write grant. No issue-triggered workflow dispatch is authorized.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        title:z.string().min(1).max(200),body:z.string().max(10000).optional()}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,title,body})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.createIssue(this.connectorOwner(),id,repo,title,body))));
 
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
     if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;
+
+    // Private-only, read-only discovery of configured Rclone remotes. Never
+    // expose the operator's Rclone config, tokens, remote options or file contents.
+    // This is auxiliary MCP metadata, NOT a canonical Head/Yaro CLI command.
+    server.registerTool('nyx_rclone_connections_list',{
+      title:'List configured private Google Drive and MEGA Rclone remotes',
+      description:'Read-only: list the Google Drive and MEGA remote names and safe logical aliases configured in the private Rclone runtime. Does not test online availability or expose credentials.',
+      inputSchema:z.object({}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>this.safeTool(()=>{
+      this.connectorOwner();
+      return this.storage.rcloneConnections();
+    }));
 
     server.registerTool(
       'nyx_execute',
@@ -516,7 +538,7 @@ export class McpService {
     return server;
   }
 
-  private async readConnectionApi<T>(connectionId:string,fn:()=>Promise<T>):Promise<T> {
+  private async limitedConnectionApi<T>(connectionId:string,fn:()=>Promise<T>):Promise<T> {
     const owner=this.connectorOwner();
     await this.connections.consumeQuota(owner,connectionId);
     return fn();

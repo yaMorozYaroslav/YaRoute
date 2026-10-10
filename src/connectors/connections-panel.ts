@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v1.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v2.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -29,23 +29,29 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .controls{display:flex;flex-wrap:wrap;gap:7px}
 </style></head>
 <body><header><h1>⚙️ NestNyx connections</h1>
-<p class="muted">Your services, your names, your selected resources. No CLI, no billing or payment access.</p>
-<div class="warn">GitHub API connection requires a GitHub App installation and secure authorization.
-Heroku currently requires a separate finance-blind broker. Financial actions are permanently unavailable.</div>
+<p class="muted">GitHub development permissions and your configured Google Drive / MEGA Rclone accounts. No billing, infrastructure control, or credential editing.</p>
+<div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
-<section><h2>Add connection</h2><form id="new-form" class="row">
-<label>Provider <select id="provider"><option value="github">GitHub</option><option value="heroku">Heroku (broker required)</option></select></label>
+<section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
+<p class="muted">Google Drive and MEGA remotes detected in the private NYX Rclone configuration. Listed means configured, not connectivity-tested. Read-only display; no passwords or tokens.</p>
+<div id="rclone-list" aria-live="polite">Loading configured drives…</div>
+<div id="rclone-status" role="status" aria-live="polite"></div>
+</section>
+<section><h2>Add GitHub connection</h2><form id="new-form" class="row">
+<span>Provider: <strong>GitHub</strong></span>
 <label>Name <input id="new-name" type="text" maxlength="80" placeholder="My development projects" required></label>
 <button type="submit">Add connection</button></form>
-<p><small>You can create multiple connections for the same provider. Old Google/MEGA names remain optional suggestions for future migration.</small></p></section>
-<section><div class="row" style="justify-content:space-between"><h2>My connections</h2><button id="refresh">Refresh</button></div>
+<p><small>You can create multiple separately named, repo-scoped GitHub connections. No provider secrets are entered in this panel.</small></p></section>
+<section><div class="row" style="justify-content:space-between"><h2>GitHub connections</h2><button id="refresh">Refresh GitHub</button></div>
 <div id="connection-list" aria-live="polite">Loading…</div></section>
-<section><h2>Technical safeguards</h2><p>Only typed, owner-scoped API operations can be exposed. No Git or Heroku CLI, arbitrary API proxy, plan changes, paid provisioning, financial credentials or payment controls.</p></section>
+<section><h2>Technical safeguards</h2><p>Only verified GitHub App installation access and repository-scoped API operations are exposed. No Git, Heroku, or Vercel CLI, infrastructure API, workflow dispatch, plan changes, billing, or payment controls.</p></section>
 <div id="message" role="status" aria-live="polite"></div>
 <script>
 (function(){
 'use strict';
 const root=document.getElementById('connection-list');
+const rcloneRoot=document.getElementById('rclone-list');
+const rcloneStatus=document.getElementById('rclone-status');
 const status=document.getElementById('message');
 const pending=new Map();let rpcId=0,connecting;
 function request(method,params){
@@ -79,6 +85,7 @@ function consume(response){
  try{
   const data=unwrap(response);
   if(data && Array.isArray(data.connections))render(data.connections);
+  if(data && Array.isArray(data.remotes))renderRclone(data);
  }catch(e){show(e.message,true);}
 }
 async function call(name,args){
@@ -90,10 +97,50 @@ function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.
 function button(name,handler){const b=el('button',name);b.type='button';b.addEventListener('click',async()=>{
  b.disabled=true;try{await handler();}catch(e){show(e.message,true);}finally{b.disabled=false;}});return b;}
 function input(value){const n=el('input');n.type='text';n.value=value||'';n.maxLength=80;return n;}
+function renderRclone(data){
+ rcloneRoot.replaceChildren();
+ if(data?.schema!=='nyx.storage.rclone.connections.v1' ||
+    data?.status!=='configured_not_live_verified' ||
+    !Array.isArray(data.remotes))throw new Error('Invalid Rclone inventory response');
+ const entries=data.remotes.filter(x=>x &&
+   ['google-drive','mega'].includes(x.provider) &&
+   typeof x.name==='string' && Array.isArray(x.aliases));
+ if(!entries.length){
+  rcloneRoot.append(el('p','No Google Drive or MEGA remotes were reported by private Rclone.'));
+  return;
+ }
+ for(const provider of ['google-drive','mega']){
+  const remotes=entries.filter(x=>x.provider===provider);
+  const group=el('div');group.className='card';
+  group.append(el('strong',provider==='google-drive'?'Google Drive':'MEGA'));
+  if(!remotes.length){
+   group.append(el('p','None configured.'));rcloneRoot.append(group);continue;
+  }
+  for(const remote of remotes){
+   const line=el('div');line.className='row';
+   line.append(el('strong',remote.name),el('span','Configured in Rclone'));
+   line.lastChild.className='badge';
+   if(remote.aliases.length)line.append(el('small','Areas: '+remote.aliases.join(', ')));
+   group.append(line);
+  }
+  rcloneRoot.append(group);
+ }
+}
+async function refreshRclone(){
+ rcloneStatus.textContent='';
+ try{
+  const data=await call('nyx_rclone_connections_list',{});
+  renderRclone(data);
+ }catch(e){
+  rcloneRoot.replaceChildren(el('p','Rclone inventory unavailable. Private NYX authorization and the configured Rclone runtime are required.'));
+  rcloneStatus.textContent=e?.message||'Unable to read configured remotes';
+  rcloneStatus.className='error';
+ }
+}
 function render(connections){
  root.replaceChildren();
  if(!connections.length){root.append(el('p','No connections yet. Add one above.'));return;}
- for(const c of connections){
+ for(const c of connections.filter(c=>c.provider==='github')){
   const box=el('div');box.className='card';
   const title=el('div');title.className='row';
   title.append(el('strong',c.displayName),el('span',c.provider),el('span',c.status));
@@ -113,24 +160,11 @@ function render(connections){
     }));
     box.append(row);
   }
-  if(c.provider==='heroku' && c.status==='pending'){
-    const warning=el('div','Heroku activation is not available until a separate, verified finance-blind broker is configured. No Heroku credentials are accepted in this panel.');
-    warning.className='warn';box.append(warning);
-    const row=el('div');row.className='row';
-    const appName=input('');appName.placeholder='Authorized Heroku app';
-    row.append(appName,button('Verify via broker',async()=>{
-      await call('nyx_connection_verify_heroku',{id:c.id,app:appName.value.trim()});
-      show('Heroku app verified by independent read-only broker. Choose permissions and resources next.');
-      await refresh();
-    }));
-    box.append(row);
-  }
   if(c.status==='active'){
     const group=el('fieldset');group.append(el('legend','Allowed API operations'));
     const grid=el('div');grid.className='capabilities';const checks=[];
-    const allowed=(c.availableCapabilities||[]).filter(x=>c.provider==='github'?
-      ['repository:metadata','resources:read','ci:read','issues:read','pulls:read','releases:read'].includes(x):
-      ['heroku:apps:read','heroku:releases:read'].includes(x));
+    const allowed=(c.availableCapabilities||[]).filter(x=>
+      ['repository:metadata','resources:read','contents:write','ci:read','issues:read','issues:write','pulls:read','pulls:write','releases:read'].includes(x));
     for(const cap of allowed){
       const label=el('label');const check=el('input');check.type='checkbox';
       check.checked=(c.capabilities||[]).includes(cap);
@@ -145,22 +179,53 @@ function render(connections){
       await refresh();
     }));box.append(group);
     const field=el('fieldset');field.append(el('legend','Resources'));
-    field.append(el('p',c.provider==='github'?
-      'One repository per line (owner/repo). These repositories must already be granted to your GitHub App.':
-      'One already-existing Heroku app name per line. Only apps independently authorized by the broker are accessible.'));
+    field.append(el('p','One repository per line (owner/repo). These repositories must already be granted to your GitHub App.'));
     const area=el('textarea');area.value=(c.resources||[]).map(x=>x.id).join('\n');field.append(area);
     field.append(button('Save resources',async()=>{
       const selected=checks.filter(x=>x.check.checked).map(x=>x.cap);
-      const kind=c.provider==='github'?'repository':'heroku-app';
+      const kind='repository';
       const ids=[...new Set(area.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))];
       await call('nyx_connection_resources',{id:c.id,resources:ids.map(id=>({kind,id,capabilities:selected}))});
       show('Resource selection saved. Provider grants are still enforced.');
       await refresh();
     }));
     box.append(field);
+    const ops=el('fieldset');ops.append(el('legend','GitHub development'));
+    ops.append(el('p','All file writes stay on nyx/* review branches. Direct main/master changes, workflow or infrastructure files, and merging are not available here.'));
+    const opRepo=input((c.resources||[]).find(x=>x.kind==='repository')?.id||'');
+    opRepo.placeholder='owner/repository';
+    const opBranch=input('nyx/my-change');opBranch.placeholder='nyx/my-change';
+    const target=el('div');target.className='row';
+    target.append(el('span','Repository'),opRepo,el('span','Review branch'),opBranch);
+    ops.append(target);
+    const commands=el('div');commands.className='controls';
+    commands.append(button('Create review branch',async()=>{
+      const result=await call('nyx_connection_github_branch_create',{
+        id:c.id,repo:opRepo.value.trim(),branch:opBranch.value.trim()
+      });show('Review branch created: '+result.branch);
+    }));
+    const prTitle=input('');prTitle.placeholder='Draft PR title';
+    const prRow=el('div');prRow.className='row';prRow.append(prTitle,
+      button('Open draft PR',async()=>{
+        const result=await call('nyx_connection_github_draft_pr',{
+          id:c.id,repo:opRepo.value.trim(),branch:opBranch.value.trim(),
+          title:prTitle.value.trim()
+        });
+        show('Draft PR #'+result.number+' created. Review it in GitHub before merging.');
+      }));
+    ops.append(commands,prRow);
+    const issueTitle=input('');issueTitle.placeholder='Issue title';
+    const issueRow=el('div');issueRow.className='row';issueRow.append(issueTitle,
+      button('Create issue',async()=>{
+        const result=await call('nyx_connection_github_issue_create',{
+          id:c.id,repo:opRepo.value.trim(),title:issueTitle.value.trim()
+        });show('GitHub issue #'+result.number+' created.');
+      }));
+    ops.append(issueRow);
+    box.append(ops);
   }
   box.append(button('Disconnect',async()=>{
-    if(!confirm('Disconnect from NestNyx? You must separately revoke the GitHub App installation or external Heroku broker grant in the provider settings.'))return;
+    if(!confirm('Disconnect from NestNyx? To revoke GitHub authorization completely, also uninstall the GitHub App in GitHub settings.'))return;
     await call('nyx_connection_disconnect',{id:c.id});await refresh();show('Connection revoked in NestNyx.');
   }));
   root.append(box);
@@ -172,13 +237,17 @@ async function refresh(){
  render(data.connections);
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
+document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
 document.getElementById('new-form').addEventListener('submit',async e=>{
  e.preventDefault();const name=document.getElementById('new-name').value.trim();
- const provider=document.getElementById('provider').value;
+ const provider='github';
  try{await call('nyx_connection_create',{provider,name});await refresh();
   document.getElementById('new-name').value='';show('Connection created. Authorize before using resources.');
  }catch(e){show(e.message,true);}
 });
-ready.then(refresh).catch(e=>show('MCP Apps unavailable: '+e.message,true));
+ready.then(()=>{
+ refresh().catch(e=>show(e.message,true));
+ refreshRclone();
+}).catch(e=>show('MCP Apps unavailable: '+e.message,true));
 })();
 </script></body></html>`;

@@ -24,7 +24,9 @@ test('MCP Apps panel has local operations and no external credential forms',()=>
  assert.match(CONNECTIONS_PANEL_HTML,/ui\/initialize/);
  assert.match(CONNECTIONS_PANEL_HTML,/tools\/call/);
  assert.match(CONNECTIONS_PANEL_HTML,/nyx_connection_begin_github/);
- assert.match(CONNECTIONS_PANEL_HTML,/nyx_connection_verify_heroku/);
+ assert.doesNotMatch(CONNECTIONS_PANEL_HTML,/nyx_connection_verify_heroku/);
+ assert.doesNotMatch(CONNECTIONS_PANEL_HTML,/value="heroku"/);
+ assert.match(CONNECTIONS_PANEL_URI,/\/v2\.html$/);
  assert.doesNotMatch(CONNECTIONS_PANEL_HTML,/type="password"/);
  assert.doesNotMatch(CONNECTIONS_PANEL_HTML,/https:\/\/cdn\./);
  const scriptStart=CONNECTIONS_PANEL_HTML.indexOf('<script>')+8;
@@ -42,7 +44,9 @@ test('GitHub OAuth linking verifies the user-accessible installation and never s
   activateGithub:async(...args)=>{
     assert.deepEqual(args.slice(0,4),['oauth:user','pending-id','987','research-org']);
     assert.ok(args[4].includes('ci:read'));assert.ok(args[4].includes('issues:read'));
-    assert.equal(args[4].includes('issues:write'),false);
+    assert.equal(args[4].includes('issues:write'),true);
+    assert.equal(args[4].includes('contents:write'),false);
+    assert.equal(args[4].includes('pulls:write'),false);
     assert.deepEqual(args[5],['research-org/project']);
     assert.equal(JSON.stringify(args).includes('ghu_'),false);
     return{id:'pending-id',status:'active'};

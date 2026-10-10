@@ -42,6 +42,52 @@ export class StorageService {
     return (await this.megaEntries()).map((entry) => entry.alias).sort();
   }
 
+  /**
+   * Private, metadata-only Rclone account inventory for the MCP connections UI.
+   * Remote presence means configured, NOT that the provider is reachable.
+   * Never expose rclone.conf, account tokens, paths, provider options or secrets.
+   */
+  async rcloneConnections() {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    }
+    const [driveNames, megaNames] = await Promise.all([
+      this.rclone.listRemoteNamesByType('drive'),
+      this.rclone.listRemoteNamesByType('mega'),
+    ]);
+    const areas = this.roots.listAreas().map((alias) => ({
+      alias,
+      remote: this.roots.get(alias).remote.split(',')[0],
+    }));
+    const summarize = (provider: 'google-drive' | 'mega', names: string[]) => {
+      if (!Array.isArray(names) || names.length > 100) {
+        throw new Error('RCLONE_REMOTE_INVENTORY_INVALID');
+      }
+      return [...new Set(names)].sort().map((name) => {
+        if (typeof name !== 'string' || !name || name.length > 120 ||
+            /[:\\/\x00-\x1f\x7f]/.test(name)) {
+          throw new Error('RCLONE_REMOTE_INVENTORY_INVALID');
+        }
+        return {
+          provider,
+          name,
+          aliases: areas.filter((item) => item.remote === name)
+            .map((item) => item.alias).sort(),
+          state: 'configured' as const,
+        };
+      });
+    };
+    return {
+      schema: 'nyx.storage.rclone.connections.v1',
+      source: 'rclone_config',
+      status: 'configured_not_live_verified',
+      remotes: [
+        ...summarize('google-drive', driveNames),
+        ...summarize('mega', megaNames),
+      ],
+    };
+  }
+
   validateCopyPayload(payload: CopyJobPayload) {
     this.validateFileRef(payload.source, 'source');
     this.validateFileRef(payload.destination, 'destination');

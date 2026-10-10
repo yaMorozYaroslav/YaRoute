@@ -57,12 +57,18 @@ function verifiedGrants(permissions:Record<string,string>):ConnectorCapability[]
   if(['read','write'].includes(permissions.contents)) values.add('releases:read');
   if(['read','write'].includes(permissions.issues)) values.add('issues:read');
   if(['read','write'].includes(permissions.pull_requests)) values.add('pulls:read');
-  // Writes deliberately never inferred, regardless of broad installation grant.
+  if(permissions.contents==='write') values.add('contents:write');
+  if(permissions.issues==='write') values.add('issues:write');
+  if(permissions.pull_requests==='write') values.add('pulls:write');
+  // No release writes, Actions dispatch or workflow access even with provider grants.
   return [...values];
 }
-const permissionsFor=(capability:ConnectorCapability):Record<string,'read'>=>{
+const permissionsFor=(capability:ConnectorCapability):Record<string,'read'|'write'>=>{
   switch(capability) {
     case 'ci:read':return {metadata:'read',actions:'read'};
+    case 'contents:write':return {metadata:'read',contents:'write'};
+    case 'issues:write':return {metadata:'read',issues:'write'};
+    case 'pulls:write':return {metadata:'read',pull_requests:'write'};
     case 'resources:read':return {metadata:'read',contents:'read'};
     case 'releases:read':return {metadata:'read',contents:'read'};
     case 'issues:read':return {metadata:'read',issues:'read'};
@@ -73,8 +79,9 @@ const permissionsFor=(capability:ConnectorCapability):Record<string,'read'>=>{
 };
 
 /**
- * Only signed installation identity and repo-bounded, read-only tokens.
- * No CLI, no user tokens at rest, no GitHub Actions dispatch, no write token.
+ * Signed installation identity and repo-bounded, capability-specific tokens.
+ * No CLI, no user tokens at rest, no GitHub Actions dispatch, no workflow grants.
+ * Write tokens are permitted ONLY for explicitly selected, verified capabilities.
  */
 @Injectable()
 export class GithubAppService {
@@ -130,7 +137,7 @@ export class GithubAppService {
 
   /**
    * Every GitHub call mints a short-lived token restricted to one exact
-   * user-selected repo AND one read permission. No token is persisted.
+   * user-selected repo AND one minimal provider permission. No token is persisted.
    */
   async tokenFor(ownerId:string,connectionId:string,installationId:string,
     repo:string,capability:ConnectorCapability,boundary?:{branch?:string;path?:string}):Promise<string> {
