@@ -65,7 +65,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
   async save(connection: ConnectorConnection): Promise<void> {
     const known = CONNECTOR_CAPABILITIES as readonly string[];
     if (!connection.id || !connection.ownerId || !connection.externalAccountId ||
-      !['github','google-drive','gitlab','mega'].includes(connection.provider) ||
+      !['github','google-drive','gitlab','mega','heroku'].includes(connection.provider) ||
       !['pending','active','revoked'].includes(connection.status) ||
       !Array.isArray(connection.capabilities) ||
       !connection.capabilities.every(value => known.includes(value)) ||
