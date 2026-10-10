@@ -46,7 +46,7 @@ test('independent Heroku broker blocks financial and unassigned operations',asyn
  const request=async (operation,app=APP,sign=true,timestamp=Math.floor(Date.now()/1000))=>{
   const body=JSON.stringify({ownerId:OWNER,connectionId:ID,app,operation});
   const ts=String(timestamp);
-  const sig=sign?createHmac('sha256',KEY).update(ts+'\\n'+body).digest('hex'):'0'.repeat(64);
+  const sig=sign?createHmac('sha256',KEY).update(ts+'\n'+body).digest('hex'):'0'.repeat(64);
   return fetch(endpoint,{
    method:'POST',
    headers:{'content-type':'application/json','x-nyx-timestamp':ts,'x-nyx-signature':sig},
