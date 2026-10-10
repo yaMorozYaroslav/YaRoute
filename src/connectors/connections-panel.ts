@@ -7,7 +7,7 @@ export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v2.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NestNyx GitHub Connections</title>
+<title>NestNyx Connections</title>
 <style>
 :root{color-scheme:light dark;font:14px/1.5 system-ui,sans-serif}
 body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
@@ -28,16 +28,21 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .capabilities{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:5px}
 .controls{display:flex;flex-wrap:wrap;gap:7px}
 </style></head>
-<body><header><h1>⚙️ NestNyx GitHub connections</h1>
-<p class="muted">Manage GitHub repositories through verified, repository-scoped API permissions. No infrastructure, billing, CLI, or payment access.</p>
+<body><header><h1>⚙️ NestNyx connections</h1>
+<p class="muted">GitHub development permissions and your configured Google Drive / MEGA Rclone accounts. No billing, infrastructure control, or credential editing.</p>
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
-<section><h2>Add connection</h2><form id="new-form" class="row">
+<section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
+<p class="muted">Google Drive and MEGA remotes detected in the private NYX Rclone configuration. Listed means configured, not connectivity-tested. Read-only display; no passwords or tokens.</p>
+<div id="rclone-list" aria-live="polite">Loading configured drives…</div>
+<div id="rclone-status" role="status" aria-live="polite"></div>
+</section>
+<section><h2>Add GitHub connection</h2><form id="new-form" class="row">
 <span>Provider: <strong>GitHub</strong></span>
 <label>Name <input id="new-name" type="text" maxlength="80" placeholder="My development projects" required></label>
 <button type="submit">Add connection</button></form>
 <p><small>You can create multiple separately named, repo-scoped GitHub connections. No provider secrets are entered in this panel.</small></p></section>
-<section><div class="row" style="justify-content:space-between"><h2>My connections</h2><button id="refresh">Refresh</button></div>
+<section><div class="row" style="justify-content:space-between"><h2>GitHub connections</h2><button id="refresh">Refresh GitHub</button></div>
 <div id="connection-list" aria-live="polite">Loading…</div></section>
 <section><h2>Technical safeguards</h2><p>Only verified GitHub App installation access and repository-scoped API operations are exposed. No Git, Heroku, or Vercel CLI, infrastructure API, workflow dispatch, plan changes, billing, or payment controls.</p></section>
 <div id="message" role="status" aria-live="polite"></div>
@@ -45,6 +50,8 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 (function(){
 'use strict';
 const root=document.getElementById('connection-list');
+const rcloneRoot=document.getElementById('rclone-list');
+const rcloneStatus=document.getElementById('rclone-status');
 const status=document.getElementById('message');
 const pending=new Map();let rpcId=0,connecting;
 function request(method,params){
@@ -78,6 +85,7 @@ function consume(response){
  try{
   const data=unwrap(response);
   if(data && Array.isArray(data.connections))render(data.connections);
+  if(data && Array.isArray(data.remotes))renderRclone(data);
  }catch(e){show(e.message,true);}
 }
 async function call(name,args){
@@ -89,6 +97,46 @@ function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.
 function button(name,handler){const b=el('button',name);b.type='button';b.addEventListener('click',async()=>{
  b.disabled=true;try{await handler();}catch(e){show(e.message,true);}finally{b.disabled=false;}});return b;}
 function input(value){const n=el('input');n.type='text';n.value=value||'';n.maxLength=80;return n;}
+function renderRclone(data){
+ rcloneRoot.replaceChildren();
+ if(data?.schema!=='nyx.storage.rclone.connections.v1' ||
+    data?.status!=='configured_not_live_verified' ||
+    !Array.isArray(data.remotes))throw new Error('Invalid Rclone inventory response');
+ const entries=data.remotes.filter(x=>x &&
+   ['google-drive','mega'].includes(x.provider) &&
+   typeof x.name==='string' && Array.isArray(x.aliases));
+ if(!entries.length){
+  rcloneRoot.append(el('p','No Google Drive or MEGA remotes were reported by private Rclone.'));
+  return;
+ }
+ for(const provider of ['google-drive','mega']){
+  const remotes=entries.filter(x=>x.provider===provider);
+  const group=el('div');group.className='card';
+  group.append(el('strong',provider==='google-drive'?'Google Drive':'MEGA'));
+  if(!remotes.length){
+   group.append(el('p','None configured.'));rcloneRoot.append(group);continue;
+  }
+  for(const remote of remotes){
+   const line=el('div');line.className='row';
+   line.append(el('strong',remote.name),el('span','Configured in Rclone'));
+   line.lastChild.className='badge';
+   if(remote.aliases.length)line.append(el('small','Areas: '+remote.aliases.join(', ')));
+   group.append(line);
+  }
+  rcloneRoot.append(group);
+ }
+}
+async function refreshRclone(){
+ rcloneStatus.textContent='';
+ try{
+  const data=await call('nyx_rclone_connections_list',{});
+  renderRclone(data);
+ }catch(e){
+  rcloneRoot.replaceChildren(el('p','Rclone inventory unavailable. Private NYX authorization and the configured Rclone runtime are required.'));
+  rcloneStatus.textContent=e?.message||'Unable to read configured remotes';
+  rcloneStatus.className='error';
+ }
+}
 function render(connections){
  root.replaceChildren();
  if(!connections.length){root.append(el('p','No connections yet. Add one above.'));return;}
@@ -189,6 +237,7 @@ async function refresh(){
  render(data.connections);
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
+document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
 document.getElementById('new-form').addEventListener('submit',async e=>{
  e.preventDefault();const name=document.getElementById('new-name').value.trim();
  const provider='github';
@@ -196,6 +245,9 @@ document.getElementById('new-form').addEventListener('submit',async e=>{
   document.getElementById('new-name').value='';show('Connection created. Authorize before using resources.');
  }catch(e){show(e.message,true);}
 });
-ready.then(refresh).catch(e=>show('MCP Apps unavailable: '+e.message,true));
+ready.then(()=>{
+ refresh().catch(e=>show(e.message,true));
+ refreshRclone();
+}).catch(e=>show('MCP Apps unavailable: '+e.message,true));
 })();
 </script></body></html>`;
