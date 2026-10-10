@@ -52,7 +52,11 @@ export class McpAuthService {
           .map((subject) => subject.trim())
           .filter(Boolean),
       );
-      if (!allowedSubjects.has(payload.sub)) {
+      // Public connector mode has verified JWT tenants and NO legacy shared
+      // Rclone, CLI, or private handoff tools. Keep strict allowlist in private mode.
+      const connectorMode = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true';
+      if (!connectorMode && !allowedSubjects.has(payload.sub)) {
         res.status(403).json({ error: 'access_denied', error_description: 'Private NYX instance: user not authorized' });
         return false;
       }
