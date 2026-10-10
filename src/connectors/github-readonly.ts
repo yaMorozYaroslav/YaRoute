@@ -11,11 +11,11 @@ export class GithubReadonlyConnector {
     private readonly credentials: GithubInstallationCredentials,
     private readonly http: GithubHttp = fetch,
   ) {}
-  private async request(ownerId: string, connectionId: string, repo: string, suffix: string) {
+  private async request(ownerId: string, connectionId: string, repo: string, suffix: string, capability: ConnectorCapability = 'ci:read') {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..')) throw new Error('GITHUB_REPOSITORY_INVALID');
-    const connection = await this.registry.requireResource(ownerId, connectionId, 'ci:read', {kind: 'repository', id: repo});
+    const connection = await this.registry.requireResource(ownerId, connectionId, capability, {kind: 'repository', id: repo});
     if (connection.provider !== 'github' || !connection.installationId) throw new Error('GITHUB_INSTALLATION_REQUIRED');
-    const token = await this.credentials.tokenFor(ownerId, connectionId, connection.installationId, repo, 'ci:read');
+    const token = await this.credentials.tokenFor(ownerId, connectionId, connection.installationId, repo, capability);
     if (!token) throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
     const response = await this.http('https://api.github.com/repos/' + repo + suffix, {
       method: 'GET',
@@ -24,8 +24,52 @@ export class GithubReadonlyConnector {
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) throw new Error(response.status === 404 ? 'GITHUB_NOT_FOUND' : 'GITHUB_API_FAILED');
-    return response.json();
+    const body=await response.text();
+    if(body.length>250000)throw new Error('GITHUB_RESPONSE_TOO_LARGE');
+    try{return JSON.parse(body);}catch{throw new Error('GITHUB_RESPONSE_INVALID');}
   }
+  /** Safe GitHub REST reads with explicit per-repo token scopes; no CLI. */
+  async repository(ownerId:string,connectionId:string,repo:string) {
+    const body=await this.request(ownerId,connectionId,repo,'','repository:metadata');
+    return {fullName:body.full_name,private:body.private,
+      defaultBranch:body.default_branch,archived:body.archived,description:body.description,
+      htmlUrl:body.html_url,updatedAt:body.updated_at};
+  }
+  async issues(ownerId:string,connectionId:string,repo:string) {
+    const body=await this.request(ownerId,connectionId,repo,'/issues?state=open&per_page=30','issues:read');
+    if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
+    return body.filter(x=>!x.pull_request).slice(0,30).map(x=>({
+      number:x.number,title:x.title,state:x.state,url:x.html_url,
+      updatedAt:x.updated_at,labels:Array.isArray(x.labels)?x.labels.slice(0,10).map((l:any)=>l.name):[],
+    }));
+  }
+  async pullRequests(ownerId:string,connectionId:string,repo:string) {
+    const body=await this.request(ownerId,connectionId,repo,'/pulls?state=open&per_page=30','pulls:read');
+    if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
+    return body.slice(0,30).map(x=>({
+      number:x.number,title:x.title,state:x.state,draft:x.draft,url:x.html_url,
+      base:x.base?.ref,head:x.head?.ref,updatedAt:x.updated_at,
+    }));
+  }
+  async fileText(ownerId:string,connectionId:string,repo:string,path:string,ref:string) {
+    if(!path||path.length>600||path.startsWith('/')||path.includes('\\')||
+       path.split('/').some(x=>!x||x==='.'||x==='..')||/[?#\x00-\x1f]/.test(path)) {
+       throw new Error('GITHUB_PATH_INVALID');
+    }
+    if(!ref||ref.length>120||!/^[A-Za-z0-9_./-]+$/.test(ref)||
+       ref.includes('..')||ref.startsWith('-'))throw new Error('GITHUB_BRANCH_INVALID');
+    const safePath=path.split('/').map(encodeURIComponent).join('/');
+    const body=await this.request(ownerId,connectionId,repo,
+      '/contents/'+safePath+'?ref='+encodeURIComponent(ref),'resources:read');
+    if(body.type!=='file'||typeof body.size!=='number'||body.size>65536||
+       body.encoding!=='base64'||typeof body.content!=='string') {
+       throw new Error('GITHUB_FILE_UNSUPPORTED_OR_TOO_LARGE');
+    }
+    const decoded=Buffer.from(body.content.replace(/\s/g,''),'base64');
+    if(decoded.length>65536||decoded.includes(0))throw new Error('GITHUB_FILE_NOT_TEXT');
+    return {path:body.path,sha:body.sha,size:decoded.length,text:decoded.toString('utf8')};
+  }
+
   async workflows(ownerId: string, connectionId: string, repo: string) {
     return this.request(ownerId, connectionId, repo, '/actions/workflows?per_page=30');
   }
