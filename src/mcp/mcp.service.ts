@@ -12,6 +12,7 @@ import { CopyJobPayload } from '../storage/storage.types';
 import { assessPotentialFinancialLoss } from '../connectors/financial-risk-preflight';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
+import { GithubWriteConnector } from '../connectors/github-writes';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 
@@ -28,6 +29,7 @@ export class McpService {
     private readonly commands: NyxCommandExecutor,
     private readonly connections: ConnectorsService,
     private readonly github: GithubReadonlyConnector,
+    private readonly githubWrites: GithubWriteConnector,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -201,21 +203,21 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.repository(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.repository(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_issues',{
       title:'List open issues in my authorized repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.issues(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.issues(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_pulls',{
       title:'List open pull requests in my authorized repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.pullRequests(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.pullRequests(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_file',{
       title:'Read a bounded text file from my authorized GitHub repository',
@@ -224,7 +226,7 @@ export class McpService {
         path:z.string().min(1).max(600),ref:z.string().min(1).max(120)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,path,ref})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.fileText(this.connectorOwner(),id,repo,path,ref))));
+      this.limitedConnectionApi(id,()=>this.github.fileText(this.connectorOwner(),id,repo,path,ref))));
 
     server.registerTool('nyx_connection_github_branches',{
       title:'List branches through authorized GitHub API',
@@ -232,7 +234,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.branches(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.branches(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_commits',{
       title:'Read recent commits on an allowed GitHub branch',
@@ -240,7 +242,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().min(1).max(120)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.commits(this.connectorOwner(),id,repo,branch))));
+      this.limitedConnectionApi(id,()=>this.github.commits(this.connectorOwner(),id,repo,branch))));
 
     server.registerTool('nyx_connection_github_releases',{
       title:'Read GitHub releases through authorized API',
@@ -248,7 +250,7 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
@@ -256,21 +258,62 @@ export class McpService {
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.workflows(this.connectorOwner(),id,repo))));
+      this.limitedConnectionApi(id,()=>this.github.workflows(this.connectorOwner(),id,repo))));
 
     server.registerTool('nyx_connection_github_runs',{
       title:'Read Actions runs in my authorized GitHub repository',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().max(120).optional()}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.runs(this.connectorOwner(),id,repo,branch))));
+      this.limitedConnectionApi(id,()=>this.github.runs(this.connectorOwner(),id,repo,branch))));
 
     server.registerTool('nyx_connection_github_jobs',{
       title:'Read jobs of an authorized GitHub Actions run',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),runId:z.number().int().positive()}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo,runId})=>this.safeTool(()=>
-      this.readConnectionApi(id,()=>this.github.jobs(this.connectorOwner(),id,repo,runId))));
+      this.limitedConnectionApi(id,()=>this.github.jobs(this.connectorOwner(),id,repo,runId))));
+
+    // GitHub API writes are restricted to owner-selected repositories and
+    // review-only nyx/* branches. No workflow dispatch, merges or hosting API.
+    server.registerTool('nyx_connection_github_branch_create',{
+      title:'Create a NYX GitHub review branch',
+      description:'Create a nyx/* branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        branch:z.string().min(5).max(100)}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,branch})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.createBranch(this.connectorOwner(),id,repo,branch))));
+
+    server.registerTool('nyx_connection_github_commit_file',{
+      title:'Commit one file on a NYX review branch',
+      description:'Create or update one UTF-8 file on an existing nyx/* branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        branch:z.string().min(5).max(100),path:z.string().min(1).max(400),
+        content:z.string().max(65536),message:z.string().min(1).max(160),
+        sha:z.string().regex(/^[a-f0-9]{40}$/).optional()}),
+      annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,branch,path,content,message,sha})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.commitFile(this.connectorOwner(),id,repo,branch,path,content,message,sha))));
+
+    server.registerTool('nyx_connection_github_draft_pr',{
+      title:'Open a draft PR for a NYX branch',
+      description:'Open a draft pull request from a nyx/* branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        branch:z.string().min(5).max(100),title:z.string().min(1).max(200),
+        body:z.string().max(10000).optional()}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,branch,title,body})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.draftPull(this.connectorOwner(),id,repo,branch,title,body))));
+
+    server.registerTool('nyx_connection_github_issue_create',{
+      title:'Create an issue in an authorized GitHub repository',
+      description:'Create an issue through the GitHub API with an installation-scoped issues:write grant. No issue-triggered workflow dispatch is authorized.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        title:z.string().min(1).max(200),body:z.string().max(10000).optional()}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id,repo,title,body})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.createIssue(this.connectorOwner(),id,repo,title,body))));
 
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
