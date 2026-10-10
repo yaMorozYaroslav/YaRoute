@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { parseLegacyKey, appendLegacyProposals } from './key-legacy';
 
 /** Storage-independent KEY engine. Provider implementations own atomic writes and readback. */
 export interface KeyStore {
@@ -24,7 +25,13 @@ export class KeyEngine {
     const original = await this.store.read(input.keyPath);
     if (original === null) throw new Error('KEY_SOURCE_MISSING');
     let parsed: { candidates: KeyCandidate[] };
-    try { parsed = JSON.parse(original); } catch { throw new Error('KEY_SOURCE_INVALID'); }
+    let legacy = false;
+    try { parsed = JSON.parse(original); }
+    catch {
+      const converted = parseLegacyKey(original);
+      parsed = { candidates: converted.items };
+      legacy = true;
+    }
     if (!Array.isArray(parsed.candidates)) throw new Error('KEY_SOURCE_INVALID');
     const merged = new Map<string, KeyCandidate>();
     for (const item of [...parsed.candidates, ...input.candidates]) {
@@ -36,7 +43,7 @@ export class KeyEngine {
     const all = [...merged.values()].sort((a,b) => b.confidence - a.confidence || a.id.localeCompare(b.id));
     const active = all.length > 10 ? all.filter(x => x.blocked || x.confidence < 0.8).slice(0,5) : all;
     const archived = all.length > 10 ? all.filter(x => !active.includes(x)) : [];
-    const next = JSON.stringify({ ...parsed, candidates: active, archived: [...((parsed as any).archived ?? []), ...archived] }, null, 2) + '\n';
+    const next = legacy ? appendLegacyProposals(original, input.candidates, input.transactionId) : JSON.stringify({ ...parsed, candidates: active, archived: [...((parsed as any).archived ?? []), ...archived] }, null, 2) + '\n';
     const base = input.seedDirectory.replace(/\/$/, '') + '/key_' + input.transactionId;
     const mutations: { path: string; sha256: string }[] = [];
     const commit = async (path: string, value: string) => {
