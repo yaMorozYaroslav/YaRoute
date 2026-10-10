@@ -120,6 +120,19 @@ export class StorageService {
     }
   }
 
+  /** Single-account isolated Rclone probe using an encrypted-vault profile. */
+  async testIsolatedRcloneConnection(
+    provider:'google-drive'|'mega',remote:string,profile:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE === 'public')throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if(!['google-drive','mega'].includes(provider) ||
+       !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote))throw new Error('RCLONE_REMOTE_INVALID');
+    const ok=await this.rclone.probeIsolated(remote,profile);
+    return {schema:'nyx.storage.rclone.probe.v1',provider,name:remote,
+      status:ok?'reachable':'unverified',
+      ...(ok?{}:{reason:'PROBE_FAILED_OR_UNSUPPORTED'}),
+      check:'isolated_rclone_about',configurationChanged:false};
+  }
+
   validateCopyPayload(payload: CopyJobPayload) {
     this.validateFileRef(payload.source, 'source');
     this.validateFileRef(payload.destination, 'destination');
