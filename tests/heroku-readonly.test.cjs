@@ -21,7 +21,7 @@ test('Heroku connector only reveals config key names for an approved app', async
     configNames: async (owner, connection, app) => {
       assert.deepEqual([owner, connection, app], ['oauth:owner', 'heroku1', 'sample-app']);
       calls++;
-      return ['DATABASE_URL', 'PUBLIC_URL', 'PUBLIC_URL'];
+      return ['DATABASE_URL', 'PUBLIC_URL', 'PUBLIC_URL', 'STRIPE_SECRET_KEY', 'PAYPAL_PAYMENTS_KEY', 'BILLING_TOKEN'];
     },
     appInfo: async () => { throw new Error('unavailable'); },
     releases: async () => { throw new Error('unavailable'); },
