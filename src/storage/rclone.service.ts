@@ -9,6 +9,11 @@ export class RcloneService implements OnModuleInit {
   private readonly configPath = process.env.RCLONE_CONFIG_PATH || '/tmp/rclone.conf';
 
   onModuleInit() {
+    // A process-wide rclone.conf contains one operator's storage credentials.
+    // Never start a public multi-user service with that configuration.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
+    }
     const encoded = process.env.RCLONE_CONFIG_B64;
     if (encoded) {
       fs.writeFileSync(this.configPath, Buffer.from(encoded, 'base64'), { mode: 0o600 });
