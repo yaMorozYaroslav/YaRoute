@@ -70,3 +70,35 @@ Production prerequisites:
 Google Drive and Git share connector ownership and permission concepts but retain
 provider-specific resource semantics. Canonical Head remains authoritative for Yaro
 command behavior; this code is not a canonical core-bundle generation.
+
+
+## Never expose financial control
+
+This is an **immutable safety constraint across all connectors and CLI workers**,
+even for an account owner: NYX may not access payment methods or financial account
+details, purchase paid services/add-ons, create potentially billable Heroku apps,
+change plans or tariffs, alter resource sizes/formation/scaling, or enable recurrent
+charges. Additional provider permissions or ChatGPT approvals cannot override it.
+There is no billing read API in NYX.
+
+- `SELECTABLE_CONNECTOR_CAPABILITIES` removes permanently forbidden capabilities.
+- `ConnectorRegistry.require()` rejects them, including historic database grants.
+- `HerokuOperationPlanner` rejects app creation, arbitrary config writes and billing.
+- Heroku metadata now requires a separate, finance-blind credential broker; NYX
+  must not hold broad Heroku tokens with access to billing endpoints.
+- Provider-specific Git/Heroku workers must use typed allowlisted operations and
+  no arbitrary shell, process credentials, or unrestricted provider API paths.
+
+**Financial safety is separate from ordinary user-adjustable permissions.**
+A user may name a connection and select ordinary access levels, but cannot activate
+prohibited payment or tariff capabilities. Billing setup and payments must be
+performed manually in the provider's own portal, outside NestNyx.
+
+Deployment and Git actions can still indirectly incur metered compute/CI usage;
+they require explicit review, external cost ceilings/budgets where available, and
+independent restrictions on credentials. Do not claim an absolute no-spend guarantee
+for broad deployment rights. Until those controls are verified, leave those
+high-impact operations unavailable in the production MCP plugin.
+
+These are library-level safeguards committed in YaRoute; they are not deployed
+or canonicalized as a new Head bundle.
