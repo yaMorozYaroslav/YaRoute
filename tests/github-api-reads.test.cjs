@@ -32,7 +32,7 @@ function api(result){
 }
 
 test('GitHub commits are bounded and branch-scoped without allowing any writes',async()=>{
- const t=api([{sha:'abcd',commit:{message:'Refactor\\nNext line',committer:{date:'2026-10-10'}},html_url:'https://github.com/example/repo/commit/abcd'}]);
+ const t=api([{sha:'abcd',commit:{message:'Refactor\nNext line',committer:{date:'2026-10-10'}},html_url:'https://github.com/example/repo/commit/abcd'}]);
  const records=await t.connector.commits('oauth:test','conn-github','example/repo','main');
  assert.equal(records.length,1);
  assert.equal(records[0].summary,'Refactor');
