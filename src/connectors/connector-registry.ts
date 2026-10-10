@@ -15,7 +15,7 @@ export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:r
 export type ConnectorCapability = typeof CONNECTOR_CAPABILITIES[number];
 /** UI MUST NOT offer old/forbidden payment, provisioning or unrestricted config capabilities. */
 export const SELECTABLE_CONNECTOR_CAPABILITIES = CONNECTOR_CAPABILITIES.filter(
-  capability => !isFinanciallyProhibited(capability),
+  capability => !isFinanciallyProhibited(capability) && !capability.startsWith('git:'),
 );
 
 /** The user chooses a label and enabled permissions; provider grants are verified separately. */
@@ -53,6 +53,8 @@ function validCapabilities(values: readonly ConnectorCapability[]): boolean {
 const gitProviders = new Set<ConnectorProvider>(['github','gitlab']);
 export function supportsCapability(provider: ConnectorProvider, capability: ConnectorCapability): boolean {
   if (isFinanciallyProhibited(capability)) return false;
+  // Owner decision: GitHub/GitLab and Heroku are API-only; never grant Git CLI.
+  if (capability.startsWith('git:')) return false;
   if (/^(git:|repository:|pulls:|issues:|releases:|ci:)/.test(capability)) return gitProviders.has(provider);
   if (capability.startsWith('heroku:')) return provider === 'heroku';
   if (capability.startsWith('storage:')) return provider === 'google-drive' || provider === 'mega';
