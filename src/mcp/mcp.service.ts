@@ -44,6 +44,32 @@ export class McpService {
       version: '0.8.0',
     });
 
+    // Capability discovery is advisory: canonical Head/nyxcli.json defines semantics.
+    // A supported tool failing authorization is NOT a GPT fallback condition.
+    server.registerTool(
+      'nyx_capabilities',
+      {
+        title: 'Discover NestNyx command capabilities',
+        description: 'Read-only routing inventory. Resolve the command in canonical Head first; only unsupported commands may be handled by GPT. Errors are never treated as unsupported.',
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async () => this.safeTool(async () => ({
+        schema: 'nyx.mcp.capabilities.v1',
+        authority: 'canonical Head/LEAD/Core_Skills/YaRoCLI/nyxcli.json',
+        routing: 'head_resolve_then_mcp_capability_then_mcp_or_gpt',
+        unsupportedOnlyFallback: true,
+        executionFailureFallback: false,
+        commandEntrypoints: {
+          execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
+          ini: { tool: 'nyx_ini', status: 'registered' },
+          sum: { tool: 'nyx_sum', status: 'registered' },
+        },
+        auxiliaryTools: ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file'],
+        note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
+      })),
+    );
+
     server.registerTool(
       'nyx_execute',
       {
