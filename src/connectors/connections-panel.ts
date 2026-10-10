@@ -33,7 +33,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
 <section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
-<p class="muted">Google Drive and MEGA remotes detected in the private NYX Rclone configuration. Listed means configured, not connectivity-tested. Read-only display; no passwords or tokens.</p>
+<p class="muted">Google Drive and MEGA remotes in the private Rclone configuration. Test account access per remote without exposing credentials or file contents. Adding, deleting and reauthorizing Rclone credentials still require private server administration.</p>
 <div id="rclone-list" aria-live="polite">Loading configured drives…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 </section>
@@ -121,6 +121,18 @@ function renderRclone(data){
    line.append(el('strong',remote.name),el('span','Configured in Rclone'));
    line.lastChild.className='badge';
    if(remote.aliases.length)line.append(el('small','Areas: '+remote.aliases.join(', ')));
+   const checkStatus=el('small','Not checked');
+   line.append(button('Test access',async()=>{
+     checkStatus.textContent='Checking…';
+     try{
+       const result=await call('nyx_rclone_connection_test',{provider:remote.provider,name:remote.name});
+       if(result?.schema!=='nyx.storage.rclone.probe.v1'||result.name!==remote.name||
+          result.provider!==remote.provider||!['reachable','unverified'].includes(result.status)){
+         throw Error('Invalid Rclone probe result');
+       }
+       checkStatus.textContent=result.status==='reachable'?'Provider access confirmed':'Not verified (unavailable or unsupported)';
+     }catch(e){checkStatus.textContent='Check failed';show(e.message,true);}
+   }),checkStatus);
    group.append(line);
   }
   rcloneRoot.append(group);
