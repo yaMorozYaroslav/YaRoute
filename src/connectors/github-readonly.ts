@@ -12,9 +12,9 @@ export class GithubReadonlyConnector {
     private readonly http: GithubHttp = fetch,
   ) {}
   private async request(ownerId: string, connectionId: string, repo: string, suffix: string) {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..')) throw new Error('GITHUB_REPOSITORY_INVALID');
     const connection = await this.registry.requireResource(ownerId, connectionId, 'ci:read', {kind: 'repository', id: repo});
     if (connection.provider !== 'github' || !connection.installationId) throw new Error('GITHUB_INSTALLATION_REQUIRED');
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..')) throw new Error('GITHUB_REPOSITORY_INVALID');
     const token = await this.credentials.tokenFor(ownerId, connectionId, connection.installationId);
     if (!token) throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
     const response = await this.http('https://api.github.com/repos/' + repo + suffix, {
