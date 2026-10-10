@@ -1,4 +1,5 @@
 /** Provider-neutral multi-tenant connection metadata. No credentials are stored here. */
+import { assertNoFinancialAccess, isFinanciallyProhibited } from './financial-safety';
 export type ConnectorProvider = 'github' | 'google-drive' | 'gitlab' | 'mega' | 'heroku';
 export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:read', 'ci:dispatch',
   'storage:list', 'storage:stat', 'storage:read', 'storage:capacity', 'storage:index',
@@ -12,6 +13,10 @@ export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:r
   'heroku:apps:read', 'heroku:config:names', 'heroku:releases:read', 'heroku:logs:read',
   'heroku:config:write', 'heroku:deploy', 'heroku:apps:create', 'heroku:apps:restart'] as const;
 export type ConnectorCapability = typeof CONNECTOR_CAPABILITIES[number];
+/** UI MUST NOT offer old/forbidden payment, provisioning or unrestricted config capabilities. */
+export const SELECTABLE_CONNECTOR_CAPABILITIES = CONNECTOR_CAPABILITIES.filter(
+  capability => !isFinanciallyProhibited(capability),
+);
 
 /** The user chooses a label and enabled permissions; provider grants are verified separately. */
 export type ConnectorResourceKind = 'repository' | 'drive' | 'folder' | 'mega-root' | 'heroku-app' | 'heroku-account';
@@ -47,6 +52,7 @@ function validCapabilities(values: readonly ConnectorCapability[]): boolean {
 }
 const gitProviders = new Set<ConnectorProvider>(['github','gitlab']);
 export function supportsCapability(provider: ConnectorProvider, capability: ConnectorCapability): boolean {
+  if (isFinanciallyProhibited(capability)) return false;
   if (/^(git:|repository:|pulls:|issues:|releases:|ci:)/.test(capability)) return gitProviders.has(provider);
   if (capability.startsWith('heroku:')) return provider === 'heroku';
   if (capability.startsWith('storage:')) return provider === 'google-drive' || provider === 'mega';
@@ -129,6 +135,7 @@ export class ConnectorRegistry {
     authorizationRequired: ConnectorCapability[];
   }> {
     const connection = await this.owned(ownerId, connectionId);
+    capabilities.forEach(assertNoFinancialAccess);
     if (!validCapabilities(capabilities) || capabilities.some(c => !supportsCapability(connection.provider,c))) throw new Error('CONNECTOR_PERMISSIONS_INVALID');
     const selected = [...new Set(capabilities)];
     const updated = { ...connection, capabilities: selected };
@@ -146,6 +153,7 @@ export class ConnectorRegistry {
     return updated;
   }
   async require(ownerId: string, connectionId: string, capability: ConnectorCapability): Promise<ConnectorConnection> {
+    assertNoFinancialAccess(capability);
     const connection = await this.owned(ownerId, connectionId);
     if (connection.status !== 'active') throw new Error('CONNECTOR_INACTIVE');
     if (!supportsCapability(connection.provider,capability) || !connection.capabilities.includes(capability)) throw new Error('CONNECTOR_FORBIDDEN');
