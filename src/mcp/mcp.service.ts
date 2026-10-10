@@ -75,7 +75,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -318,6 +318,19 @@ export class McpService {
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
     if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;
+
+    // Private-only, read-only discovery of configured Rclone remotes. Never
+    // expose the operator's Rclone config, tokens, remote options or file contents.
+    // This is auxiliary MCP metadata, NOT a canonical Head/Yaro CLI command.
+    server.registerTool('nyx_rclone_connections_list',{
+      title:'List configured private Google Drive and MEGA Rclone remotes',
+      description:'Read-only: list the Google Drive and MEGA remote names and safe logical aliases configured in the private Rclone runtime. Does not test online availability or expose credentials.',
+      inputSchema:z.object({}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>this.safeTool(()=>{
+      this.connectorOwner();
+      return this.storage.rcloneConnections();
+    }));
 
     server.registerTool(
       'nyx_execute',
