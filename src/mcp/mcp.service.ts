@@ -9,9 +9,6 @@ import { InitService } from '../init/init.service';
 import { JobStoreService } from '../storage/job-store.service';
 import { StorageService } from '../storage/storage.service';
 import { CopyJobPayload } from '../storage/storage.types';
-import { NyxBootstrapService } from '../nyx/bootstrap.service';
-import { NyxCliRegistryService } from '../nyx/cli-registry.service';
-import { NyxHeadLibraryService } from '../nyx/head-library.service';
 
 @Injectable()
 export class McpService {
@@ -24,9 +21,6 @@ export class McpService {
     private readonly jobs: JobStoreService,
     private readonly init: InitService,
     private readonly commands: NyxCommandExecutor,
-    private readonly bootstrap: NyxBootstrapService,
-    private readonly registry: NyxCliRegistryService,
-    private readonly head: NyxHeadLibraryService,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -106,99 +100,6 @@ export class McpService {
           nextAction: input.nextAction,
         },
       }, this.ownerContext.getStore())),
-    );
-
-    server.registerTool(
-      'nyx_head_status',
-      {
-        title: 'Inspect Nyx Head constitution library',
-        description: 'Verify canonical Head CLI authority and report the read-only Head library cache used by NestNyx.',
-        inputSchema: z.object({}),
-        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      },
-      async () => this.safeTool(async () => {
-        const locator = await this.bootstrap.locate();
-        const cli = await this.registry.current(locator);
-        return {
-          status: 'READY',
-          role: 'constitution-library',
-          canonical: locator.canonical,
-          cli: { version: cli.cli.version, sha256: cli.hash },
-          library: this.head.snapshot(),
-          source_of_truth: 'canonical Head bundle',
-          mutation: 'read-only runtime cache',
-        };
-      }),
-    );
-
-    server.registerTool(
-      'nyx_areas',
-      {
-        title: 'List Nyx shared areas',
-        description: 'List the logical shared-folder areas that NestNyx is allowed to access.',
-        inputSchema: z.object({}),
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: false,
-        },
-      },
-      async () => this.safeTool(async () => ({ areas: await this.storage.areas() })),
-    );
-
-    server.registerTool(
-      'nyx_list',
-      {
-        title: 'List files in a shared area',
-        description: 'List files and folders below one configured Nyx shared-folder root. Paths cannot escape the configured root.',
-        inputSchema: z.object({
-          area: z.string().min(1).describe('Logical shared area, for example A, B, C, or D.'),
-          path: z.string().default('').describe('Relative path below the shared root. Empty string lists the root.'),
-        }),
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: false,
-        },
-      },
-      async ({ area, path }) => this.safeTool(() => this.storage.list(area, path)),
-    );
-
-    server.registerTool(
-      'nyx_stat',
-      {
-        title: 'Inspect a shared-area file',
-        description: 'Read rclone file metadata, hashes, size, and owner for one path below a configured Nyx shared-folder root.',
-        inputSchema: z.object({
-          area: z.string().min(1),
-          path: z.string().min(1),
-        }),
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: false,
-        },
-      },
-      async ({ area, path }) => this.safeTool(() => this.storage.stat(area, path)),
-    );
-
-    server.registerTool(
-      'nyx_capacity',
-      {
-        title: 'Check storage capacity',
-        description: 'Report quota total, used, and free bytes for the unique rclone accounts backing the configured shared areas.',
-        inputSchema: z.object({}),
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: false,
-        },
-      },
-      async () => this.safeTool(() => this.storage.capacity()),
     );
 
     server.registerTool(
@@ -300,7 +201,7 @@ export class McpService {
             root: 'Documents/Nyxpad/file_global_indexes',
             files: ['global.md', 'n_global.json', 'd_global.json'],
           },
-          message: 'Global file indexing queued. Poll nyx_job_status for completion.',
+          message: 'Global file indexing queued. Use the internal job workflow to check completion.',
         };
       }),
     );
@@ -335,30 +236,8 @@ export class McpService {
         return {
           job,
           sourceRetained: true,
-          message: 'Copy queued. Poll nyx_job_status until it succeeds or fails.',
+          message: 'Copy queued. Use the internal job workflow to check completion.',
         };
-      }),
-    );
-
-    server.registerTool(
-      'nyx_job_status',
-      {
-        title: 'Check a Nyx storage job',
-        description: 'Read the status and verification evidence for a queued storage job.',
-        inputSchema: z.object({
-          id: z.string().uuid(),
-        }),
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: false,
-        },
-      },
-      async ({ id }) => this.safeTool(async () => {
-        const job = await this.jobs.get(id);
-        if (!job) throw new Error('Job not found');
-        return job;
       }),
     );
 
