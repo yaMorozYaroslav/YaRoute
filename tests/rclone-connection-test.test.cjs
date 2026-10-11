@@ -56,10 +56,12 @@ test('unsupported or failing probes do not expose provider errors and never clai
   assert.equal(result.reason, 'PROBE_FAILED_OR_UNSUPPORTED');
   assert.equal(JSON.stringify(result).includes('private-token'), false);
 });
-test('Rclone probe stays private and app-only; panel renders results as text', () => {
+test('Rclone probe is app-only, owner-scoped, and public mode omits legacy commands', () => {
   const mcp = fs.readFileSync(path.join(__dirname, '../src/mcp/mcp.service.ts'), 'utf8');
   const panel = fs.readFileSync(path.join(__dirname, '../src/connectors/connections-panel.ts'), 'utf8');
-  assert.ok(mcp.indexOf("server.registerTool('nyx_rclone_connection_test'") >
+  assert.ok(mcp.indexOf("server.registerTool('nyx_rclone_connection_test'") <
+    mcp.indexOf("if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;"));
+  assert.ok(mcp.indexOf("server.registerTool('nyx_rclone_connections_list'") >
     mcp.indexOf("if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;"));
   assert.match(mcp, /this\.connections\.testRclone\(this\.connectorOwner\(\),id\)/);
   assert.match(mcp, /server\.registerTool\('nyx_rclone_connection_link'/);

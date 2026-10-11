@@ -81,7 +81,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -119,14 +119,14 @@ export class McpService {
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_PANEL_HTML,
         _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
-          'openai/widgetCSP':{redirect_domains:['https://github.com']},
+          'openai/widgetCSP':{redirect_domains:['https://github.com','https://accounts.google.com']},
           'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
       }]}),
     );
 
     server.registerTool('nyx_connections_panel',{
       title:'Manage NestNyx connections',
-      description:'Open the NestNyx MCP Apps panel: manage GitHub App connections, inspect Google Drive/MEGA Rclone remotes and run private read-only connectivity probes. Rclone credential editing is not supported. This is an MCP auxiliary tool, not a Yaro CLI command.',
+      description:'Manage GitHub App connections and owner-scoped Google Drive/MEGA encrypted-vault references. Isolated probes are available only for provisioned accounts; legacy Rclone inventory is private-only. This is an MCP auxiliary tool, not a Yaro CLI command.',
       inputSchema:z.object({}),
       _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
@@ -136,9 +136,9 @@ export class McpService {
       connections:await this.connections.list(this.connectorOwner()),
       providers:[
         {id:'github',availability:'oauth_ready_if_configured'},
-        ...(process.env.NYX_DEPLOYMENT_MODE === 'public' ? [] : [
-          {id:'google-drive',availability:'private_rclone_configuration_only'},
-          {id:'mega',availability:'private_rclone_configuration_only'},
+        ...((process.env.NYX_DEPLOYMENT_MODE === 'public' && process.env.NYX_RCLONE_VAULT_ENABLED !== 'true') ? [] : [
+          {id:'google-drive',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'read_only_oauth_if_configured' : 'private_rclone_configuration_only'},
+          {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
         ]),
       ],
       note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
@@ -146,11 +146,13 @@ export class McpService {
 
     server.registerTool('nyx_connections_list',{
       title:'List my NestNyx connections',
-      description:'Read owner-scoped GitHub and, in private mode, linked Rclone account metadata from the existing Neon/PostgreSQL registry without exposing credentials.',
+      description:'Read owner-scoped GitHub and vault-enabled Rclone account metadata from the existing Neon/PostgreSQL registry without exposing credentials.',
       inputSchema:z.object({}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       connections:await this.connections.list(this.connectorOwner()),
+      legacyInventoryAvailable:process.env.NYX_DEPLOYMENT_MODE!=='public',
+      isolatedVaultEnabled:process.env.NYX_RCLONE_VAULT_ENABLED==='true',
     })));
 
     server.registerTool('nyx_connection_create',{
@@ -163,7 +165,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_rename',{
       title:'Rename my connection',
-      description:'Rename one owned GitHub or private Rclone connection without changing identity, provider grants, or Rclone configuration.',
+      description:'Rename one owned GitHub or authorized Rclone connection without changing identity, provider grants, or Rclone configuration.',
       inputSchema:z.object({id:z.string().uuid(),name:z.string().min(1).max(80)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async({id,name})=>this.safeTool(()=>
@@ -193,7 +195,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_disconnect',{
       title:'Disconnect one NestNyx account',
-      description:'Disable one owned connection metadata record. GitHub App uninstall and Rclone credential removal must be performed separately by the provider owner. Does not edit Rclone configuration.',
+      description:'Disable owned connection metadata. Vault-managed Rclone credential ciphertext is deleted; provider-side revocation may still be needed. Does not edit a global Rclone config.',
       inputSchema:z.object({id:z.string().uuid()}),
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
     },async({id})=>this.safeTool(()=>
@@ -325,6 +327,42 @@ export class McpService {
     },async({id,repo,title,body})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.githubWrites.createIssue(this.connectorOwner(),id,repo,title,body))));
 
+    // Multi-account references are persisted in the existing Neon PostgreSQL
+    // connector registry with immutable IDs and authenticated owner IDs.
+    // Linking changes metadata only; no process-global Rclone configuration edits.
+    server.registerTool('nyx_rclone_connection_link',{
+      title:'Create one owner-scoped Drive/MEGA account reference',
+      description:'Create a pending owner-scoped Google Drive/MEGA account record in Neon. In private legacy mode the remote must already exist; vault mode permits isolated provisioning. No authorization is inferred.',
+      inputSchema:z.object({
+        provider:z.enum(['google-drive','mega']),
+        remoteName:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
+        name:z.string().min(1).max(80),
+      }),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    },async({provider,remoteName,name})=>this.safeTool(()=>
+      this.connections.createRclone(this.connectorOwner(),provider,remoteName,name)));
+
+
+    server.registerTool('nyx_rclone_connection_begin_google',{
+      title:'Authorize an owned Google Drive account (read-only OAuth)',
+      description:'Create a single-use Google PKCE consent URL for an owned Drive connection. Does not expose tokens, grant write access or use shared Rclone credentials.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.connections.beginGoogleDrive(this.connectorOwner(),id)));
+
+    server.registerTool('nyx_rclone_connection_test',{
+      title:'Check one owner-scoped Rclone account',
+      description:'Probe a configured Google Drive or MEGA remote selected by owner-scoped immutable connection ID. Returns sanitized connectivity status, without reading files, exposing secrets or modifying credentials. An auxiliary MCP Apps action, not a Yaro CLI command.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.connections.testRclone(this.connectorOwner(),id)));
+
+
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
     if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;
@@ -341,31 +379,6 @@ export class McpService {
       this.connectorOwner();
       return this.storage.rcloneConnections();
     }));
-
-    // Multi-account references are persisted in the existing Neon PostgreSQL
-    // connector registry with immutable IDs and authenticated owner IDs.
-    // Linking changes metadata only; no process-global Rclone configuration edits.
-    server.registerTool('nyx_rclone_connection_link',{
-      title:'Link an existing private Rclone remote as one named account',
-      description:'Create an owner-scoped, pending metadata reference to a configured Google Drive or MEGA remote in the existing Neon/PostgreSQL registry. No credentials are written and provider authorization is NOT inferred.',
-      inputSchema:z.object({
-        provider:z.enum(['google-drive','mega']),
-        remoteName:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
-        name:z.string().min(1).max(80),
-      }),
-      _meta:{ui:{visibility:['app']}},
-      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
-    },async({provider,remoteName,name})=>this.safeTool(()=>
-      this.connections.createRclone(this.connectorOwner(),provider,remoteName,name)));
-
-    server.registerTool('nyx_rclone_connection_test',{
-      title:'Check one linked private Rclone account',
-      description:'Probe a configured Google Drive or MEGA remote selected by owner-scoped immutable connection ID. Returns sanitized connectivity status, without reading files, exposing secrets or modifying credentials. An auxiliary MCP Apps action, not a Yaro CLI command.',
-      inputSchema:z.object({id:z.string().uuid()}),
-      _meta:{ui:{visibility:['app']}},
-      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    },async({id})=>this.safeTool(()=>
-      this.connections.testRclone(this.connectorOwner(),id)));
 
     // Private-only operational tools. These are MCP auxiliaries and must not
     // silently introduce new canonical Yaro CLI commands or execution contracts.

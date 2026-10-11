@@ -13,7 +13,11 @@ export class RcloneService implements OnModuleInit {
     // A process-wide rclone.conf contains one operator's storage credentials.
     // Never start a public multi-user service with that configuration.
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
-      throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
+      if (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') {
+        throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
+      }
+      // No global credentials or Rclone config materialization in public mode.
+      return;
     }
     const encoded = process.env.RCLONE_CONFIG_B64;
     if (encoded) {
@@ -31,7 +35,8 @@ export class RcloneService implements OnModuleInit {
    * are returned to the caller. The config file is always removed afterwards.
    */
   async probeIsolated(remote:string,profile:string):Promise<boolean> {
-    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
     if (!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
         typeof profile !== 'string' || Buffer.byteLength(profile,'utf8')>32768) {
       throw new Error('RCLONE_PROFILE_INVALID');
@@ -73,6 +78,21 @@ export class RcloneService implements OnModuleInit {
   }
 
   async version(): Promise<string> {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      return new Promise<string>(resolve => {
+        const child = spawn(this.binary, ['version'], {
+          env: { PATH: process.env.PATH }, stdio: ['ignore','pipe','ignore'], timeout: 5000,
+        });
+        let version = '';
+        child.stdout.on('data', (data:Buffer) => {
+          version += data.toString('utf8');
+          if (version.length > 1024) child.kill();
+        });
+        child.on('error', () => resolve('unavailable'));
+        child.on('close', code => resolve(code === 0 ?
+          (version.split('\n')[0]?.trim() || 'unknown') : 'unavailable'));
+      });
+    }
     const { stdout } = await this.run(['version']);
     return stdout.split('\n')[0]?.trim() || 'unknown';
   }
@@ -108,6 +128,8 @@ export class RcloneService implements OnModuleInit {
   }
 
   async run(args: string[], maxOutputBytes?: number): Promise<{ stdout: string; stderr: string }> {
+    // Legacy arbitrary-argument Rclone executor cannot operate with public tenants.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('LEGACY_RCLONE_PUBLIC_DISABLED');
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, ['--config', this.configPath, ...args], {
         env: process.env,

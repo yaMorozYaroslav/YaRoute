@@ -33,7 +33,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
 <section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
-<p class="muted">Google Drive and MEGA remotes in the private Rclone configuration. Link each existing remote under an editable name; then test its account access below. Provider reauthorization and credential removal remain private server administration.</p>
+<p class="muted">Private mode discovers legacy configured remotes. Isolated-vault mode supports owner-scoped accounts. Google Drive supports read-only OAuth consent; MEGA requires trusted operator provisioning.</p>
 <div id="rclone-list" aria-live="polite">Loading configured drives…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 <form id="rclone-new-form" class="row">
@@ -42,9 +42,9 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <label>Label <input id="rclone-new-label" type="text" maxlength="80" required placeholder="Personal files"></label>
 <button type="submit">Create account reference</button>
 </form>
-<p><small>The optional encrypted-vault mode supports new pending account references. Credentials must be provisioned separately through trusted server administration; they are never entered in this panel. Without vault mode, only existing configured remotes can be linked.</small></p>
+<p><small>Google Drive uses read-only OAuth consent in vault mode. MEGA credentials require trusted server administration. The panel never accepts credentials.</small></p>
 <h2>Linked Rclone accounts (Neon)</h2>
-<p class="muted">Each link has its own immutable connection ID, editable name, and authenticated owner. Links are metadata only: unlinking does not remove an Rclone remote or revoke its provider token.</p>
+<p class="muted">Each link has its own immutable connection ID, editable name, and authenticated owner. Vault unlink removes encrypted credentials and attempts Google token revocation; MEGA sessions require provider-side revocation. Legacy remotes remain configured.</p>
 <div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
 </section>
 <section><h2>Add GitHub connection</h2><form id="new-form" class="row">
@@ -176,7 +176,7 @@ function render(connections){
    const box=el('div');box.className='card';
    const title=el('div');title.className='row';
    title.append(el('strong',c.displayName),el('span',c.provider),
-     el('span','Remote: '+c.externalAccountId),el('small','Reference only · not OAuth verified'));
+     el('span','Remote: '+c.externalAccountId),el('small',c.status==='active' ? 'Provider authorized' : 'Pending authorization'));
    box.append(title);
    const edit=el('div');edit.className='row';
    const name=input(c.displayName);
@@ -184,6 +184,16 @@ function render(connections){
      await call('nyx_connection_rename',{id:c.id,name:name.value.trim()});
      await refresh();
    }));
+   if(c.provider==='google-drive' && c.connectionType==='isolated-credential-vault'){
+     edit.append(button('Authorize Google Drive (read-only)',async()=>{
+       const v=await call('nyx_rclone_connection_begin_google',{id:c.id});
+       if(v?.connectionId!==c.id || !v?.authorizationUrl?.startsWith('https://accounts.google.com/o/oauth2/v2/auth?')){
+         throw Error('Invalid Google authorization response');
+       }
+       await request('ui/open-link',{url:v.authorizationUrl});
+       show('Complete Google consent, then return and refresh.');
+     }));
+   }
    const probe=el('small','Not checked');
    edit.append(button('Test access',async()=>{
      probe.textContent='Checking…';
@@ -195,7 +205,7 @@ function render(connections){
      }catch(e){probe.textContent='Check failed';show(e.message,true);}
    }),probe);
    edit.append(button('Unlink',async()=>{
-     if(!confirm('Unlink this account reference in Neon? Provider credentials and the Rclone configuration will remain unchanged.'))return;
+     if(!confirm('Disconnect? Local vault credentials will be deleted and Google revocation attempted. MEGA or provider-side sessions may need separate revocation.'))return;
      await call('nyx_connection_disconnect',{id:c.id});
      await refresh();
      show('Account reference revoked in Neon; provider credentials remain configured.');
@@ -301,6 +311,13 @@ async function refresh(){
  const data=await call('nyx_connections_list',{});
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
  render(data.connections);
+ const legacy=data.legacyInventoryAvailable!==false;
+ document.getElementById('rclone-refresh').hidden=!legacy;
+ if(!legacy){
+  rcloneRoot.replaceChildren(el('p','Global remote inventory is not exposed to public users; create an isolated account reference below.'));
+  rcloneStatus.textContent='';
+ }
+ return legacy;
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
@@ -328,9 +345,9 @@ document.getElementById('new-form').addEventListener('submit',async e=>{
   document.getElementById('new-name').value='';show('Connection created. Authorize before using resources.');
  }catch(e){show(e.message,true);}
 });
-ready.then(()=>{
- refresh().catch(e=>show(e.message,true));
- refreshRclone();
+ready.then(async()=>{
+ const legacy=await refresh();
+ if(legacy)await refreshRclone();
 }).catch(e=>show('MCP Apps unavailable: '+e.message,true));
 })();
 </script></body></html>`;

@@ -102,8 +102,8 @@ test('public mode cannot bind or probe private process-global Rclone remotes', a
   const linked=await service.createRclone('oauth:alice','mega','mega_one','Archive');
   process.env.NYX_DEPLOYMENT_MODE='public';
   assert.deepEqual(await service.list('oauth:alice'),[]);
-  await assert.rejects(()=>service.createRclone('oauth:alice','mega','mega_one','Other'),/PRIVATE_RCLONE_CONNECTIONS_ONLY/);
-  await assert.rejects(()=>service.testRclone('oauth:alice',linked.id),/PRIVATE_RCLONE_CONNECTIONS_ONLY/);
+  await assert.rejects(()=>service.createRclone('oauth:alice','mega','mega_one','Other'),/PUBLIC_RCLONE_VAULT_REQUIRED/);
+  await assert.rejects(()=>service.testRclone('oauth:alice',linked.id),/PUBLIC_RCLONE_VAULT_REQUIRED/);
   await assert.rejects(()=>service.disconnect('oauth:alice',linked.id),/CONNECTOR_PROVIDER_DISABLED/);
 });
 test('PostgreSQL migration preserves multi-account rows and enforces an owner-scoped remote uniqueness index', async()=>{

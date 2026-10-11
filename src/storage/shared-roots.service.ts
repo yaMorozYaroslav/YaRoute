@@ -7,6 +7,12 @@ export class SharedRootsService {
   private readonly roots: Record<string, SharedRoot>;
 
   constructor() {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true') {
+      // Ignore any inherited operator-wide roots even when configured.
+      this.roots={};
+      return;
+    }
     const raw = process.env.NYX_SHARED_ROOTS_JSON;
     if (!raw) throw new Error('NYX_SHARED_ROOTS_JSON is required');
 
