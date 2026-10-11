@@ -14,7 +14,15 @@ test('public-facing empty panel starts with a + and no private storage inventory
  assert.match(html,/body\.nyx-empty:not\(\.nyx-adding\) section/);
  assert.match(html,/section\.storage-section/);
  assert.match(html,/☁️ NestNyx/);
- assert.doesNotMatch(html,/Configured in Rclone|Refresh drives|nyx_rclone_connections_list/);
+ assert.doesNotMatch(html,/Configured in Rclone|Refresh drives/);
+ assert.match(html,/<details id="nyx-legacy-options" hidden>/);
+ assert.match(html,/<summary>⚙️ Advanced · Existing Rclone<\/summary>/);
+ assert.match(html,/legacyAvailable=data\.legacyInventoryAvailable===true/);
+ assert.match(html,/legacyOptions\.hidden=!legacyAvailable/);
+ assert.match(html,/legacyLoad\.addEventListener\('click',\(\)=>showLegacyRemotes\(\)\)/);
+ assert.match(html,/async function showLegacyRemotes\(\)/);
+ assert.match(html,/if\(!legacyAvailable \|\| !legacyOptions\.open\) return/);
+ assert.match(html,/call\('nyx_rclone_connections_list',\{\}\)/);
  assert.doesNotMatch(html,/Remote: |Areas: /);
 });
 
