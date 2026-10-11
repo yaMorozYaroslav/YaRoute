@@ -263,14 +263,43 @@ async function showLegacyRemotes(){
     legacyList.append(el('p','No existing remotes found.'));return;
   }
   for(const remote of remotes){
+    const item=el('details');
+    item.className='nyx-rclone-remote card';
+    item.append(el('summary',(remote.provider==='mega'?'🗄️ ':'🌈 ')+remote.name+' · View configuration'));
+    const detail=el('div');detail.className='nyx-provider-list';
+    const cfg=remote.configuration;
+    // Rclone inventory is private-only. Never render arbitrary config keys,
+    // raw profiles, token fields, secret paths, URLs, or unrecognized scope strings.
+    if(cfg?.inspection==='available'){
+      detail.append(el('p','Configuration source: private server Rclone file (metadata only)'));
+      if(remote.provider==='google-drive'){
+        const allowedScopes=['drive.readonly','drive.metadata.readonly','drive.file','drive'];
+        const scope=allowedScopes.includes(cfg.declaredScope)?cfg.declaredScope:'unknown';
+        detail.append(el('p','Configured Google scope: '+scope+' (not live-verified)'));
+        detail.append(el('p','Requested access: '+
+          (scope==='drive.readonly'||scope==='drive.metadata.readonly'?'Read-only':
+           scope==='drive'||scope==='drive.file'?'Write-capable OAuth scope, grant unverified':'Unknown')));
+        detail.append(el('p','Shared Drive binding configured: '+(cfg.sharedDriveConfigured===true?'Yes':'No')));
+        detail.append(el('p','Root folder binding configured: '+(cfg.rootFolderConfigured===true?'Yes':'No')));
+        detail.append(el('p','Service account configured: '+(cfg.serviceAccountConfigured===true?'Yes':'No')));
+      }else{
+        detail.append(el('p','MEGA permissions: unknown from Rclone configuration'));
+      }
+    }else{
+      detail.append(el('p','Configuration inspection unavailable; only remote presence is known.'));
+    }
+    if(Array.isArray(remote.aliases)&&remote.aliases.length){
+      const aliases=remote.aliases.filter(x=>typeof x==='string'&&x.length<=100).slice(0,16);
+      detail.append(el('p','Private area aliases: '+aliases.join(', ')));
+    }
+    detail.append(el('p','Configured does not mean connected, reachable, or authorized for writes.'));
     const line=el('div');line.className='row';
-    line.append(el('small',(remote.provider==='mega'?'🗄️ ':'🌈 ')+remote.name));
     if(boundRemoteKeys.has(remote.provider+':'+remote.name)){
       line.append(el('small','Already linked'));
     }else{
       const label=input(remote.name.slice(0,80));
       label.placeholder='Display name';
-      line.append(label,button('Link',async()=>{
+      line.append(label,button('Link existing remote',async()=>{
         const name=label.value.trim();
         if(!name)throw Error('Enter a display name');
         await call('nyx_rclone_connection_link',{
@@ -281,7 +310,9 @@ async function showLegacyRemotes(){
         show('Existing private remote linked; credentials were not migrated.');
       }));
     }
-    legacyList.append(line);
+    detail.append(line);
+    item.append(detail);
+    legacyList.append(item);
   }
  }catch(e){
   legacyList.replaceChildren(el('small','Unable to load private remotes.'));
