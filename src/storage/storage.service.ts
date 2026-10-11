@@ -127,11 +127,11 @@ export class StorageService {
        process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
     if(!['google-drive','mega'].includes(provider) ||
        !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote))throw new Error('RCLONE_REMOTE_INVALID');
-    const ok=await this.rclone.probeIsolated(remote,profile);
+    const ok=await this.rclone.probeIsolated(remote,profile,provider);
     return {schema:'nyx.storage.rclone.probe.v1',provider,name:remote,
       status:ok?'reachable':'unverified',
       ...(ok?{}:{reason:'PROBE_FAILED_OR_UNSUPPORTED'}),
-      check:'isolated_rclone_about',configurationChanged:false};
+      check:provider==='mega'?'isolated_rclone_lsf':'isolated_rclone_about',configurationChanged:false};
   }
 
   validateCopyPayload(payload: CopyJobPayload) {
