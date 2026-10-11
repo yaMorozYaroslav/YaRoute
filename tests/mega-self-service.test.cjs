@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const {ConnectorsService}=require('../dist/connectors/connectors.service');
 const {MegaSetupService}=require('../dist/connectors/mega-setup.service');
 const {megaSetupPage}=require('../dist/connectors/mega-setup.controller');
+const {obscureMegaPassword,megaProfile}=require('../dist/connectors/mega-obscure');
 
 const state='s'.repeat(43);
 const remote='mega_personal';
@@ -18,14 +19,17 @@ function flags(t){
     NYX_RCLONE_VAULT_ENABLED:'true',NYX_PUBLIC_CONNECTORS_ENABLED:'true',NYX_PUBLIC_URL:'https://nestnyx.example'});
 }
 
-test('MEGA form teaches local Rclone profile setup without requesting recovery key or direct account password',()=>{
+test('MEGA page explains direct credentials, permissions and never requests recovery keys',()=>{
   const html=megaSetupPage(state,remote);
-  assert.match(html,/rclone config/);
+  assert.match(html,/MEGA account password/);
+  assert.match(html,/value="manage"/);
+  assert.match(html,/value="read"/);
+  assert.match(html,/not active until separate permission-enforced tools/);
   assert.match(html,/MEGA API key or recovery key/);
   assert.match(html,/action="\/connect\/mega\/setup"/);
   assert.match(html,/<textarea[^>]+name="profile"/);
   assert.match(html,/name="state"/);
-  assert.doesNotMatch(html,/name="password"/);
+  assert.match(html,/type="password" name="password"/);
   assert.doesNotMatch(html,/name="recoveryKey"/);
   assert.throws(()=>megaSetupPage('invalid','good'),/MEGA_SETUP_LINK_INVALID/);
   assert.throws(()=>megaSetupPage(state,'bad"><script>'),/MEGA_SETUP_LINK_INVALID/);
@@ -128,4 +132,35 @@ test('MEGA public connectivity checks are owner-scoped and atomically throttled'
   assert.equal((await svc.testRclone('oauth:alice',id)).status,'reachable');
   await assert.rejects(()=>svc.testRclone('oauth:alice',id),/MEGA_PROBE_COOLDOWN/);
   assert.equal(providerCalls,1);
+});
+
+test('Direct MEGA password is obscured through Rclone stdin; only resulting single profile is stored',async t=>{
+  flags(t);
+  const result=await obscureMegaPassword('sample-test-only-password');
+  assert.ok(result.length>=16);
+  assert.ok(!result.includes('sample-test-only-password'));
+  const txt=megaProfile(remote,'sample@example.com',result);
+  assert.match(txt,/type = mega/);
+  assert.match(txt,/pass = /);
+  assert.ok(!txt.includes('sample-test-only-password'));
+  await assert.rejects(()=>obscureMegaPassword('password\\nexfil'),/MEGA_PASSWORD_INVALID/);
+  assert.throws(()=>megaProfile('bad\\nremote','sample@example.com',result),/MEGA_SETUP_INPUT_INVALID/);
+
+  const stored=[],prefs=[];
+  const svc=new MegaSetupService({
+    consumeMegaSetupState:async()=>({ownerId:'oauth:alice',
+      connectionId:'123e4567-e89b-42d3-a456-426614174000',remote}),
+    recordMegaAccessRequest:async(...values)=>prefs.push(values),
+  },{isEnabled:()=>true,store:async(...args)=>{stored.push(args);}});
+  const connected=await svc.completeCredentials(state,'sample@example.com',
+    'sample-test-only-password','manage');
+  assert.equal(connected.effectiveMode,'read-only-probe');
+  assert.equal(connected.requestedMode,'manage');
+  assert.equal(stored.length,1);
+  assert.equal(stored[0][0],'oauth:alice');
+  assert.equal(stored[0][2],'mega');
+  assert.ok(stored[0][4].includes('type = mega'));
+  assert.ok(!stored[0][4].includes('sample-test-only-password'));
+  assert.deepEqual(prefs[0].slice(0,2),['oauth:alice','123e4567-e89b-42d3-a456-426614174000']);
+  assert.equal(prefs[0][2],'manage');
 });
