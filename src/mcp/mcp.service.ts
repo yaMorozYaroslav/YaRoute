@@ -81,7 +81,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -124,27 +124,43 @@ export class McpService {
       }]}),
     );
 
+    // Separate global and thread entrypoints make each launcher independently
+    // discoverable. Both reuse the SAME authenticated, read-only view payload.
+    // No storage, Head authority, provider grants or credential paths are changed.
+    const connectionsPanelResult = async () => this.safeTool(async () => {
+      const ownerId = this.connectorOwner();
+      return {
+        schema:'nyx.connections.panel.v1',
+        ownerId,
+        connections:await this.connections.list(ownerId),
+        providers:[{id:'github',availability:'oauth_ready_if_configured'}],
+        note:'GitHub authorization is required. Refresh ChatGPT plugin discovery after deployment.',
+      };
+    });
+
     server.registerTool('nyx_connections_panel',{
       title:'☁️ NestNyx Connections',
-      description:'Open your private NestNyx connections panel in ChatGPT. This production version supports authenticated GitHub connections; Google Drive and MEGA migration remains under separate review.',
+      description:'Open the NestNyx connections conversation tab. Production supports authenticated GitHub connections only; Google Drive and MEGA migration remains under separate review.',
       inputSchema:z.object({}),
       _meta:{
         ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
-        // OpenAI MCP Extensions: sidebar launcher + conversation content tab.
-        // This changes app discovery only and cannot grant more provider access.
-        'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]},
+        'openai/ui':{entrypoints:[{type:'thread'}]},
         'openai/outputTemplate':CONNECTIONS_PANEL_URI,
       },
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-    },async()=>this.safeTool(async()=>({
-      schema:'nyx.connections.panel.v1',
-      ownerId:this.connectorOwner(),
-      connections:await this.connections.list(this.connectorOwner()),
-      providers:[
-        {id:'github',availability:'oauth_ready_if_configured'},
-      ],
-      note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
-    })));
+    },connectionsPanelResult);
+
+    server.registerTool('nyx_connections_home',{
+      title:'☁️ NestNyx',
+      description:'Open NestNyx Connections from the global ChatGPT sidebar. Same owner-scoped GitHub panel; no provider authorization or storage mutation.',
+      inputSchema:z.object({}),
+      _meta:{
+        ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
+        'openai/ui':{entrypoints:[{type:'global'}]},
+        'openai/outputTemplate':CONNECTIONS_PANEL_URI,
+      },
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },connectionsPanelResult);
 
     server.registerTool('nyx_connections_list',{
       title:'List my NestNyx connections',
