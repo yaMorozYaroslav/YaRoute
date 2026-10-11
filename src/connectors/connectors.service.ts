@@ -81,7 +81,8 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   async list(ownerId: string) {
     this.owner(ownerId);
-    const showRclone = process.env.NYX_DEPLOYMENT_MODE !== 'public';
+    const showRclone = process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
+      (process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' && this.vault?.isEnabled());
     return (await this.policy().list(ownerId))
       .filter(c => c.provider === 'github' ||
         (showRclone && (c.provider === 'google-drive' || c.provider === 'mega')))
@@ -134,7 +135,10 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   async createRclone(ownerId: string, provider: 'google-drive' | 'mega',
     remoteName: string, displayName: string) {
     const owner = this.owner(ownerId);
-    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true' || !this.vault?.isEnabled())) {
+      throw new Error('PUBLIC_RCLONE_VAULT_REQUIRED');
+    }
     if (!['google-drive','mega'].includes(provider) ||
         typeof remoteName !== 'string' || !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName)) {
       throw new Error('RCLONE_REMOTE_INVALID');
@@ -164,7 +168,10 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
 
   async testRclone(ownerId: string, id: string) {
     const connection = await this.owned(this.owner(ownerId), id);
-    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true' || !this.vault?.isEnabled())) {
+      throw new Error('PUBLIC_RCLONE_VAULT_REQUIRED');
+    }
     if (connection.status === 'revoked' ||
         (connection.provider !== 'google-drive' && connection.provider !== 'mega')) {
       throw new Error('RCLONE_CONNECTION_NOT_AVAILABLE');
@@ -187,7 +194,8 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     const connection=await this.owned(this.owner(ownerId),id);
     if (connection.provider !== 'github' &&
         !(['google-drive','mega'].includes(connection.provider) &&
-          process.env.NYX_DEPLOYMENT_MODE !== 'public')) {
+          (process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
+           (process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' && this.vault?.isEnabled())))) {
       throw new Error('CONNECTOR_PROVIDER_DISABLED');
     }
     return this.view(await this.policy().rename(ownerId, id, name));
@@ -213,7 +221,8 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     const previous=await this.owned(ownerId,id);
     if (previous.provider !== 'github' &&
         !(['google-drive','mega'].includes(previous.provider) &&
-          process.env.NYX_DEPLOYMENT_MODE !== 'public')) {
+          (process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
+           (process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' && this.vault?.isEnabled())))) {
       throw new Error('CONNECTOR_PROVIDER_DISABLED');
     }
     await this.db().query(
