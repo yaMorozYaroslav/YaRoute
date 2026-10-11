@@ -24,6 +24,16 @@ body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
 #nyx-quick .subtitle{display:block;font-size:11px;opacity:.65}
 #nyx-quick .spacer{flex:1}
 #nyx-quick .add-label{font-weight:600;font-size:12px;opacity:.75}
+#nyx-provider-choices{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+#nyx-provider-choices button{width:100%;text-align:left;padding:10px 12px;
+ border-radius:11px;border:1px solid #92929255;background:transparent;font-weight:650}
+#nyx-provider-choices button:hover,#nyx-provider-choices button[aria-pressed="true"]{
+ border-color:#10a867;background:color-mix(in srgb,#16a56b 10%,transparent)}
+#nyx-provider-choices button[hidden]{display:none}
+.nyx-visually-hidden{position:absolute!important;clip-path:inset(50%);width:1px;height:1px;
+ overflow:hidden;white-space:nowrap}
+body:not(.nyx-provider-selected) #nyx-cloud-name,
+body:not(.nyx-provider-selected) #nyx-cloud-create{display:none}
 body:not(.nyx-adding) #nyx-setup{display:none}
 #nyx-setup{padding:12px;border-radius:12px;border:1px solid #18a36a42;
  background:color-mix(in srgb,#17a06e 5%,transparent)}
@@ -93,12 +103,14 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 </header>
 <section class="storage-section"><div id="nyx-setup"><h2>✨ Connect a cloud drive</h2>
 <p class="setup-subtitle">Choose a provider and continue to secure sign-in. Never put passwords or recovery keys in chat.</p>
-<div class="provider-hint">🌈 Google Drive · Sign in with Google</div>
-<div class="provider-hint">🗄️ MEGA · Secure login</div>
-<div class="provider-hint">🧰 Existing Rclone · Private only</div>
+<div id="nyx-provider-choices" role="group" aria-label="Choose a connection type">
+<button type="button" data-provider="google-drive" aria-pressed="false">🌈 Google Drive · Sign in with Google</button>
+<button type="button" data-provider="mega" aria-pressed="false">🗄️ MEGA · Secure login</button>
+<button type="button" data-provider="existing-rclone" aria-pressed="false" hidden disabled>🧰 Existing Rclone · Private only</button>
+</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 <form id="rclone-new-form" class="row">
-<label>Provider <select id="rclone-new-provider"><option value="google-drive">🌈 Google Drive</option><option value="mega">🗄️ MEGA</option><option value="existing-rclone" hidden disabled>🧰 Existing Rclone · Advanced</option></select></label>
+<label class="nyx-visually-hidden">Provider <select id="rclone-new-provider" tabindex="-1"><option value="">Choose a provider</option><option value="google-drive">Google Drive</option><option value="mega">MEGA</option><option value="existing-rclone" hidden disabled>Existing Rclone</option></select></label>
 <label id="nyx-cloud-name">Name your connection <input id="rclone-new-label" type="text" maxlength="80" required placeholder="My files"></label>
 <button id="nyx-cloud-create" type="submit">Continue →</button>
 </form>
@@ -148,13 +160,17 @@ const megaCount=document.getElementById('nyx-mega-count');
 let revealProvider=null;
 let megaSetupEnabled=false, legacyAvailable=false, boundRemoteKeys=new Set();
 const providerChoice=document.getElementById("rclone-new-provider");
+const providerButtons=Array.from(document.querySelectorAll('#nyx-provider-choices button[data-provider]'));
 const newCloudLabel=document.getElementById("rclone-new-label");
 const legacyOptions=document.getElementById('nyx-legacy-options');
 const legacyLoad=document.getElementById('nyx-legacy-load');
 const legacyList=document.getElementById('nyx-legacy-list');
 const quickAdd=document.getElementById('nyx-add');
 function updateProviderChoice(){
- const existing=legacyAvailable && providerChoice.value==='existing-rclone';
+ const selected=providerChoice.value;
+ const existing=legacyAvailable && selected==='existing-rclone';
+ document.body.classList.toggle('nyx-provider-selected',!!selected);
+ for(const option of providerButtons)option.setAttribute('aria-pressed',String(option.dataset.provider===selected));
  document.body.classList.toggle('nyx-existing',existing);
  newCloudLabel.required=!existing;
  legacyOptions.hidden=!legacyAvailable;
@@ -162,6 +178,15 @@ function updateProviderChoice(){
  if(!legacyAvailable){legacyOptions.open=false;legacyList.replaceChildren();}
 }
 providerChoice.addEventListener('change',updateProviderChoice);
+for(const option of providerButtons)option.addEventListener('click',()=>{
+ if(option.disabled)return;
+ providerChoice.value=option.dataset.provider;
+ updateProviderChoice();
+ if(providerChoice.value==='existing-rclone'){
+   document.body.classList.remove('nyx-adding');
+   quickAdd.setAttribute('aria-expanded','false');
+ }else newCloudLabel.focus();
+});
 quickAdd.addEventListener('click',()=>{
  document.body.classList.toggle('nyx-adding');
  quickAdd.setAttribute('aria-expanded',String(document.body.classList.contains('nyx-adding')));
@@ -461,6 +486,11 @@ async function refresh(){
    existingOption.hidden=!legacyAvailable;
    existingOption.disabled=!legacyAvailable;
  }
+ const existingButton=providerButtons.find(x=>x.dataset.provider==='existing-rclone');
+ if(existingButton){
+   existingButton.hidden=!legacyAvailable;
+   existingButton.disabled=!legacyAvailable;
+ }
  if(!legacyAvailable && providerChoice.value==='existing-rclone'){
    providerChoice.value='google-drive';
  }
@@ -487,6 +517,7 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
  try{
   await call('nyx_rclone_connection_link',{provider,remoteName,name});
   document.getElementById('rclone-new-label').value='';
+  providerChoice.value='';
   revealProvider=provider;
   await refresh();
   document.body.classList.remove('nyx-adding');
