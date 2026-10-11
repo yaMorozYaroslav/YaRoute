@@ -17,7 +17,9 @@ export class StorageConnectionsService implements OnModuleInit, OnModuleDestroy 
   private key?: Buffer;
 
   async onModuleInit() {
-    if (process.env.NYX_DEPLOYMENT_MODE !== 'public') return;
+    if (process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true') return;
+    // Legacy fixed-slot public storage remains disabled in connector-only mode.
     const encoded = process.env.NYX_STORAGE_ENCRYPTION_KEY || '';
     if (!/^[A-Za-z0-9+/]{43}=$/.test(encoded)) throw new Error('NYX_STORAGE_ENCRYPTION_KEY must be canonical base64');
     const key = Buffer.from(encoded, 'base64');
