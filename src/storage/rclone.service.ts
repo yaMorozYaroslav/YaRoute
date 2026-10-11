@@ -84,6 +84,59 @@ export class RcloneService implements OnModuleInit {
     }
   }
 
+  /** Owner-isolated, read-only, bounded listing; never accept shell flags or global config. */
+  async listIsolated(remote:string,profile:string,folder:string='') {
+    if(process.env.NYX_DEPLOYMENT_MODE==='public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED!=='true')throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if(!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
+       typeof profile!=='string' || Buffer.byteLength(profile,'utf8')>32768 ||
+       typeof folder!=='string' || folder.length>512 || folder.startsWith('/') ||
+       /[\\\x00-\x1f\x7f]/.test(folder) ||
+       folder.split('/').some(x=>x==='.'||x==='..'||(folder!==''&&!x))) {
+      throw new Error('RCLONE_LIST_PATH_INVALID');
+    }
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nyx-rclone-list-'));
+    fs.chmodSync(dir,0o700);
+    const config=path.join(dir,'config.conf');
+    try{
+      fs.writeFileSync(config,profile,{mode:0o600,flag:'wx'});
+      const env:NodeJS.ProcessEnv={HOME:dir,XDG_CONFIG_HOME:dir,TMPDIR:dir};
+      for(const k of ['PATH','SSL_CERT_FILE','SSL_CERT_DIR',
+        'HTTPS_PROXY','HTTP_PROXY','NO_PROXY']){
+        if(process.env[k])env[k]=process.env[k];
+      }
+      const raw=await new Promise<string>((resolve,reject)=>{
+        const child=spawn(this.binary,[
+          '--config',config,'lsjson',remote+':'+folder,
+          '--max-depth','1','--contimeout','5s','--timeout','15s',
+        ],{env,stdio:['ignore','pipe','pipe'],timeout:22000});
+        let stdout='',size=0,invalid=false;
+        child.stdout.on('data',(data:Buffer)=>{
+          size+=data.length;
+          if(size>65536){invalid=true;child.kill();return;}
+          stdout+=data.toString('utf8');
+        });
+        // Discard stderr to avoid returning provider details or credential values.
+        child.stderr.on('data',()=>{});
+        child.on('error',()=>reject(new Error('RCLONE_LIST_FAILED')));
+        child.on('close',code=>{
+          if(code!==0 || invalid)reject(new Error('RCLONE_LIST_FAILED'));
+          else resolve(stdout);
+        });
+      });
+      let parsed:unknown;
+      try{parsed=JSON.parse(raw);}catch{throw new Error('RCLONE_LIST_FAILED');}
+      if(!Array.isArray(parsed))throw new Error('RCLONE_LIST_FAILED');
+      const limited=parsed.slice(0,50).map((v:any)=>{
+        if(!v || typeof v.Name!=='string' || typeof v.IsDir!=='boolean')
+          throw new Error('RCLONE_LIST_FAILED');
+        return {name:v.Name.slice(0,255),isDirectory:v.IsDir,
+          size:Number.isSafeInteger(v.Size)&&v.Size>=0?v.Size:null};
+      });
+      return {entries:limited,truncated:parsed.length>50};
+    }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  }
+
   async version(): Promise<string> {
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
       return new Promise<string>(resolve => {
