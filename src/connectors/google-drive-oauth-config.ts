@@ -16,7 +16,7 @@ export function googleOAuthConfiguration(){
   }
   return {clientId,clientSecret};
 }
-function profileOf(remote:string,token:{
+export function profileOf(remote:string,token:{
  access_token:string;refresh_token:string;token_type:string;expires_in:number;
 },clientId:string,clientSecret:string){
   // Rclone expects a single config section; the exact JSON token format
