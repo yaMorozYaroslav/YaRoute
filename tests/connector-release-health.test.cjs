@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {HealthController}=require('../dist/health.controller');
+const {HealthController,buildHealthResponse}=require('../dist/health.controller');
 
 const keys=['NYX_DEPLOYMENT_MODE','NYX_PUBLIC_URL','NYX_GOOGLE_CLIENT_ID',
   'NYX_GOOGLE_CLIENT_SECRET','NYX_RCLONE_VAULT_ENABLED',
@@ -39,4 +39,17 @@ test('public health remains connectors-only even when storage credentials are co
   assert.equal(q.ownerVaultConfigured,true);
   assert.equal(q.megaFormEnabled,true);
   assert.equal(q.multiUserYaroReady,false);
+});
+
+test('nyx_health MCP uses the same pure health implementation as GET /health',async t=>{
+  setup(t);
+  const healthSnapshot=await health();
+  const shared=buildHealthResponse('rclone mock version',true);
+  assert.deepEqual(healthSnapshot,shared);
+  const fs=require('node:fs');
+  const mcp=fs.readFileSync(require('node:path').join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
+  assert.match(mcp,/server\\.registerTool\\(\\s*'nyx_health'/);
+  assert.match(mcp,/this\\.connectorOwner\\(\\)/);
+  assert.match(mcp,/buildHealthResponse\\(await this\\.rclone\\.version\\(\\),this\\.jobs\\.isDurable\\(\\)\\)/);
+  assert.match(mcp,/readOnlyHint:true,destructiveHint:false,idempotentHint:true/);
 });
