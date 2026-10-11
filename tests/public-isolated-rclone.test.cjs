@@ -66,31 +66,55 @@ test('public Rclone references fail closed when vault is disabled',async t=>{
    /PUBLIC_RCLONE_VAULT_REQUIRED/);
 });
 
-test('public tenants never see, create, test, rename or revoke MEGA connections',async t=>{
+test('public MEGA accounts use independent owner credentials, not global Rclone',async t=>{
  configure(t);
- const id='123e4567-e89b-42d3-a456-426614174000';
- const oldMega={id,ownerId:'oauth:alice',provider:'mega',displayName:'Legacy MEGA',
-   externalAccountId:'MEGA_1',status:'active',capabilities:[],providerCapabilities:[],resources:[]};
- const ownDrive={id:'123e4567-e89b-42d3-a456-426614174001',
-   ownerId:'oauth:alice',provider:'google-drive',displayName:'Personal Drive',
-   externalAccountId:'drive_1',status:'pending',capabilities:[],providerCapabilities:[],resources:[]};
- const stored=[oldMega,ownDrive];
- let providerCalls=0;
- const storage={rcloneConnections:async()=>{providerCalls++;throw Error('private inventory forbidden');}};
- const vault={isEnabled:()=>true,load:async()=>{providerCalls++;throw Error('MEGA vault forbidden');},
-   revoke:async()=>{providerCalls++;throw Error('MEGA vault mutation forbidden');}};
+ const records=new Map(),provisioned=new Map(),isolatedCalls=[];
+ let leakedGlobal=false;
+ const storage={
+   rcloneConnections:async()=>{leakedGlobal=true;throw Error('shared remotes forbidden');},
+   testRcloneConnection:async()=>{leakedGlobal=true;throw Error('shared probe forbidden');},
+   testIsolatedRcloneConnection:async(provider,remote,profile)=>{
+     isolatedCalls.push({provider,remote,profile});
+     return {schema:'nyx.storage.rclone.probe.v1',provider,name:remote,
+       status:'reachable',configurationChanged:false};
+   },
+ };
+ const vault={isEnabled:()=>true,
+   load:async(owner,id)=>provisioned.get(owner+':'+id),
+   revoke:async(owner,id)=>{provisioned.delete(owner+':'+id);}};
+ const repo={get:async id=>records.get(id)||null,
+   list:async owner=>[...records.values()].filter(x=>x.ownerId===owner),
+   save:async row=>{records.set(row.id,{...row});}};
  const svc=new ConnectorsService(storage,vault);
- svc.repository={get:async key=>stored.find(x=>x.id===key)||null,
-   list:async owner=>stored.filter(x=>x.ownerId===owner),save:async()=>{}};
- svc.registry={list:async owner=>stored.filter(x=>x.ownerId===owner)};
- svc.pool={query:async()=>{providerCalls++;throw Error('DB mutation forbidden');}};
- assert.deepEqual((await svc.list('oauth:alice')).map(x=>x.provider),['google-drive']);
- await assert.rejects(()=>svc.createRclone('oauth:alice','mega','MEGA_2','No public MEGA'),/PUBLIC_MEGA_DISABLED/);
- await assert.rejects(()=>svc.testRclone('oauth:alice',id),/PUBLIC_MEGA_DISABLED/);
- await assert.rejects(()=>svc.rename('oauth:alice',id,'Changed'),/PUBLIC_MEGA_DISABLED/);
- await assert.rejects(()=>svc.disconnect('oauth:alice',id),/PUBLIC_MEGA_DISABLED/);
- assert.equal(oldMega.status,'active');
- assert.equal(providerCalls,0);
+ svc.repository=repo;svc.registry=new ConnectorRegistry(repo);
+ svc.pool={query:async(sql,args)=>{
+   if(sql.includes("SET status='revoked'")){
+     const row=records.get(args[0]);
+     if(row&&row.ownerId===args[1])records.set(row.id,{...row,status:'revoked'});
+   }
+   return {rowCount:1,rows:[]};
+ }};
+ const alice=await svc.createRclone('oauth:alice','mega','mega_remote','Private MEGA');
+ const bob=await svc.createRclone('oauth:bob','mega','mega_remote','Bob MEGA');
+ assert.notEqual(alice.id,bob.id);
+ assert.deepEqual((await svc.list('oauth:alice')).map(x=>x.id),[alice.id]);
+ assert.deepEqual((await svc.list('oauth:bob')).map(x=>x.id),[bob.id]);
+ const pending=await svc.testRclone('oauth:bob',bob.id);
+ assert.equal(pending.status,'unverified');
+ assert.equal(pending.reason,'ISOLATED_CREDENTIAL_NOT_PROVISIONED');
+ assert.equal(isolatedCalls.length,0);
+ provisioned.set('oauth:alice:'+alice.id,'single-owner-profile');
+ const working=await svc.testRclone('oauth:alice',alice.id);
+ assert.equal(working.status,'reachable');
+ assert.deepEqual(isolatedCalls,[{provider:'mega',remote:'mega_remote',profile:'single-owner-profile'}]);
+ await assert.rejects(()=>svc.testRclone('oauth:bob',alice.id),/CONNECTOR_NOT_FOUND/);
+ await assert.rejects(()=>svc.rename('oauth:bob',alice.id,'Stolen'),/CONNECTOR_NOT_FOUND/);
+ await assert.rejects(()=>svc.disconnect('oauth:bob',alice.id),/CONNECTOR_NOT_FOUND/);
+ assert.equal(leakedGlobal,false);
+ const disconnected=await svc.disconnect('oauth:alice',alice.id);
+ assert.equal(disconnected.status,'revoked');
+ assert.equal(provisioned.has('oauth:alice:'+alice.id),false);
+ assert.equal((await svc.list('oauth:bob')).length,1);
 });
 test('public Yaro capability discovery does not claim private commands are registered',()=>{
  const fs=require('node:fs'),path=require('node:path');
@@ -98,6 +122,6 @@ test('public Yaro capability discovery does not claim private commands are regis
  assert.match(mcp,/blocked_pending_per_user_yaro_workspace/);
  assert.match(mcp,/if \(process\.env\.NYX_DEPLOYMENT_MODE==='public'\) return server/);
  const panel=fs.readFileSync(path.join(__dirname,'../src/connectors/connections-panel.ts'),'utf8');
- assert.match(panel,/megaOption\.disabled=!legacy/);
- assert.match(mcp,/z\.literal\('google-drive'\) : z\.enum\(\['google-drive','mega'\]\)/);
+ assert.match(panel,/megaOption\.disabled=false/);
+ assert.match(mcp,/provider:z\.enum\(\['google-drive','mega'\]\)/);
 });
