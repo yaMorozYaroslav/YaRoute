@@ -78,7 +78,7 @@ test('private inventory remains backend-only; the public-facing panel hides name
  const privateGate=mcp.indexOf("if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;");
  const tool=mcp.indexOf("server.registerTool('nyx_rclone_connections_list'");
  assert.ok(privateGate>0&&tool>privateGate);
- assert.match(mcp,/this\\.storage\\.rcloneConnections\\(\\)/);
+ assert.ok(mcp.includes('this.storage.rcloneConnections()'));
  assert.doesNotMatch(panel,/id="rclone-list"/);
  assert.doesNotMatch(panel,/nyx_rclone_connections_list|renderRclone|Configured in Rclone/);
  assert.match(panel,/id="nyx-add"/);
