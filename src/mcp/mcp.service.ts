@@ -340,7 +340,8 @@ export class McpService {
       title:'Create one owner-scoped storage account reference',
       description:'Create a pending owner-scoped Google Drive account; MEGA is available only in private legacy mode. Public MEGA requests fail closed.',
       inputSchema:z.object({
-        provider:z.enum(['google-drive','mega']),
+        provider:process.env.NYX_DEPLOYMENT_MODE === 'public'
+          ? z.literal('google-drive') : z.enum(['google-drive','mega']),
         remoteName:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
         name:z.string().min(1).max(80),
       }),
