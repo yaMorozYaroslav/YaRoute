@@ -125,3 +125,41 @@ test('public Yaro capability discovery does not claim private commands are regis
  assert.match(panel,/megaOption\.disabled=false/);
  assert.match(mcp,/provider:z\.enum\(\['google-drive','mega'\]\)/);
 });
+
+test('public cloud browsing only lists an active owner's own vaulted account',async t=>{
+ configure(t);
+ const cid='123e4567-e89b-42d3-a456-426614174000';
+ const rows=new Map([[cid,{id:cid,ownerId:'oauth:alice',provider:'mega',
+   externalAccountId:'alice_mega',status:'active'}]]);
+ let probes=0,globalCalls=0;
+ const svc=new ConnectorsService({
+   listIsolatedRcloneConnection:async(provider,name,profile,folder)=>{
+     probes++;
+     assert.equal(provider,'mega');assert.equal(name,'alice_mega');
+     assert.equal(profile,'one-secret-owner-profile');
+     assert.equal(folder,'private');
+     return {schema:'nyx.storage.rclone.list.v1',provider,folder,
+       readOnly:true,entries:[{name:'report.txt',isDirectory:false,size:15}],truncated:false};
+   },
+   rcloneConnections:async()=>{globalCalls++;throw Error('forbidden');},
+ },{isEnabled:()=>true,load:async(owner,id)=>{
+   assert.equal(owner,'oauth:alice');assert.equal(id,cid);
+   return 'one-secret-owner-profile';
+ }});
+ svc.repository={get:async id=>rows.get(id)||null};
+ svc.pool={query:async(sql,params)=>{
+   assert.match(sql,/nyx_owner_storage_listing_limits/);
+   assert.deepEqual(params,['oauth:alice',cid]);
+   return{rowCount:1,rows:[{count:1}]};
+ }};
+ await assert.rejects(()=>svc.listRclone('oauth:bob',cid,'private'),/CONNECTOR_NOT_FOUND/);
+ await assert.rejects(()=>svc.listRclone('oauth:alice',cid,'../private'),/RCLONE_LIST_PATH_INVALID/);
+ await assert.rejects(()=>svc.listRclone('oauth:alice',cid,'/private'),/RCLONE_LIST_PATH_INVALID/);
+ const result=await svc.listRclone('oauth:alice',cid,'private');
+ assert.equal(result.readOnly,true);
+ assert.equal(result.connectionId,cid);
+ assert.deepEqual(result.entries.map(x=>x.name),['report.txt']);
+ assert.equal(probes,1);assert.equal(globalCalls,0);
+ rows.get(cid).status='pending';
+ await assert.rejects(()=>svc.listRclone('oauth:alice',cid,'private'),/STORAGE_CONNECTION_NOT_ACTIVE/);
+});
