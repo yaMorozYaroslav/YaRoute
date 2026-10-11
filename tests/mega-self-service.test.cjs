@@ -95,3 +95,33 @@ test('MEGA setup only accepts one bounded remote profile, never plaintext recove
   process.env.NYX_MEGA_SELF_SERVICE_ENABLED='false';
   await assert.rejects(()=>svc.complete(state,profile),/MEGA_SELF_SERVICE_DISABLED/);
 });
+
+test('MEGA public connectivity checks are owner-scoped and atomically throttled',async t=>{
+  flags(t);
+  const old=process.env.NYX_DEPLOYMENT_MODE;
+  t.after(()=>{if(old===undefined)delete process.env.NYX_DEPLOYMENT_MODE;
+    else process.env.NYX_DEPLOYMENT_MODE=old;});
+  process.env.NYX_DEPLOYMENT_MODE='public';
+  const id='123e4567-e89b-42d3-a456-426614174000';
+  const row={id,ownerId:'oauth:alice',provider:'mega',
+    externalAccountId:remote,displayName:'Alice MEGA',status:'pending'};
+  let callCount=0,providerCalls=0;
+  const svc=new ConnectorsService({
+    testRcloneConnection:async()=>{throw Error('shared config must be disabled');},
+    testIsolatedRcloneConnection:async()=>{
+      providerCalls++;return {schema:'nyx.storage.rclone.probe.v1',
+        status:'reachable',configurationChanged:false};
+    },
+  },{isEnabled:()=>true,load:async()=>profile});
+  svc.repository={get:async key=>key===id?row:null};
+  svc.registry={list:async()=>[row]};
+  svc.pool={query:async(sql,args)=>{
+    assert.ok(sql.includes('nyx_mega_probe_limits'));
+    assert.deepEqual(args,['oauth:alice',id]);
+    return{rowCount:++callCount===1?1:0,rows:[]};
+  }};
+  await assert.rejects(()=>svc.testRclone('oauth:bob',id),/CONNECTOR_NOT_FOUND/);
+  assert.equal((await svc.testRclone('oauth:alice',id)).status,'reachable');
+  await assert.rejects(()=>svc.testRclone('oauth:alice',id),/MEGA_PROBE_COOLDOWN/);
+  assert.equal(providerCalls,1);
+});
