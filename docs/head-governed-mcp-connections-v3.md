@@ -26,7 +26,7 @@ MCP Apps resource: `ui://nestnyx/connections/v3.html`. Entrypoint: `nyx_connecti
 ## Activation / verification
 
 1. Review and merge the code via an approved PR; do not silently deploy.
-2. Manually dispatch the existing owner-managed `deploy-heroku.yml` workflow.
+2. Deploy only through a separately approved operator-managed release process; GitHub Actions no longer deploys to Heroku. Do not grant GitHub a broad Heroku API key.
 3. Verify `/health.commit` matches the intended deployed commit.
 4. Refresh the NestNyx MCP connection and open the **v3** panel.
 5. Confirm authenticated GitHub operations and Rclone inventory; test a non-critical Rclone remote. Confirm public mode rejects the private tool and that no secrets appear in responses.
@@ -77,7 +77,7 @@ The private runtime now contains an **optional, disabled-by-default** credential
 3. Configure an independently managed `NYX_RCLONE_CREDENTIAL_KEY` in private hosting secrets. This is a new secret value to manage; it is never provided to ChatGPT.
 4. Add a pending connection in the panel for each target Google Drive/MEGA account. In the trusted server shell, provision its single-remote Rclone config using the stdin-only operator script, never through GitHub, MCP, shell argv or chat.
 5. **Only after every required profile is available**, enable `NYX_RCLONE_VAULT_ENABLED=true`. An unprovisioned account will show `ISOLATED_CREDENTIAL_NOT_PROVISIONED`; the old shared configuration is never used as a fallback.
-6. Merge and deploy manually through the existing deployment workflow after approval; verify `/health.commit`, private OAuth, panel v3, correct owner linkage, encrypted vault reads, local temp cleanup, and negative cross-owner probes. There is no automatic deploy in this PR.
+6. Deploy only through separately approved operator-controlled deployment after review; verify `/health.commit`, private OAuth, panel v3, owner linkage, encrypted vault reads, temp cleanup and cross-owner denial. No automated GitHub-to-Heroku deploy is supported.
 
 ### Deliberate limits
 
