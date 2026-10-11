@@ -20,8 +20,10 @@ export class MegaSetupService {
        /[\r\n\x00-\x1f\x7f]/.test(password))throw new Error('MEGA_PASSWORD_INVALID');
     megaProfile('validation_remote',email,'A'.repeat(32));
     // Do not pass passwords as command arguments or write them to disk.
-    const obscure=await obscureMegaPassword(password);
+    // Consume the verified one-use state before spawning a subprocess.
+    // Invalid or replayed links must not be able to trigger Rclone work.
     const lease=await this.connections.consumeMegaSetupState(state);
+    const obscure=await obscureMegaPassword(password);
     const profile=megaProfile(lease.remote,email,obscure);
     assertSingleRcloneProfile('mega',lease.remote,profile);
     await this.vault.store(lease.ownerId,lease.connectionId,'mega',lease.remote,profile);
