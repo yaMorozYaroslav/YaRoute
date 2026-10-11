@@ -65,3 +65,39 @@ test('public Rclone references fail closed when vault is disabled',async t=>{
  await assert.rejects(()=>svc.createRclone('oauth:alice','google-drive','drive','Personal'),
    /PUBLIC_RCLONE_VAULT_REQUIRED/);
 });
+
+test('public tenants never see, create, test, rename or revoke MEGA connections',async t=>{
+ configure(t);
+ const id='123e4567-e89b-42d3-a456-426614174000';
+ const oldMega={id,ownerId:'oauth:alice',provider:'mega',displayName:'Legacy MEGA',
+   externalAccountId:'MEGA_1',status:'active',capabilities:[],providerCapabilities:[],resources:[]};
+ const ownDrive={id:'123e4567-e89b-42d3-a456-426614174001',
+   ownerId:'oauth:alice',provider:'google-drive',displayName:'Personal Drive',
+   externalAccountId:'drive_1',status:'pending',capabilities:[],providerCapabilities:[],resources:[]};
+ const stored=[oldMega,ownDrive];
+ let providerCalls=0;
+ const storage={rcloneConnections:async()=>{providerCalls++;throw Error('private inventory forbidden');}};
+ const vault={isEnabled:()=>true,load:async()=>{providerCalls++;throw Error('MEGA vault forbidden');},
+   revoke:async()=>{providerCalls++;throw Error('MEGA vault mutation forbidden');}};
+ const svc=new ConnectorsService(storage,vault);
+ svc.repository={get:async key=>stored.find(x=>x.id===key)||null,
+   list:async owner=>stored.filter(x=>x.ownerId===owner),save:async()=>{}};
+ svc.registry={list:async owner=>stored.filter(x=>x.ownerId===owner)};
+ svc.pool={query:async()=>{providerCalls++;throw Error('DB mutation forbidden');}};
+ assert.deepEqual((await svc.list('oauth:alice')).map(x=>x.provider),['google-drive']);
+ await assert.rejects(()=>svc.createRclone('oauth:alice','mega','MEGA_2','No public MEGA'),/PUBLIC_MEGA_DISABLED/);
+ await assert.rejects(()=>svc.testRclone('oauth:alice',id),/PUBLIC_MEGA_DISABLED/);
+ await assert.rejects(()=>svc.rename('oauth:alice',id,'Changed'),/PUBLIC_MEGA_DISABLED/);
+ await assert.rejects(()=>svc.disconnect('oauth:alice',id),/PUBLIC_MEGA_DISABLED/);
+ assert.equal(oldMega.status,'active');
+ assert.equal(providerCalls,0);
+});
+test('public Yaro capability discovery does not claim private commands are registered',()=>{
+ const fs=require('node:fs'),path=require('node:path');
+ const mcp=fs.readFileSync(path.join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
+ assert.match(mcp,/blocked_pending_per_user_yaro_workspace/);
+ assert.match(mcp,/if \(process\.env\.NYX_DEPLOYMENT_MODE==='public'\) return server/);
+ const panel=fs.readFileSync(path.join(__dirname,'../src/connectors/connections-panel.ts'),'utf8');
+ assert.match(panel,/megaOption\.disabled=!legacy/);
+ assert.match(mcp,/z\.literal\('google-drive'\) : z\.enum\(\['google-drive','mega'\]\)/);
+});
