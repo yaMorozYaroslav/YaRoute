@@ -88,6 +88,13 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       last_checked timestamptz NOT NULL,
       PRIMARY KEY(owner_id,connection_id)
     )`);
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_mega_access_prefs (
+      owner_id text NOT NULL,
+      connection_id text NOT NULL,
+      requested_mode text NOT NULL CHECK (requested_mode IN ('read','manage')),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY(owner_id,connection_id)
+    )`);
     this.registry = new ConnectorRegistry(this.repository);
   }
   async onModuleDestroy() { await this.pool?.end(); }
@@ -197,6 +204,21 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     return this.view(connection);
   }
 
+
+  async recordMegaAccessRequest(ownerId:string,id:string,mode:'read'|'manage') {
+    if(mode!=='read' && mode!=='manage')throw new Error('MEGA_PERMISSION_INVALID');
+    const c=await this.owned(this.owner(ownerId),id);
+    if(c.provider!=='mega'||c.status==='revoked')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    // Store intent separately from executable permissions: selecting "manage"
+    // does not unlock writes. Current public Rclone supports probes only.
+    await this.db().query(`INSERT INTO nyx_mega_access_prefs
+      (owner_id,connection_id,requested_mode,updated_at)
+      VALUES($1,$2,$3,now())
+      ON CONFLICT(owner_id,connection_id)
+      DO UPDATE SET requested_mode=EXCLUDED.requested_mode,updated_at=now()`,
+      [ownerId,id,mode]);
+    return {requestedMode:mode,effectiveMode:'read-only-probe'};
+  }
 
   /** Public MEGA uses a one-time owner-linked form, never a model-facing credential field. */
   async beginMegaSetup(ownerId:string,id:string) {
