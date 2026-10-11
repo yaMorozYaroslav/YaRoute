@@ -7,16 +7,16 @@ const {CONNECTIONS_PANEL_URI,CONNECTIONS_PANEL_HTML}=require('../dist/connectors
 
 test('public-facing empty panel starts with a + and no private storage inventory',()=>{
  const html=CONNECTIONS_PANEL_HTML;
- assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v3.html');
+ assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v5.html');
  assert.match(html,/<body class="nyx-empty">/);
- assert.match(html,/<button type="button" id="nyx-add"[^>]+>\+<\/button>/);
- assert.match(html,/aria-label="Add Google Drive or MEGA connection"/);
+ assert.match(html,/<button[^>]+id="nyx-add"[^>]+>.*Add new drive<\/button>/);
+ assert.match(html,/aria-label="Add new drive"/);
  assert.match(html,/body\.nyx-empty:not\(\.nyx-adding\) section/);
  assert.match(html,/section\.storage-section/);
  assert.match(html,/☁️ NestNyx/);
  assert.doesNotMatch(html,/Configured in Rclone|Refresh drives/);
  assert.match(html,/<details id="nyx-legacy-options" hidden>/);
- assert.match(html,/<summary>⚙️ Advanced · Existing Rclone<\/summary>/);
+ assert.match(html,/<summary>🧰 Existing Rclone · Advanced<\/summary>/);
  assert.match(html,/legacyAvailable=data\.legacyInventoryAvailable===true/);
  assert.match(html,/legacyOptions\.hidden=!existing/);
  assert.match(html,/legacyLoad\.addEventListener\('click',\(\)=>showLegacyRemotes\(\)\)/);
