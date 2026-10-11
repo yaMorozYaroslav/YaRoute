@@ -9,7 +9,7 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v5\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\/connections\/v6\.html/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
