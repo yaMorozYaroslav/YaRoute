@@ -73,6 +73,12 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       expires_at timestamptz NOT NULL
     )`);
     await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_mega_setup_expiry_idx ON nyx_mega_setup_states(expires_at)');
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_mega_setup_request_limits (
+      owner_id text NOT NULL,
+      connection_id text NOT NULL,
+      last_issued timestamptz NOT NULL,
+      PRIMARY KEY(owner_id,connection_id)
+    )`);
     // The MEGA backend may block accounts after frequent independent logins.
     // A database-atomic cooldown prevents concurrent web dynos from retrying
     // the same tenant's account repeatedly.
@@ -202,6 +208,15 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     const base=new URL(process.env.NYX_PUBLIC_URL || '');
     if(base.protocol!=='https:' || base.username || base.password || base.pathname!=='/' ||
        base.search || base.hash) throw new Error('MEGA_PUBLIC_URL_INVALID');
+    const allowed=await this.db().query(`
+      INSERT INTO nyx_mega_setup_request_limits(owner_id,connection_id,last_issued)
+      VALUES($1,$2,now())
+      ON CONFLICT(owner_id,connection_id)
+      DO UPDATE SET last_issued=now()
+      WHERE nyx_mega_setup_request_limits.last_issued < now()-interval '1 minute'
+      RETURNING connection_id
+    `,[ownerId,id]);
+    if(allowed.rowCount!==1) throw new Error('MEGA_SETUP_LINK_COOLDOWN');
     const state=randomBytes(32).toString('base64url');
     const digest=createHash('sha256').update(state).digest('hex');
     await this.db().query('DELETE FROM nyx_mega_setup_states WHERE expires_at<=now() OR (owner_id=$1 AND connection_id=$2)',[ownerId,id]);
