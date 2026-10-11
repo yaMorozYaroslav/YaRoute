@@ -7,13 +7,13 @@ export class SharedRootsService {
   private readonly roots: Record<string, SharedRoot>;
 
   constructor() {
-    const raw = process.env.NYX_SHARED_ROOTS_JSON;
-    if (!raw && process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true') {
-      // Public connector mode has no operator-wide shared roots.
+      // Ignore any inherited operator-wide roots even when configured.
       this.roots={};
       return;
     }
+    const raw = process.env.NYX_SHARED_ROOTS_JSON;
     if (!raw) throw new Error('NYX_SHARED_ROOTS_JSON is required');
 
     const parsed = JSON.parse(raw) as Record<string, SharedRoot>;
