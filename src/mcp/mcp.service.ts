@@ -76,7 +76,11 @@ export class McpService {
         routing: 'head_resolve_then_mcp_capability_then_mcp_or_gpt',
         unsupportedOnlyFallback: true,
         executionFailureFallback: false,
-        commandEntrypoints: {
+        commandEntrypoints: process.env.NYX_DEPLOYMENT_MODE === 'public' ? {
+          execute: { status: 'blocked_pending_per_user_yaro_workspace' },
+          ini: { status: 'blocked_pending_per_user_yaro_workspace' },
+          sum: { status: 'blocked_pending_per_user_yaro_workspace' },
+        } : {
           execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
@@ -126,7 +130,7 @@ export class McpService {
 
     server.registerTool('nyx_connections_panel',{
       title:'Manage NestNyx connections',
-      description:'Manage GitHub App connections and owner-scoped Google Drive/MEGA encrypted-vault references. Isolated probes are available only for provisioned accounts; legacy Rclone inventory is private-only. This is an MCP auxiliary tool, not a Yaro CLI command.',
+      description:'Manage owner-scoped GitHub App and Google Drive encrypted-vault connections. MEGA remains private-only; legacy Rclone inventory is private-only. This is an MCP auxiliary tool, not a Yaro CLI command.',
       inputSchema:z.object({}),
       _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
@@ -138,7 +142,9 @@ export class McpService {
         {id:'github',availability:'oauth_ready_if_configured'},
         ...((process.env.NYX_DEPLOYMENT_MODE === 'public' && process.env.NYX_RCLONE_VAULT_ENABLED !== 'true') ? [] : [
           {id:'google-drive',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'read_only_oauth_if_configured' : 'private_rclone_configuration_only'},
-          {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
+          ...(process.env.NYX_DEPLOYMENT_MODE === 'public' ? [] : [
+            {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
+          ]),
         ]),
       ],
       note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
@@ -331,8 +337,8 @@ export class McpService {
     // connector registry with immutable IDs and authenticated owner IDs.
     // Linking changes metadata only; no process-global Rclone configuration edits.
     server.registerTool('nyx_rclone_connection_link',{
-      title:'Create one owner-scoped Drive/MEGA account reference',
-      description:'Create a pending owner-scoped Google Drive/MEGA account record in Neon. In private legacy mode the remote must already exist; vault mode permits isolated provisioning. No authorization is inferred.',
+      title:'Create one owner-scoped storage account reference',
+      description:'Create a pending owner-scoped Google Drive account; MEGA is available only in private legacy mode. Public MEGA requests fail closed.',
       inputSchema:z.object({
         provider:z.enum(['google-drive','mega']),
         remoteName:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
@@ -355,7 +361,7 @@ export class McpService {
 
     server.registerTool('nyx_rclone_connection_test',{
       title:'Check one owner-scoped Rclone account',
-      description:'Probe a configured Google Drive or MEGA remote selected by owner-scoped immutable connection ID. Returns sanitized connectivity status, without reading files, exposing secrets or modifying credentials. An auxiliary MCP Apps action, not a Yaro CLI command.',
+      description:'Probe a configured owner-scoped Google Drive account; private mode also supports MEGA. Returns sanitized connectivity status; no file contents or secrets.',
       inputSchema:z.object({id:z.string().uuid()}),
       _meta:{ui:{visibility:['app']}},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
