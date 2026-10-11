@@ -29,6 +29,7 @@ function fixture(){
    save:async()=>{}};
  service.registry={list:async owner=>owner===row.ownerId?[row]:[]};
  service.pool={query:async(sql,args)=>{
+   if(sql.includes('DELETE FROM nyx_google_drive_oauth_states WHERE expires_at<=now()'))return{rowCount:0,rows:[]};
    if(sql.includes('INSERT INTO nyx_google_drive_oauth_states')){
      states.set(args[0],{owner_id:args[1],connection_id:args[2],code_verifier:args[3]});
      return{rowCount:1,rows:[]};
