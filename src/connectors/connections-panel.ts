@@ -23,7 +23,7 @@ body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
 body.nyx-empty:not(.nyx-adding) header,body.nyx-empty:not(.nyx-adding) section,
 body.nyx-empty:not(.nyx-adding) #message{display:none}
 body.nyx-empty.nyx-adding header,body.nyx-empty.nyx-adding section:not(.storage-section){display:none}
-body.nyx-empty.nyx-adding section.storage-section>*:not(#rclone-new-form):not(#rclone-status){display:none}
+body.nyx-empty.nyx-adding section.storage-section>#rclone-linked-list,body.nyx-empty.nyx-adding section.storage-section>.connected-title{display:none}
 body.nyx-empty.nyx-adding #nyx-add{background:#8882}
 h1{font-size:22px;margin:0 0 5px}h2{font-size:17px;margin:0 0 8px}
 p{margin:4px 0 12px}small,.muted{opacity:.72}
