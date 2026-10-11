@@ -35,6 +35,9 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     await this.pool.query('ALTER TABLE nyx_connector_connections ALTER COLUMN display_name SET NOT NULL');
     await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_connector_owner_idx ON nyx_connector_connections(owner_id)');
     await this.pool.query('CREATE UNIQUE INDEX IF NOT EXISTS nyx_connector_owner_name_uq ON nyx_connector_connections (owner_id, lower(display_name))');
+    // One active owner+remote binding, while allowing many accounts per provider.
+    // Existing historical revoked rows remain untouched.
+    await this.pool.query("CREATE UNIQUE INDEX IF NOT EXISTS nyx_rclone_owner_remote_uq ON nyx_connector_connections(owner_id, provider, external_account_id) WHERE provider IN ('google-drive','mega') AND status <> 'revoked'");
   }
 
   private parse(row: Record<string, unknown>): ConnectorConnection {

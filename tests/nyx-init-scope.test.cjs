@@ -28,7 +28,7 @@ const contract = () => ({
   verification: { sourceRead: true, artifactReadback: true },
   response: 'nyx.context.v1',
 });
-const makeCli = () => cliSchema.parse({ schema: 'nyx.yarocli.v1', version: 'test-v1', commands: { ini: { execution: contract() } } });
+const makeCli = () => cliSchema.parse({ schema: 'nyx.yarocli.v1', version: 'test-v1', commands: { ini: { purpose: 'Initialize the current conversation from Head', execution: contract() } } });
 const locator = {
   schema: 'nyx.bootstrap.v1',
   cli: ref('authority.json'),
