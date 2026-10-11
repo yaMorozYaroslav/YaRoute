@@ -72,17 +72,21 @@ test('Unknown or malformed Rclone remote names fail closed',async t=>{
  await assert.rejects(()=>svc.rcloneConnections(),/RCLONE_REMOTE_INVENTORY_INVALID/);
 });
 
-test('Rclone panel MCP tool is private-only; renders names as text, not HTML',()=>{
+test('private inventory remains backend-only; the public-facing panel hides names',()=>{
  const mcp=fs.readFileSync(require('node:path').join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
  const panel=fs.readFileSync(require('node:path').join(__dirname,'../src/connectors/connections-panel.ts'),'utf8');
  const privateGate=mcp.indexOf("if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;");
  const tool=mcp.indexOf("server.registerTool('nyx_rclone_connections_list'");
  assert.ok(privateGate>0&&tool>privateGate);
- assert.match(mcp,/this\.storage\.rcloneConnections\(\)/);
- assert.match(panel,/id="rclone-list"/);
- assert.match(panel,/nyx_rclone_connections_list/);
- assert.match(panel,/renderRclone/);
- assert.match(panel,/\['google-drive','mega'\]/);
- assert.match(panel,/line\.append\(el\('strong',remote\.name\)/);
+ assert.ok(mcp.includes('this.storage.rcloneConnections()'));
+ assert.doesNotMatch(panel,/id="rclone-list"/);
+ assert.doesNotMatch(panel,/renderRclone|Configured in Rclone/);
+ assert.match(panel,/<details id="nyx-legacy-options" class="nyx-provider-group" hidden>/);
+ assert.match(panel,/if\(!legacyAvailable \|\| !legacyOptions\.open\) return/);
+ assert.match(panel,/call\('nyx_rclone_connections_list',\{\}\)/);
+ assert.match(panel,/legacyAvailable=data\.legacyInventoryAvailable===true/);
+ assert.match(panel,/id="nyx-add"/);
+ assert.match(panel,/google-drive/);
+ assert.match(panel,/mega/);
  assert.doesNotMatch(panel,/<input[^>]*type="password"/);
 });

@@ -123,14 +123,26 @@ export class StorageService {
   /** Single-account isolated Rclone probe using an encrypted-vault profile. */
   async testIsolatedRcloneConnection(
     provider:'google-drive'|'mega',remote:string,profile:string) {
-    if(process.env.NYX_DEPLOYMENT_MODE === 'public')throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if(process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
     if(!['google-drive','mega'].includes(provider) ||
        !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote))throw new Error('RCLONE_REMOTE_INVALID');
-    const ok=await this.rclone.probeIsolated(remote,profile);
+    const ok=await this.rclone.probeIsolated(remote,profile,provider);
     return {schema:'nyx.storage.rclone.probe.v1',provider,name:remote,
       status:ok?'reachable':'unverified',
       ...(ok?{}:{reason:'PROBE_FAILED_OR_UNSUPPORTED'}),
-      check:'isolated_rclone_about',configurationChanged:false};
+      check:provider==='mega'?'isolated_rclone_lsf':'isolated_rclone_about',configurationChanged:false};
+  }
+
+  async listIsolatedRcloneConnection(
+    provider:'google-drive'|'mega',remote:string,profile:string,folder:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE==='public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED!=='true')
+      throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if(!['google-drive','mega'].includes(provider))throw new Error('RCLONE_REMOTE_INVALID');
+    const listing=await this.rclone.listIsolated(remote,profile,folder);
+    return {schema:'nyx.storage.rclone.list.v1',provider,folder,
+      ...listing,readOnly:true,configurationChanged:false};
   }
 
   validateCopyPayload(payload: CopyJobPayload) {

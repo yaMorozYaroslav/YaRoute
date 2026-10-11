@@ -17,7 +17,16 @@ test('private release validator rejects unsafe conditions without exposing secre
  assert.ok(privateReleaseConditions({...base,NYX_PRIVATE_OAUTH_SUBJECTS:''}).includes('PRIVATE_OAUTH_REQUIRES_ONE_SUBJECT'));
  assert.ok(privateReleaseConditions({...base,DATABASE_URL:''}).includes('NEON_DATABASE_NOT_CONFIGURED'));
  assert.ok(privateReleaseConditions({...base,NYX_RCLONE_VAULT_ENABLED:'true',NYX_RCLONE_CREDENTIAL_KEY:''}).includes('RCLONE_VAULT_KEY_NOT_CONFIGURED'));
- assert.ok(privateReleaseConditions({...base,NYX_DEPLOYMENT_MODE:'public'}).includes('PUBLIC_RCLONE_RUNTIME_DISABLED'));
+ const publicBase={...base,NYX_DEPLOYMENT_MODE:'public',
+   NYX_PUBLIC_CONNECTORS_ENABLED:'true',NYX_PRIVATE_OAUTH_SUBJECTS:'alice,bob'};
+ delete publicBase.RCLONE_CONFIG_B64;
+ assert.deepEqual(privateReleaseConditions(publicBase),[]);
+ assert.ok(privateReleaseConditions({...publicBase,NYX_RCLONE_VAULT_ENABLED:'false'})
+   .includes('PUBLIC_RCLONE_VAULT_REQUIRED'));
+ assert.ok(privateReleaseConditions({...publicBase,RCLONE_CONFIG_B64:'operator-config'})
+   .includes('PUBLIC_GLOBAL_RCLONE_CONFIG_FORBIDDEN'));
+ assert.ok(privateReleaseConditions({...publicBase,NYX_PUBLIC_CONNECTORS_ENABLED:'false'})
+   .includes('PUBLIC_CONNECTOR_MODE_REQUIRED'));
 });
 test('release preflight reads Heroku config and does not leak secret values in logs',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nyx-private-check-'));

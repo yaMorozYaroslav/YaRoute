@@ -33,7 +33,12 @@ export class RcloneCredentialVaultService implements OnModuleInit, OnModuleDestr
   isEnabled() { return process.env.NYX_RCLONE_VAULT_ENABLED === 'true'; }
   async onModuleInit() {
     if (!this.isEnabled()) return;
-    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    // Public connector mode may use only this owner-scoped encrypted vault.
+    // Shared operator-wide Rclone paths remain blocked separately.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') {
+      throw new Error('PUBLIC_RCLONE_CONNECTORS_NOT_ENABLED');
+    }
     const raw=process.env.NYX_RCLONE_CREDENTIAL_KEY||'';
     if (!/^[A-Za-z0-9+/]{43}=$/.test(raw) || !process.env.DATABASE_URL) {
       throw new Error('RCLONE_VAULT_CONFIGURATION_REQUIRED');

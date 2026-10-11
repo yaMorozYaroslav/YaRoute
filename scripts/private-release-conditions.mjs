@@ -9,22 +9,42 @@ export function privateReleaseConditions(config) {
     return ['PRIVATE_RUNTIME_CONFIG_INVALID'];
   }
   const errors=[];
-  if (config.NYX_DEPLOYMENT_MODE === 'public') errors.push('PUBLIC_RCLONE_RUNTIME_DISABLED');
+  const multiTenant=config.NYX_DEPLOYMENT_MODE==='public';
+  if(multiTenant){
+    if(config.NYX_PUBLIC_CONNECTORS_ENABLED!=='true')errors.push('PUBLIC_CONNECTOR_MODE_REQUIRED');
+    if(config.NYX_RCLONE_VAULT_ENABLED!=='true')errors.push('PUBLIC_RCLONE_VAULT_REQUIRED');
+    // Public mode never accesses shared operator credentials, even accidentally.
+    if(config.RCLONE_CONFIG_B64 || config.RCLONE_CONFIG_PATH)errors.push('PUBLIC_GLOBAL_RCLONE_CONFIG_FORBIDDEN');
+  }
   const subjects=(config.NYX_PRIVATE_OAUTH_SUBJECTS||'')
     .split(',').map(s=>s.trim()).filter(Boolean);
-  if (new Set(subjects).size !== 1 || subjects.length !== 1) {
+  if (!multiTenant && (new Set(subjects).size !== 1 || subjects.length !== 1)) {
     errors.push('PRIVATE_OAUTH_REQUIRES_ONE_SUBJECT');
   }
   if (typeof config.DATABASE_URL !== 'string' || !config.DATABASE_URL.trim()) {
     errors.push('NEON_DATABASE_NOT_CONFIGURED');
   }
-  if (typeof config.RCLONE_CONFIG_B64 !== 'string' && !config.RCLONE_CONFIG_PATH) {
+  if (!multiTenant && typeof config.RCLONE_CONFIG_B64 !== 'string' && !config.RCLONE_CONFIG_PATH) {
     errors.push('PRIVATE_RCLONE_CONFIG_NOT_CONFIGURED');
   }
   if(config.NYX_RCLONE_VAULT_ENABLED === 'true'){
     const b64=config.NYX_RCLONE_CREDENTIAL_KEY||'';
     if(!/^[A-Za-z0-9+/]{43}=$/.test(b64) || Buffer.from(b64,'base64').length !== 32) {
       errors.push('RCLONE_VAULT_KEY_NOT_CONFIGURED');
+    }
+  }
+  if(config.NYX_MEGA_SELF_SERVICE_ENABLED === 'true') {
+    if(config.NYX_RCLONE_VAULT_ENABLED !== 'true' || !config.DATABASE_URL) {
+      errors.push('MEGA_SELF_SERVICE_REQUIRES_VAULT');
+    }
+    try {
+      const origin=new URL(config.NYX_PUBLIC_URL);
+      if(origin.protocol!=='https:' || origin.origin!==config.NYX_PUBLIC_URL.replace(/\/$/,'') ||
+          origin.username || origin.password || origin.hostname==='localhost') {
+        errors.push('MEGA_SELF_SERVICE_PUBLIC_HTTPS_REQUIRED');
+      }
+    } catch {
+      errors.push('MEGA_SELF_SERVICE_PUBLIC_HTTPS_REQUIRED');
     }
   }
   return errors;
