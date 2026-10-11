@@ -80,7 +80,11 @@ test('private inventory remains backend-only; the public-facing panel hides name
  assert.ok(privateGate>0&&tool>privateGate);
  assert.ok(mcp.includes('this.storage.rcloneConnections()'));
  assert.doesNotMatch(panel,/id="rclone-list"/);
- assert.doesNotMatch(panel,/nyx_rclone_connections_list|renderRclone|Configured in Rclone/);
+ assert.doesNotMatch(panel,/renderRclone|Configured in Rclone/);
+ assert.match(panel,/<details id="nyx-legacy-options" hidden>/);
+ assert.match(panel,/if\(!legacyAvailable \|\| !legacyOptions\.open\) return/);
+ assert.match(panel,/call\('nyx_rclone_connections_list',\{\}\)/);
+ assert.match(panel,/legacyAvailable=data\.legacyInventoryAvailable===true/);
  assert.match(panel,/id="nyx-add"/);
  assert.match(panel,/google-drive/);
  assert.match(panel,/mega/);
