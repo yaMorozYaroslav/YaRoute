@@ -24,6 +24,9 @@ body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
 #nyx-legacy-options summary{cursor:pointer;opacity:.78;max-width:max-content}
 #nyx-legacy-options summary:hover{opacity:1}
 #nyx-legacy-list .row{padding:5px 0;border-top:1px solid #92929222}
+body.nyx-existing #nyx-cloud-name,body.nyx-existing #nyx-cloud-create{display:none}
+body.nyx-existing #nyx-legacy-options{display:block}
+#nyx-legacy-options[hidden]{display:none!important}
 body.nyx-empty:not(.nyx-adding) header,body.nyx-empty:not(.nyx-adding) section,
 body.nyx-empty:not(.nyx-adding) #message{display:none}
 body.nyx-empty.nyx-adding header,body.nyx-empty.nyx-adding section:not(.storage-section){display:none}
@@ -60,9 +63,9 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="provider-hint">🗄️ MEGA · Secure setup</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 <form id="rclone-new-form" class="row">
-<label>Provider <select id="rclone-new-provider"><option value="google-drive">🌈 Google Drive</option><option value="mega">🗄️ MEGA</option></select></label>
-<label>Name your connection <input id="rclone-new-label" type="text" maxlength="80" required placeholder="My files"></label>
-<button type="submit">Continue →</button>
+<label>Provider <select id="rclone-new-provider"><option value="google-drive">🌈 Google Drive</option><option value="mega">🗄️ MEGA</option><option value="existing-rclone" hidden disabled>⚙️ Existing Rclone · Advanced</option></select></label>
+<label id="nyx-cloud-name">Name your connection <input id="rclone-new-label" type="text" maxlength="80" required placeholder="My files"></label>
+<button id="nyx-cloud-create" type="submit">Continue →</button>
 </form>
 <p><small>🔒 NestNyx stores account credentials in an encrypted vault. Disconnect anytime.</small></p>
 <div class="connected-title">✅ Your linked accounts</div>
@@ -89,10 +92,21 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 const root=document.getElementById('connection-list');
 const rcloneLinkedRoot=document.getElementById('rclone-linked-list');
 let megaSetupEnabled=false, legacyAvailable=false, boundRemoteKeys=new Set();
+const providerChoice=document.getElementById("rclone-new-provider");
+const newCloudLabel=document.getElementById("rclone-new-label");
 const legacyOptions=document.getElementById('nyx-legacy-options');
 const legacyLoad=document.getElementById('nyx-legacy-load');
 const legacyList=document.getElementById('nyx-legacy-list');
 const quickAdd=document.getElementById('nyx-add');
+function updateProviderChoice(){
+ const existing=legacyAvailable && providerChoice.value==='existing-rclone';
+ document.body.classList.toggle('nyx-existing',existing);
+ newCloudLabel.required=!existing;
+ legacyOptions.hidden=!existing;
+ if(existing)legacyOptions.open=true;
+ else {legacyOptions.open=false;legacyList.replaceChildren();}
+}
+providerChoice.addEventListener('change',updateProviderChoice);
 quickAdd.addEventListener('click',()=>{
  document.body.classList.toggle('nyx-adding');
  quickAdd.setAttribute('aria-expanded',String(document.body.classList.contains('nyx-adding')));
@@ -372,10 +386,15 @@ async function refresh(){
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
  megaSetupEnabled=data.megaSelfServiceEnabled===true;
  legacyAvailable=data.legacyInventoryAvailable===true;
- legacyOptions.hidden=!legacyAvailable;
- if(!legacyAvailable){
-   legacyOptions.open=false;legacyList.replaceChildren();
+ const existingOption=providerChoice.querySelector('option[value="existing-rclone"]');
+ if(existingOption){
+   existingOption.hidden=!legacyAvailable;
+   existingOption.disabled=!legacyAvailable;
  }
+ if(!legacyAvailable && providerChoice.value==='existing-rclone'){
+   providerChoice.value='google-drive';
+ }
+ updateProviderChoice();
  const hasConnections=data.connections.some(c=>c&&c.status!=='revoked');
  document.body.classList.toggle('nyx-empty',!hasConnections);
  if(hasConnections){document.body.classList.remove('nyx-adding');quickAdd.setAttribute('aria-expanded','false');}
@@ -384,7 +403,11 @@ async function refresh(){
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('rclone-new-form').addEventListener('submit',async event=>{
  event.preventDefault();
- const provider=document.getElementById('rclone-new-provider').value;
+ const provider=providerChoice.value;
+ if(provider==='existing-rclone'){
+   show('Choose an existing Rclone account below; do not create a new cloud connection.');
+   return;
+ }
  const remoteName='nyx_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,9);
  const name=document.getElementById('rclone-new-label').value.trim();
  if(!['google-drive','mega'].includes(provider) ||
