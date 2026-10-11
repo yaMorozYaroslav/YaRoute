@@ -151,6 +151,8 @@ export class McpService {
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       connections:await this.connections.list(this.connectorOwner()),
+      legacyInventoryAvailable:process.env.NYX_DEPLOYMENT_MODE!=='public',
+      isolatedVaultEnabled:process.env.NYX_RCLONE_VAULT_ENABLED==='true',
     })));
 
     server.registerTool('nyx_connection_create',{
