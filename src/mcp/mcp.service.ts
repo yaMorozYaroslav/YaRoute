@@ -147,10 +147,16 @@ export class McpService {
     );
 
     server.registerTool('nyx_connections_panel',{
-      title:'Manage NestNyx connections',
-      description:'Manage owner-scoped GitHub, Google Drive OAuth and optional provisioned MEGA accounts. Public mode never accesses the operator-wide Rclone configuration. This is an MCP auxiliary tool, not a Yaro CLI command.',
+      title:'☁️ NestNyx Connections',
+      description:'Open your personal cloud connections. Add Google Drive or MEGA from one clean, owner-scoped interface. Private legacy remotes are never listed in the panel. This is an MCP auxiliary tool, not a Yaro CLI command.',
       inputSchema:z.object({}),
-      _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
+      // OpenAI MCP extension: create a persistent sidebar launcher and a
+      // conversation tab without requiring a new message to the model.
+      _meta:{
+        ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
+        'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]},
+        'openai/outputTemplate':CONNECTIONS_PANEL_URI,
+      },
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       schema:'nyx.connections.panel.v1',
