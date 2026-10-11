@@ -5,7 +5,7 @@ const {ConnectorRegistry}=require('../dist/connectors/connector-registry');
 const {RcloneService}=require('../dist/storage/rclone.service');
 const {SharedRootsService}=require('../dist/storage/shared-roots.service');
 const old={...Object.fromEntries(['NYX_DEPLOYMENT_MODE','NYX_PUBLIC_CONNECTORS_ENABLED',
- 'NYX_RCLONE_VAULT_ENABLED','NYX_SHARED_ROOTS_JSON'].map(k=>[k,process.env[k]]))};
+ 'NYX_RCLONE_VAULT_ENABLED','NYX_SHARED_ROOTS_JSON','RCLONE_CONFIG_B64','RCLONE_CONFIG_PATH'].map(k=>[k,process.env[k]]))};
 function configure(t){
  t.after(()=>{for(const[k,v]of Object.entries(old))v===undefined?
  delete process.env[k]:process.env[k]=v});
@@ -13,6 +13,8 @@ function configure(t){
  process.env.NYX_PUBLIC_CONNECTORS_ENABLED='true';
  process.env.NYX_RCLONE_VAULT_ENABLED='true';
  delete process.env.NYX_SHARED_ROOTS_JSON;
+ delete process.env.RCLONE_CONFIG_B64;
+ delete process.env.RCLONE_CONFIG_PATH;
 }
 test('public connector mode has no global roots and shared Rclone executor is blocked',async t=>{
  configure(t);
@@ -21,7 +23,12 @@ test('public connector mode has no global roots and shared Rclone executor is bl
  process.env.NYX_SHARED_ROOTS_JSON=JSON.stringify({OPERATOR:{remote:'shared',root:'.'}});
  assert.deepEqual(new SharedRootsService().listAreas(),[]);
  const rclone=new RcloneService();
+ assert.throws(()=>rclone.onModuleInit(),/PUBLIC_OPERATOR_RCLONE_CONFIG_FORBIDDEN/);
+ delete process.env.NYX_SHARED_ROOTS_JSON;
  assert.doesNotThrow(()=>rclone.onModuleInit());
+ process.env.RCLONE_CONFIG_B64='not-a-real-config';
+ assert.throws(()=>rclone.onModuleInit(),/PUBLIC_OPERATOR_RCLONE_CONFIG_FORBIDDEN/);
+ delete process.env.RCLONE_CONFIG_B64;
  await assert.rejects(()=>rclone.run(['listremotes']),/LEGACY_RCLONE_PUBLIC_DISABLED/);
  await assert.rejects(()=>rclone.run(['copy','remote:path','another:path']),/LEGACY_RCLONE_PUBLIC_DISABLED/);
 });
