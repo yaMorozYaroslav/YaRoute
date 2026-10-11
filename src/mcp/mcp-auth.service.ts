@@ -56,7 +56,9 @@ export class McpAuthService {
       // Rclone, CLI, or private handoff tools. Keep strict allowlist in private mode.
       const connectorMode = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true';
-      if (!connectorMode && !allowedSubjects.has(payload.sub)) {
+      // The private runtime retains process-wide Rclone roots and NYX handoffs.
+      // Multiple OAuth subjects must NOT be mistaken for isolated tenants.
+      if (!connectorMode && (allowedSubjects.size !== 1 || !allowedSubjects.has(payload.sub))) {
         res.status(403).json({ error: 'access_denied', error_description: 'Private NYX instance: user not authorized' });
         return false;
       }
