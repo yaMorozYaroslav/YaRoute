@@ -98,3 +98,16 @@ test('Rclone and Other services use separate private/optional expandable groups'
  assert.ok(html.includes('data-provider="mega"'));
  assert.ok(html.includes('data-provider="existing-rclone"'));
 });
+
+
+test('green plus Google flow starts consent automatically and retains safe retry',()=>{
+ const html=CONNECTIONS_PANEL_HTML;
+ assert.match(html,/const linked=await call\('nyx_rclone_connection_link'/);
+ assert.match(html,/if\(provider==='google-drive'\)/);
+ assert.match(html,/const consent=await call\('nyx_rclone_connection_begin_google',\{id:linked\.id\}\)/);
+ assert.match(html,/consent\?\.connectionId!==linked\.id/);
+ assert.match(html,/consent\.authorizationUrl\?\.startsWith\('https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?'\)/);
+ assert.match(html,/await request\('ui\/open-link',\{url:consent\.authorizationUrl\}\)/);
+ assert.match(html,/Use Sign in with Google on that connection to retry/);
+ assert.doesNotMatch(html,/<input[^>]+type="password"/);
+});
