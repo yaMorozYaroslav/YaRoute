@@ -73,6 +73,15 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       expires_at timestamptz NOT NULL
     )`);
     await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_mega_setup_expiry_idx ON nyx_mega_setup_states(expires_at)');
+    // The MEGA backend may block accounts after frequent independent logins.
+    // A database-atomic cooldown prevents concurrent web dynos from retrying
+    // the same tenant's account repeatedly.
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_mega_probe_limits (
+      owner_id text NOT NULL,
+      connection_id text NOT NULL,
+      last_checked timestamptz NOT NULL,
+      PRIMARY KEY(owner_id,connection_id)
+    )`);
     this.registry = new ConnectorRegistry(this.repository);
   }
   async onModuleDestroy() { await this.pool?.end(); }
@@ -311,6 +320,18 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
         schema:'nyx.storage.rclone.probe.v1',provider:connection.provider,
         name:connection.externalAccountId,status:'unverified',
         reason:'ISOLATED_CREDENTIAL_NOT_PROVISIONED',configurationChanged:false};
+
+      if(process.env.NYX_DEPLOYMENT_MODE === 'public' && connection.provider==='mega') {
+        const permitted=await this.db().query(`
+          INSERT INTO nyx_mega_probe_limits(owner_id,connection_id,last_checked)
+          VALUES($1,$2,now())
+          ON CONFLICT(owner_id,connection_id)
+          DO UPDATE SET last_checked=now()
+          WHERE nyx_mega_probe_limits.last_checked < now()-interval '3 minutes'
+          RETURNING connection_id
+        `,[ownerId,connection.id]);
+        if(permitted.rowCount!==1) throw new Error('MEGA_PROBE_COOLDOWN');
+      }
       return {connectionId:connection.id,...await this.storage.testIsolatedRcloneConnection(
         connection.provider,connection.externalAccountId,profile)};
     }
