@@ -8,6 +8,12 @@ export class SharedRootsService {
 
   constructor() {
     const raw = process.env.NYX_SHARED_ROOTS_JSON;
+    if (!raw && process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true') {
+      // Public connector mode has no operator-wide shared roots.
+      this.roots={};
+      return;
+    }
     if (!raw) throw new Error('NYX_SHARED_ROOTS_JSON is required');
 
     const parsed = JSON.parse(raw) as Record<string, SharedRoot>;
