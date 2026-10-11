@@ -81,7 +81,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -119,7 +119,7 @@ export class McpService {
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_PANEL_HTML,
         _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
-          'openai/widgetCSP':{redirect_domains:['https://github.com']},
+          'openai/widgetCSP':{redirect_domains:['https://github.com','https://accounts.google.com']},
           'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
       }]}),
     );
@@ -137,8 +137,8 @@ export class McpService {
       providers:[
         {id:'github',availability:'oauth_ready_if_configured'},
         ...((process.env.NYX_DEPLOYMENT_MODE === 'public' && process.env.NYX_RCLONE_VAULT_ENABLED !== 'true') ? [] : [
-          {id:'google-drive',availability:'private_rclone_configuration_only'},
-          {id:'mega',availability:'private_rclone_configuration_only'},
+          {id:'google-drive',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'read_only_oauth_if_configured' : 'private_rclone_configuration_only'},
+          {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
         ]),
       ],
       note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
@@ -340,6 +340,16 @@ export class McpService {
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
     },async({provider,remoteName,name})=>this.safeTool(()=>
       this.connections.createRclone(this.connectorOwner(),provider,remoteName,name)));
+
+
+    server.registerTool('nyx_rclone_connection_begin_google',{
+      title:'Authorize an owned Google Drive account (read-only OAuth)',
+      description:'Create a single-use Google PKCE consent URL for an owned Drive connection. Does not expose tokens, grant write access or use shared Rclone credentials.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.connections.beginGoogleDrive(this.connectorOwner(),id)));
 
     server.registerTool('nyx_rclone_connection_test',{
       title:'Check one owner-scoped Rclone account',
