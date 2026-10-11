@@ -44,7 +44,7 @@ const sumContract = () => ({
 const makeCli = () => cliSchema.parse({
   schema: 'nyx.yarocli.v1',
   version: 'test-v1',
-  commands: { ini: { execution: iniContract() }, sum: { execution: sumContract() } },
+  commands: { ini: { purpose: 'Initialize the current conversation from Head', execution: iniContract() }, sum: { purpose: 'Summarize and checkpoint the current conversation', execution: sumContract() } },
 });
 const locator = {
   schema: 'nyx.bootstrap.v1',

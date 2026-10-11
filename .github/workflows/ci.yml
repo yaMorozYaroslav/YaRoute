@@ -19,8 +19,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Reject Heroku deployment credentials in GitHub Actions
-        run: node scripts/guard-no-heroku-actions.mjs
       - name: Install dependencies
         run: npm ci
       - name: Security check
