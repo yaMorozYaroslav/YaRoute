@@ -36,6 +36,13 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <p class="muted">Google Drive and MEGA remotes in the private Rclone configuration. Link each existing remote under an editable name; then test its account access below. Provider reauthorization and credential removal remain private server administration.</p>
 <div id="rclone-list" aria-live="polite">Loading configured drives…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
+<form id="rclone-new-form" class="row">
+<label>Provider <select id="rclone-new-provider"><option value="google-drive">Google Drive</option><option value="mega">MEGA</option></select></label>
+<label>Remote name <input id="rclone-new-remote" type="text" maxlength="120" pattern="[A-Za-z][A-Za-z0-9_.-]*" required placeholder="personal_drive"></label>
+<label>Label <input id="rclone-new-label" type="text" maxlength="80" required placeholder="Personal files"></label>
+<button type="submit">Create account reference</button>
+</form>
+<p><small>The optional encrypted-vault mode supports new pending account references. Credentials must be provisioned separately through trusted server administration; they are never entered in this panel. Without vault mode, only existing configured remotes can be linked.</small></p>
 <h2>Linked Rclone accounts (Neon)</h2>
 <p class="muted">Each link has its own immutable connection ID, editable name, and authenticated owner. Links are metadata only: unlinking does not remove an Rclone remote or revoke its provider token.</p>
 <div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
@@ -297,6 +304,23 @@ async function refresh(){
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
+document.getElementById('rclone-new-form').addEventListener('submit',async event=>{
+ event.preventDefault();
+ const provider=document.getElementById('rclone-new-provider').value;
+ const remoteName=document.getElementById('rclone-new-remote').value.trim();
+ const name=document.getElementById('rclone-new-label').value.trim();
+ if(!['google-drive','mega'].includes(provider) ||
+    !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName) || !name){
+   show('Enter a valid provider, remote name and label.',true);return;
+ }
+ try{
+  await call('nyx_rclone_connection_link',{provider,remoteName,name});
+  document.getElementById('rclone-new-remote').value='';
+  document.getElementById('rclone-new-label').value='';
+  await refresh();
+  show('Account reference created in Neon. Provider authorization is not implied.');
+ }catch(e){show(e.message,true);}
+});
 document.getElementById('new-form').addEventListener('submit',async e=>{
  e.preventDefault();const name=document.getElementById('new-name').value.trim();
  const provider='github';
