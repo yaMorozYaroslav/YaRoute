@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConnectorsService } from './connectors.service';
 import { RcloneCredentialVaultService } from '../storage/rclone-credential-vault.service';
-import { googleCallbackUrl, googleOAuthConfiguration } from './google-drive-oauth-config';
+import { googleCallbackUrl, googleOAuthConfiguration, profileOf } from './google-drive-oauth-config';
 
 /**
  * Callback consumes an owner-bound, single-use state from Neon.
