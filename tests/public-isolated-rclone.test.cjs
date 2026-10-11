@@ -147,6 +147,7 @@ test("public cloud browsing only lists an active owner's own vaulted account",as
    return 'one-secret-owner-profile';
  }});
  svc.repository={get:async id=>rows.get(id)||null};
+ svc.registry={list:async()=>[...rows.values()]};
  svc.pool={query:async(sql,params)=>{
    assert.match(sql,/nyx_owner_storage_listing_limits/);
    assert.deepEqual(params,['oauth:alice',cid]);
