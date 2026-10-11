@@ -67,7 +67,8 @@ test('green add menu is accessible and provider lists stay visible when closed',
     'nyx-rclone-count','nyx-other-count','new-github-container']){
    assert.ok(panel.includes('id="'+id+'"'),id);
  }
- assert.match(panel,/aria-controls="nyx-add-menu" aria-expanded="false"/);
+ assert.match(panel,/id="nyx-add"[^>]*aria-expanded="false"/);
+ assert.match(panel,/id="nyx-add"[^>]*aria-controls="nyx-add-menu"/);
  assert.match(panel,/addMenu\.hidden=!addMenu\.hidden/);
  assert.ok(panel.indexOf('id="nyx-add-menu"')<panel.indexOf('id="nyx-google-group"'));
  assert.ok(panel.indexOf('id="nyx-google-group"')<panel.indexOf('id="nyx-other-group"'));
