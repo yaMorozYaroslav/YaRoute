@@ -95,6 +95,13 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       updated_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY(owner_id,connection_id)
     )`);
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_owner_storage_listing_limits (
+      owner_id text NOT NULL,
+      connection_id text NOT NULL,
+      window_hour timestamptz NOT NULL,
+      count integer NOT NULL,
+      PRIMARY KEY(owner_id,connection_id,window_hour)
+    )`);
     this.registry = new ConnectorRegistry(this.repository);
   }
   async onModuleDestroy() { await this.pool?.end(); }
@@ -381,6 +388,41 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     }
     return { connectionId: connection.id,
       ...await this.storage.testRcloneConnection(connection.provider, connection.externalAccountId) };
+  }
+
+  /** Read-only listing bound to a verified account owner and encrypted profile. */
+  async listRclone(ownerId:string,id:string,folder:string=''){
+    const owner=this.owner(ownerId);
+    const connection=await this.owned(owner,id);
+    if(connection.status!=='active' ||
+       (connection.provider!=='mega' && connection.provider!=='google-drive')){
+      throw new Error('STORAGE_CONNECTION_NOT_ACTIVE');
+    }
+    if(!this.vault?.isEnabled())throw new Error('RCLONE_VAULT_NOT_CONFIGURED');
+    if(process.env.NYX_DEPLOYMENT_MODE==='public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED!=='true'){
+      throw new Error('PUBLIC_RCLONE_VAULT_REQUIRED');
+    }
+    if(typeof folder!=='string'||folder.length>512 || folder.startsWith('/') ||
+       /[\\\x00-\x1f\x7f]/.test(folder) ||
+       folder.split('/').some(segment=>segment==='..'||segment==='.'||
+         (folder!=='' && !segment))){
+      throw new Error('RCLONE_LIST_PATH_INVALID');
+    }
+    const usage=await this.db().query(`
+      INSERT INTO nyx_owner_storage_listing_limits(owner_id,connection_id,window_hour,count)
+      VALUES($1,$2,date_trunc('hour',now()),1)
+      ON CONFLICT(owner_id,connection_id,window_hour)
+      DO UPDATE SET count=nyx_owner_storage_listing_limits.count+1
+      WHERE nyx_owner_storage_listing_limits.count<30
+      RETURNING count
+    `,[owner,id]);
+    if(usage.rowCount!==1)throw new Error('RCLONE_LIST_HOURLY_LIMIT');
+    const profile=await this.vault.load(owner,id,connection.provider,
+      connection.externalAccountId);
+    if(!profile)throw new Error('RCLONE_CREDENTIAL_NOT_PROVISIONED');
+    return {connectionId:id,...await this.storage.listIsolatedRcloneConnection(
+      connection.provider,connection.externalAccountId,profile,folder)};
   }
 
   async rename(ownerId: string, id: string, name: string) {
