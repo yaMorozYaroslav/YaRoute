@@ -33,5 +33,19 @@ export function privateReleaseConditions(config) {
       errors.push('RCLONE_VAULT_KEY_NOT_CONFIGURED');
     }
   }
+  if(config.NYX_MEGA_SELF_SERVICE_ENABLED === 'true') {
+    if(config.NYX_RCLONE_VAULT_ENABLED !== 'true' || !config.DATABASE_URL) {
+      errors.push('MEGA_SELF_SERVICE_REQUIRES_VAULT');
+    }
+    try {
+      const origin=new URL(config.NYX_PUBLIC_URL);
+      if(origin.protocol!=='https:' || origin.origin!==config.NYX_PUBLIC_URL.replace(/\/$/,'') ||
+          origin.username || origin.password || origin.hostname==='localhost') {
+        errors.push('MEGA_SELF_SERVICE_PUBLIC_HTTPS_REQUIRED');
+      }
+    } catch {
+      errors.push('MEGA_SELF_SERVICE_PUBLIC_HTTPS_REQUIRED');
+    }
+  }
   return errors;
 }
