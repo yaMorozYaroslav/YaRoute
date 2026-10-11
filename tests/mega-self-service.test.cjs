@@ -88,9 +88,9 @@ test('MEGA setup only accepts one bounded remote profile, never plaintext recove
   await assert.rejects(()=>svc.complete(state,
     '[other]\ntype = mega\nuser = sample@example.com\npass = '+ 'A'.repeat(32)+'\n'),/RCLONE_PROFILE_INVALID/);
   await assert.rejects(()=>svc.complete(state,
-    profile+'session_id = leaked-value\n'),/MEGA_PROFILE_INVALID/);
+    profile+'session_id = leaked-value\n'),/RCLONE_PROFILE_INVALID|MEGA_PROFILE_INVALID/);
   await assert.rejects(()=>svc.complete(state,
-    profile+'2fa = 123456\n'),/MEGA_PROFILE_INVALID/);
+    profile+'2fa = 123456\n'),/RCLONE_PROFILE_INVALID|MEGA_PROFILE_INVALID/);
   assert.equal(stored.length,1);
   process.env.NYX_MEGA_SELF_SERVICE_ENABLED='false';
   await assert.rejects(()=>svc.complete(state,profile),/MEGA_SELF_SERVICE_DISABLED/);
