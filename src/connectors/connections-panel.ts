@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v3.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v4.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,6 +11,14 @@ export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <style>
 :root{color-scheme:light dark;font:14px/1.5 system-ui,sans-serif}
 body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
+#nyx-add{display:inline-flex;align-items:center;justify-content:center;min-width:42px;min-height:42px;
+ font-weight:600;font-size:24px;line-height:1;background:transparent;border:1px solid #8888;border-radius:12px}
+#nyx-quick{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+body.nyx-empty:not(.nyx-adding) header,body.nyx-empty:not(.nyx-adding) section,
+body.nyx-empty:not(.nyx-adding) #message{display:none}
+body.nyx-empty.nyx-adding header,body.nyx-empty.nyx-adding section:not(.storage-section){display:none}
+body.nyx-empty.nyx-adding section.storage-section>*:not(#rclone-new-form):not(#rclone-status){display:none}
+body.nyx-empty.nyx-adding #nyx-add{background:#8882}
 h1{font-size:22px;margin:0 0 5px}h2{font-size:17px;margin:0 0 8px}
 p{margin:4px 0 12px}small,.muted{opacity:.72}
 header{margin-bottom:16px}section{border:1px solid #92929255;border-radius:12px;padding:14px;margin:12px 0}
@@ -28,11 +36,13 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .capabilities{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:5px}
 .controls{display:flex;flex-wrap:wrap;gap:7px}
 </style></head>
-<body><header><h1>⚙️ NestNyx connections</h1>
+<body class="nyx-empty"><div id="nyx-quick">
+<button type="button" id="nyx-add" aria-label="Add Google Drive or MEGA connection" aria-expanded="false" title="Add a connection">+</button>
+</div><header><h1>⚙️ NestNyx connections</h1>
 <p class="muted">Multiple owner-scoped GitHub and Rclone accounts. Account metadata uses the existing Neon PostgreSQL connection registry; provider credentials never enter this panel.</p>
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
-<section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
+<section class="storage-section"><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
 <p class="muted">Google Drive uses read-only OAuth for every user, including the operator. MEGA is optional, using separately provisioned credentials encrypted per owner. Private shared remotes are never visible to public users.</p>
 <div id="rclone-list" aria-live="polite">Loading configured drives…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
@@ -63,6 +73,12 @@ const root=document.getElementById('connection-list');
 const rcloneRoot=document.getElementById('rclone-list');
 const rcloneLinkedRoot=document.getElementById('rclone-linked-list');
 let boundRcloneKeys=new Set();let lastRcloneInventory=null;let megaSetupEnabled=false;
+const quickAdd=document.getElementById('nyx-add');
+quickAdd.addEventListener('click',()=>{
+ document.body.classList.toggle('nyx-adding');
+ quickAdd.setAttribute('aria-expanded',String(document.body.classList.contains('nyx-adding')));
+ if(document.body.classList.contains('nyx-adding'))document.getElementById('rclone-new-provider').focus();
+});
 const rcloneStatus=document.getElementById('rclone-status');
 const status=document.getElementById('message');
 const pending=new Map();let rpcId=0,connecting;
@@ -349,6 +365,9 @@ async function refresh(){
  const data=await call('nyx_connections_list',{});
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
  megaSetupEnabled=data.megaSelfServiceEnabled===true;
+ const hasConnections=data.connections.some(c=>c&&c.status!=='revoked');
+ document.body.classList.toggle('nyx-empty',!hasConnections);
+ if(hasConnections){document.body.classList.remove('nyx-adding');quickAdd.setAttribute('aria-expanded','false');}
  render(data.connections);
  const legacy=data.legacyInventoryAvailable!==false;
  // MEGA is a private legacy provider only. Never offer it to public tenants.
@@ -377,7 +396,7 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
   document.getElementById('rclone-new-remote').value='';
   document.getElementById('rclone-new-label').value='';
   await refresh();
-  show('Account reference created in Neon. Provider authorization is not implied.');
+  show('Account reference created. Continue with provider authorization below.');
  }catch(e){show(e.message,true);}
 });
 document.getElementById('new-form').addEventListener('submit',async e=>{
