@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { StorageModule } from '../storage/storage.module';
 import { ConnectorsService } from './connectors.service';
 import { GithubAppService } from './github-app.service';
 import { GithubReadonlyConnector } from './github-readonly';
@@ -6,6 +7,7 @@ import { GithubWriteConnector } from './github-writes';
 import { GithubOAuthController } from './github-oauth.controller';
 
 @Module({
+  imports: [StorageModule],
   controllers:[GithubOAuthController],
   providers:[
     ConnectorsService, GithubAppService,

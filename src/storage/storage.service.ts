@@ -88,6 +88,51 @@ export class StorageService {
     };
   }
 
+
+  /**
+   * An authenticated, private-only connectivity check for an existing remote.
+   * Never returns Rclone output or errors (which can contain provider details).
+   * This does not mutate rclone.conf or claim credentials were renewed.
+   */
+  async testRcloneConnection(provider: 'google-drive' | 'mega', name: string) {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    }
+    if (!['google-drive', 'mega'].includes(provider) ||
+        typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(name)) {
+      throw new Error('RCLONE_REMOTE_INVALID');
+    }
+    const inventory = await this.rcloneConnections();
+    if (!inventory.remotes.some(remote => remote.provider === provider && remote.name === name)) {
+      throw new Error('RCLONE_REMOTE_NOT_CONFIGURED');
+    }
+    try {
+      // "about" only checks provider account/quota access; no ls, file contents,
+      // credential output, remote config writes or destructive operations.
+      await this.rclone.run(['about', name + ':', '--json', '--contimeout', '5s', '--timeout', '12s'], 16384);
+      return { schema: 'nyx.storage.rclone.probe.v1', provider, name,
+        status: 'reachable', check: 'rclone_about', configurationChanged: false };
+    } catch {
+      // "about" may be unsupported even for a working remote.
+      return { schema: 'nyx.storage.rclone.probe.v1', provider, name,
+        status: 'unverified', check: 'rclone_about',
+        reason: 'PROBE_FAILED_OR_UNSUPPORTED', configurationChanged: false };
+    }
+  }
+
+  /** Single-account isolated Rclone probe using an encrypted-vault profile. */
+  async testIsolatedRcloneConnection(
+    provider:'google-drive'|'mega',remote:string,profile:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE === 'public')throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if(!['google-drive','mega'].includes(provider) ||
+       !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote))throw new Error('RCLONE_REMOTE_INVALID');
+    const ok=await this.rclone.probeIsolated(remote,profile);
+    return {schema:'nyx.storage.rclone.probe.v1',provider,name:remote,
+      status:ok?'reachable':'unverified',
+      ...(ok?{}:{reason:'PROBE_FAILED_OR_UNSUPPORTED'}),
+      check:'isolated_rclone_about',configurationChanged:false};
+  }
+
   validateCopyPayload(payload: CopyJobPayload) {
     this.validateFileRef(payload.source, 'source');
     this.validateFileRef(payload.destination, 'destination');
