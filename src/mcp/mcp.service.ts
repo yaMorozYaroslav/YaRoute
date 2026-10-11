@@ -85,7 +85,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -123,7 +123,8 @@ export class McpService {
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_PANEL_HTML,
         _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
-          'openai/widgetCSP':{redirect_domains:['https://github.com','https://accounts.google.com']},
+          'openai/widgetCSP':{redirect_domains:['https://github.com','https://accounts.google.com',
+            ...(process.env.NYX_PUBLIC_URL?.startsWith('https://') ? [process.env.NYX_PUBLIC_URL.replace(/\/$/,'')] : [])]},
           'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
       }]}),
     );
@@ -157,6 +158,7 @@ export class McpService {
       connections:await this.connections.list(this.connectorOwner()),
       legacyInventoryAvailable:process.env.NYX_DEPLOYMENT_MODE!=='public',
       isolatedVaultEnabled:process.env.NYX_RCLONE_VAULT_ENABLED==='true',
+      megaSelfServiceEnabled:process.env.NYX_MEGA_SELF_SERVICE_ENABLED==='true' && process.env.NYX_RCLONE_VAULT_ENABLED==='true',
     })));
 
     server.registerTool('nyx_connection_create',{
@@ -356,6 +358,14 @@ export class McpService {
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id})=>this.safeTool(()=>
       this.connections.beginGoogleDrive(this.connectorOwner(),id)));
+
+    server.registerTool('nyx_rclone_connection_begin_mega',{
+      title:'Create a one-time secure MEGA setup form',
+      description:'Generate a 10-minute owner-bound HTTPS setup link. Users configure Rclone on their own device and paste a single profile directly into the NestNyx web form. Never supply credentials to ChatGPT. Disabled until manually enabled on the server.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>this.connections.beginMegaSetup(this.connectorOwner(),id)));
 
     server.registerTool('nyx_rclone_connection_test',{
       title:'Check one owner-scoped Rclone account',
