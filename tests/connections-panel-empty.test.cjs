@@ -15,10 +15,10 @@ test('public-facing empty panel starts with a + and no private storage inventory
  assert.match(html,/<section class="storage-section">/);
  assert.match(html,/☁️ NestNyx/);
  assert.doesNotMatch(html,/Configured in Rclone|Refresh drives/);
- assert.match(html,/<details id="nyx-legacy-options" hidden>/);
- assert.match(html,/<summary>🧰 Existing Rclone · Advanced<\/summary>/);
+ assert.match(html,/<details id="nyx-legacy-options" class="nyx-provider-group" hidden>/);
+ assert.match(html,/<summary>🧰 Rclone <span class="nyx-provider-count">Private</span><\/summary>/);
  assert.match(html,/legacyAvailable=data\.legacyInventoryAvailable===true/);
- assert.match(html,/legacyOptions\.hidden=!existing/);
+ assert.match(html,/legacyOptions\.hidden=!legacyAvailable/);
  assert.match(html,/legacyLoad\.addEventListener\('click',\(\)=>showLegacyRemotes\(\)\)/);
  assert.match(html,/async function showLegacyRemotes\(\)/);
  assert.match(html,/if\(!legacyAvailable \|\| !legacyOptions\.open\) return/);
