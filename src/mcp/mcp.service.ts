@@ -96,7 +96,9 @@ export class McpService {
         title: 'Preview potential financial and operational loss (no execution)',
         description: 'Read-only conservative risk preview. Warns about CI, deployments, transfers, growth, recurring jobs, outages, data loss, and forbidden financial actions. Input metadata is unverified and no billing details are accessed. This tool NEVER grants permission or executes an operation.',
         inputSchema: z.object({
-          provider: z.enum(['github','gitlab','google-drive','mega','heroku','neon','other']),
+          provider: process.env.NYX_DEPLOYMENT_MODE === 'public'
+            ? z.enum(['github','gitlab','google-drive','heroku','neon','other'])
+            : z.enum(['github','gitlab','google-drive','mega','heroku','neon','other']),
           operation: z.string().min(1).max(80),
           paths: z.array(z.string().min(1).max(2048)).max(500).optional(),
           estimatedCalls: z.number().int().nonnegative().optional(),
