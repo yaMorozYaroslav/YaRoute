@@ -85,7 +85,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -376,6 +376,14 @@ export class McpService {
     },async({id})=>this.safeTool(()=>
       this.connections.testRclone(this.connectorOwner(),id)));
 
+
+    server.registerTool('nyx_rclone_connection_ls',{
+      title:'Browse one owned connected cloud folder (read-only)',
+      description:'List up to 50 file or directory names from one owned, active Google Drive or MEGA connection. Enforced per-account hourly quota and isolated Rclone credentials. No download, write, copy, move, or deletion.',
+      inputSchema:z.object({id:z.string().uuid(),folder:z.string().max(512).optional()}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,folder})=>this.safeTool(()=>
+      this.connections.listRclone(this.connectorOwner(),id,folder??'')));
 
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
