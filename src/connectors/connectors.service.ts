@@ -1,6 +1,8 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { StorageService } from '../storage/storage.service';
+import { RcloneCredentialVaultService } from '../storage/rclone-credential-vault.service';
 import { ConnectorRegistry } from './connector-registry';
 import { PostgresConnectorRepository } from './postgres-connector-repository';
 
@@ -21,6 +23,9 @@ import {
  */
 @Injectable()
 export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
+  constructor(private readonly storage: StorageService,
+    @Optional() private readonly vault?: RcloneCredentialVaultService) {}
+
   private pool?: Pool;
   private registry?: ConnectorRegistry;
   private repository?: PostgresConnectorRepository;
@@ -76,7 +81,11 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   async list(ownerId: string) {
     this.owner(ownerId);
-    return (await this.policy().list(ownerId)).filter(c => c.provider === 'github').map(connection => this.view(connection));
+    const showRclone = process.env.NYX_DEPLOYMENT_MODE !== 'public';
+    return (await this.policy().list(ownerId))
+      .filter(c => c.provider === 'github' ||
+        (showRclone && (c.provider === 'google-drive' || c.provider === 'mega')))
+      .map(connection => this.view(connection));
   }
   view(c: ConnectorConnection) {
     const { id, displayName, provider, externalAccountId,
@@ -85,6 +94,10 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       id, displayName, provider, externalAccountId, capabilities, providerCapabilities,
       resources: resources ?? [], status,
       availableCapabilities: this.enabledCapabilities(provider),
+      ...(provider === 'google-drive' || provider === 'mega'
+        ? { connectionType: this.vault?.isEnabled() ? 'isolated-credential-vault' : 'private-rclone-reference',
+            configurationChanged: false,
+            verification: this.vault?.isEnabled() ? 'credentials_unverified' : 'configured_not_live_verified' } : {}),
     };
   }
   private enabledCapabilities(provider: ConnectorProvider): ConnectorCapability[] {
@@ -106,15 +119,77 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       capabilities: [], providerCapabilities: [], resources: [], status: 'pending',
     };
     const existing=await this.policy().list(ownerId);
-    if(existing.filter(c=>c.status!=='revoked').length>=12) {
+    if(existing.filter(c=>c.status!=='revoked').length>=30 ||
+       existing.filter(c=>c.provider==='github'&&c.status!=='revoked').length>=12) {
       throw new Error('CONNECTOR_ACCOUNT_LIMIT');
     }
     await this.repository!.save(connection);
     return this.view(connection);
   }
+  /**
+   * Owner-scoped reference to a preconfigured Rclone remote, NOT an OAuth grant.
+   * Shares Neon DATABASE_URL with the existing GitHub connection registry;
+   * no credentials, config bytes or provider tokens are persisted here.
+   */
+  async createRclone(ownerId: string, provider: 'google-drive' | 'mega',
+    remoteName: string, displayName: string) {
+    const owner = this.owner(ownerId);
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if (!['google-drive','mega'].includes(provider) ||
+        typeof remoteName !== 'string' || !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName)) {
+      throw new Error('RCLONE_REMOTE_INVALID');
+    }
+    if (!this.vault?.isEnabled()) {
+      const inventory = await this.storage.rcloneConnections();
+      if (!inventory.remotes.some(remote => remote.provider === provider && remote.name === remoteName)) {
+        throw new Error('RCLONE_REMOTE_NOT_CONFIGURED');
+      }
+    }
+    const existing = await this.policy().list(owner);
+    if (existing.filter(c => c.status !== 'revoked').length >= 30) {
+      throw new Error('CONNECTOR_ACCOUNT_LIMIT');
+    }
+    if (existing.some(c => c.provider === provider &&
+        c.externalAccountId === remoteName && c.status !== 'revoked')) {
+      throw new Error('RCLONE_REMOTE_ALREADY_LINKED');
+    }
+    const connection: ConnectorConnection = {
+      id: randomUUID(), ownerId: owner, provider, displayName: validateConnectionName(displayName),
+      externalAccountId: remoteName, capabilities: [], providerCapabilities: [],
+      resources: [], status: 'pending',
+    };
+    await this.repository!.save(connection);
+    return this.view(connection);
+  }
+
+  async testRclone(ownerId: string, id: string) {
+    const connection = await this.owned(this.owner(ownerId), id);
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if (connection.status === 'revoked' ||
+        (connection.provider !== 'google-drive' && connection.provider !== 'mega')) {
+      throw new Error('RCLONE_CONNECTION_NOT_AVAILABLE');
+    }
+    if (this.vault?.isEnabled()) {
+      const profile=await this.vault.load(ownerId,connection.id,connection.provider,
+        connection.externalAccountId);
+      if (!profile) return {connectionId:connection.id,
+        schema:'nyx.storage.rclone.probe.v1',provider:connection.provider,
+        name:connection.externalAccountId,status:'unverified',
+        reason:'ISOLATED_CREDENTIAL_NOT_PROVISIONED',configurationChanged:false};
+      return {connectionId:connection.id,...await this.storage.testIsolatedRcloneConnection(
+        connection.provider,connection.externalAccountId,profile)};
+    }
+    return { connectionId: connection.id,
+      ...await this.storage.testRcloneConnection(connection.provider, connection.externalAccountId) };
+  }
+
   async rename(ownerId: string, id: string, name: string) {
     const connection=await this.owned(this.owner(ownerId),id);
-    if(connection.provider!=='github')throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    if (connection.provider !== 'github' &&
+        !(['google-drive','mega'].includes(connection.provider) &&
+          process.env.NYX_DEPLOYMENT_MODE !== 'public')) {
+      throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    }
     return this.view(await this.policy().rename(ownerId, id, name));
   }
   async permissions(ownerId: string, id: string, capabilities: ConnectorCapability[]) {
@@ -136,7 +211,11 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   async disconnect(ownerId: string, id: string) {
     const previous=await this.owned(ownerId,id);
-    if(previous.provider!=='github')throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    if (previous.provider !== 'github' &&
+        !(['google-drive','mega'].includes(previous.provider) &&
+          process.env.NYX_DEPLOYMENT_MODE !== 'public')) {
+      throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    }
     await this.db().query(
       `UPDATE nyx_connector_connections SET status='revoked',
        capabilities='[]'::jsonb, provider_capabilities='[]'::jsonb,
@@ -146,7 +225,11 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     );
     await this.db().query('DELETE FROM nyx_connector_link_states WHERE owner_id=$1 AND connection_id=$2',
       [ownerId,id]);
-    return {id,status:'revoked',externalRevocationRequired:true,provider:previous.provider};
+    if (previous.provider === 'google-drive' || previous.provider === 'mega') {
+      await this.vault?.revoke(ownerId,id);
+    }
+    return {id,status:'revoked',externalRevocationRequired:true,provider:previous.provider,
+      configurationChanged:false, metadataOnly:previous.provider !== 'github'};
   }
   /** Atomic owner-level hourly request budget across all NestJS instances. */
   async consumeQuota(ownerId:string, id:string) {
