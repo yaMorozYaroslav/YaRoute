@@ -23,6 +23,10 @@ body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
 #nyx-quick .brand{letter-spacing:.1px;font-size:17px}
 #nyx-quick .subtitle{display:block;font-size:11px;opacity:.65}
 #nyx-quick .spacer{flex:1}
+body:not(.nyx-adding) #nyx-setup{display:none}
+#nyx-setup{padding:12px;border-radius:12px;border:1px solid #18a36a42;
+ background:color-mix(in srgb,#17a06e 5%,transparent)}
+#nyx-setup h2{margin-top:0}
 #nyx-add:hover{filter:brightness(1.08)}
 .provider-hint{display:inline-flex;align-items:center;border:1px solid #92929233;
  border-radius:11px;padding:8px 12px;background:color-mix(in srgb,currentColor 4%,transparent);
@@ -74,7 +78,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <p class="muted">Connect your own cloud accounts. Each connection belongs to you.</p>
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
-<section class="storage-section"><h2>✨ Connect a cloud drive</h2>
+<section class="storage-section"><div id="nyx-setup"><h2>✨ Connect a cloud drive</h2>
 <p class="setup-subtitle">Choose a provider and continue to secure sign-in. Never put passwords or recovery keys in chat.</p>
 <div class="provider-hint">🌈 Google Drive · OAuth</div>
 <div class="provider-hint">🗄️ MEGA · Private setup</div>
@@ -93,6 +97,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <button type="button" id="nyx-legacy-load">Show existing remotes</button>
 <div id="nyx-legacy-list" role="status" aria-live="polite"></div>
 </details>
+</div>
 </section>
 <section><h2>🐙 Add GitHub connection</h2><form id="new-form" class="row">
 <span>Provider: <strong>GitHub</strong></span>
@@ -414,7 +419,7 @@ async function refresh(){
  updateProviderChoice();
  const hasConnections=data.connections.some(c=>c&&c.status!=='revoked');
  document.body.classList.toggle('nyx-empty',!hasConnections);
- if(hasConnections){document.body.classList.remove('nyx-adding');quickAdd.setAttribute('aria-expanded','false');}
+ if(hasConnections && !document.body.classList.contains('nyx-adding'))quickAdd.setAttribute('aria-expanded','false');
  render(data.connections);
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
@@ -435,6 +440,8 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
   await call('nyx_rclone_connection_link',{provider,remoteName,name});
   document.getElementById('rclone-new-label').value='';
   await refresh();
+  document.body.classList.remove('nyx-adding');
+  quickAdd.setAttribute('aria-expanded','false');
   show('✅ Added to your account. Complete provider sign-in to connect.');
  }catch(e){show(e.message,true);}
 });
