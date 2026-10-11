@@ -94,7 +94,8 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       (process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' && this.vault?.isEnabled());
     return (await this.policy().list(ownerId))
       .filter(c => c.provider === 'github' ||
-        (showRclone && (c.provider === 'google-drive' || c.provider === 'mega')))
+        (showRclone && (c.provider === 'google-drive' ||
+          (process.env.NYX_DEPLOYMENT_MODE !== 'public' && c.provider === 'mega'))))
       .map(connection => this.view(connection));
   }
   view(c: ConnectorConnection) {
@@ -144,6 +145,11 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   async createRclone(ownerId: string, provider: 'google-drive' | 'mega',
     remoteName: string, displayName: string) {
     const owner = this.owner(ownerId);
+    // MEGA is deliberately excluded from the public release. Preserve old
+    // private remotes and vault rows; never provision public MEGA accounts.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' && provider === 'mega') {
+      throw new Error('PUBLIC_MEGA_DISABLED');
+    }
     if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true' || !this.vault?.isEnabled())) {
       throw new Error('PUBLIC_RCLONE_VAULT_REQUIRED');
@@ -236,6 +242,9 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
 
   async testRclone(ownerId: string, id: string) {
     const connection = await this.owned(this.owner(ownerId), id);
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' && connection.provider === 'mega') {
+      throw new Error('PUBLIC_MEGA_DISABLED');
+    }
     if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true' || !this.vault?.isEnabled())) {
       throw new Error('PUBLIC_RCLONE_VAULT_REQUIRED');
@@ -260,6 +269,9 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
 
   async rename(ownerId: string, id: string, name: string) {
     const connection=await this.owned(this.owner(ownerId),id);
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' && connection.provider === 'mega') {
+      throw new Error('PUBLIC_MEGA_DISABLED');
+    }
     if (connection.provider !== 'github' &&
         !(['google-drive','mega'].includes(connection.provider) &&
           (process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
@@ -287,6 +299,9 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   async disconnect(ownerId: string, id: string) {
     const previous=await this.owned(ownerId,id);
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' && previous.provider === 'mega') {
+      throw new Error('PUBLIC_MEGA_DISABLED');
+    }
     if (previous.provider !== 'github' &&
         !(['google-drive','mega'].includes(previous.provider) &&
           (process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
