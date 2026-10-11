@@ -1,6 +1,9 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const {RcloneService}=require('../dist/storage/rclone.service');
 const {StorageService}=require('../dist/storage/storage.service');
 
 const oldMode=process.env.NYX_DEPLOYMENT_MODE;
@@ -20,6 +23,11 @@ function fixtures() {
   }[area]),
  };
  const rclone={
+  safeRemoteConfiguration:(name,type)=>({
+   inspection:'available',declaredScope:type==='drive'?'drive.readonly':'unknown',
+   requestedAccess:type==='drive'?'read-only-requested':'unknown',
+   sharedDriveConfigured:name==='gmain',rootFolderConfigured:false,serviceAccountConfigured:false,
+  }),
   listRemoteNamesByType:async type=>{
    calls.push(type);
    if(type==='drive')return ['gmain','drive_secondary','gmain'];
@@ -42,10 +50,22 @@ test('private Rclone inventory lists Google Drive and MEGA remotes with safe ali
   source:'rclone_config',
   status:'configured_not_live_verified',
   remotes:[
-   {provider:'google-drive',name:'drive_secondary',aliases:[],state:'configured'},
-   {provider:'google-drive',name:'gmain',aliases:['DRIVE_TEAM','MAIN'],state:'configured'},
-   {provider:'mega',name:'mega_archive',aliases:['MEGA_ARCHIVE'],state:'configured'},
-   {provider:'mega',name:'mega_private',aliases:[],state:'configured'},
+   {provider:'google-drive',name:'drive_secondary',aliases:[],state:'configured',
+    configuration:{inspection:'available',declaredScope:'drive.readonly',
+      requestedAccess:'read-only-requested',
+      sharedDriveConfigured:false,rootFolderConfigured:false,serviceAccountConfigured:false}},
+   {provider:'google-drive',name:'gmain',aliases:['DRIVE_TEAM','MAIN'],state:'configured',
+    configuration:{inspection:'available',declaredScope:'drive.readonly',
+      requestedAccess:'read-only-requested',
+      sharedDriveConfigured:true,rootFolderConfigured:false,serviceAccountConfigured:false}},
+   {provider:'mega',name:'mega_archive',aliases:['MEGA_ARCHIVE'],state:'configured',
+    configuration:{inspection:'available',declaredScope:'unknown',
+      requestedAccess:'unknown',
+      sharedDriveConfigured:false,rootFolderConfigured:false,serviceAccountConfigured:false}},
+   {provider:'mega',name:'mega_private',aliases:[],state:'configured',
+    configuration:{inspection:'available',declaredScope:'unknown',
+      requestedAccess:'unknown',
+      sharedDriveConfigured:false,rootFolderConfigured:false,serviceAccountConfigured:false}},
   ],
  });
  assert.deepEqual(calls,['drive','mega']);
@@ -89,4 +109,63 @@ test('private inventory remains backend-only; the public-facing panel hides name
  assert.match(panel,/google-drive/);
  assert.match(panel,/mega/);
  assert.doesNotMatch(panel,/<input[^>]*type="password"/);
+});
+
+
+test('private Rclone config inspection emits only safe allowlisted fields',async t=>{
+ t.after(restoreMode);
+ process.env.NYX_DEPLOYMENT_MODE='private';
+ const old=process.env.RCLONE_CONFIG_PATH;
+ const folder=fs.mkdtempSync(path.join(os.tmpdir(),'nyx-safe-config-test-'));
+ const config=path.join(folder,'rclone.conf');
+ t.after(()=>{fs.rmSync(folder,{recursive:true,force:true});
+   if(old===undefined)delete process.env.RCLONE_CONFIG_PATH;
+   else process.env.RCLONE_CONFIG_PATH=old;});
+ fs.writeFileSync(config,[
+  '[drive_alpha]','type = drive','scope = drive.readonly',
+  'team_drive = id-do-not-leak','root_folder_id = root-do-not-leak',
+  'service_account_file = /secret/service-account.json',
+  'token = {"access_token":"top-secret-token"}',
+  'client_secret = hidden-client-secret',
+  '[mega_private]','type = mega','user = private@example.com',
+  'pass = hidden-mega-password',
+  '[drive_weird]','type = drive','scope = secret-malicious-scope',
+  '',
+ ].join('\n'),{mode:0o600});
+ process.env.RCLONE_CONFIG_PATH=config;
+ const service=new RcloneService();
+ const drive=service.safeRemoteConfiguration('drive_alpha','drive');
+ assert.deepEqual(drive,{
+  inspection:'available',declaredScope:'drive.readonly',
+  requestedAccess:'read-only-requested',
+  sharedDriveConfigured:true,rootFolderConfigured:true,serviceAccountConfigured:true,
+ });
+ const mega=service.safeRemoteConfiguration('mega_private','mega');
+ assert.equal(mega.declaredScope,'unknown');
+ assert.equal(mega.requestedAccess,'unknown');
+ assert.equal(mega.sharedDriveConfigured,false);
+ assert.equal(service.safeRemoteConfiguration('drive_weird','drive').declaredScope,'unknown');
+ assert.equal(service.safeRemoteConfiguration('missing','drive').inspection,'unavailable');
+ assert.equal(service.safeRemoteConfiguration('mega_private','drive').inspection,'unavailable');
+ const exposed=JSON.stringify([drive,mega,service.safeRemoteConfiguration('drive_weird','drive')]);
+ for(const secret of ['top-secret','hidden-client-secret','id-do-not-leak',
+   'root-do-not-leak','private@example','hidden-mega','/secret/','secret-malicious']){
+   assert.equal(exposed.includes(secret),false,secret);
+ }
+ process.env.NYX_DEPLOYMENT_MODE='public';
+ assert.throws(()=>service.safeRemoteConfiguration('drive_alpha','drive'),/PRIVATE_RCLONE_CONNECTIONS_ONLY/);
+});
+
+test('private panel shows expandable safe configuration without claiming verified grants',()=>{
+ const panel=fs.readFileSync(require('node:path').join(__dirname,'../src/connectors/connections-panel.ts'),'utf8');
+ assert.match(panel,/item\.className='nyx-rclone-remote card'/);
+ assert.match(panel,/Configured Google scope:/);
+ assert.match(panel,/Requested access:/);
+ assert.match(panel,/Shared Drive binding configured:/);
+ assert.match(panel,/Root folder binding configured:/);
+ assert.match(panel,/Service account configured:/);
+ assert.match(panel,/MEGA permissions: unknown/);
+ assert.match(panel,/not live-verified/);
+ assert.match(panel,/cfg\?\.inspection==='available'/);
+ assert.doesNotMatch(panel,/JSON\.stringify\(remote\.configuration\)/);
 });
