@@ -11,7 +11,7 @@ test('public-facing empty panel starts with a + and no private storage inventory
  assert.match(html,/<body class="nyx-empty">/);
  assert.match(html,/<button[^>]+id="nyx-add"[^>]+>＋<\/button>/);
  assert.match(html,/aria-label="Add new drive"/);
- assert.match(html,/body\.nyx-empty:not\(\.nyx-adding\) section/);
+ assert.match(html,/body:not\(\.nyx-adding\) #nyx-setup\{display:none\}/);
  assert.match(html,/<section class="storage-section">/);
  assert.match(html,/☁️ NestNyx/);
  assert.doesNotMatch(html,/Configured in Rclone|Refresh drives/);
@@ -75,7 +75,23 @@ test('Drive and MEGA accounts are rendered in separate independent collapsible l
  assert.match(html,/count\.textContent=items\.length\+' '\+/);
  assert.match(html,/else if\(wasHidden\)group\.open=items\.length===1/);
  assert.match(html,/revealProvider=provider/);
- assert.match(html, /<\/details>\s*<\/div>\s*<div id="nyx-linked-accounts"/);
+ assert.match(html,/<div id="nyx-linked-accounts"/);
  assert.ok(html.indexOf('<div id="nyx-linked-accounts"') > html.indexOf('<div id="nyx-setup">'));
  assert.doesNotMatch(html,/id="rclone-linked-list"/);
+});
+
+
+test('Rclone and Other services use separate private/optional expandable groups',()=>{
+ const html=CONNECTIONS_PANEL_HTML;
+ assert.ok(html.includes('<details id="nyx-legacy-options" class="nyx-provider-group" hidden>'));
+ assert.ok(html.includes('<details class="nyx-provider-group" id="nyx-other-group">'));
+ assert.ok(html.includes('🧩 Other services'));
+ assert.ok(html.includes('legacyOptions.hidden=!legacyAvailable'));
+ assert.ok(html.includes('if(!legacyAvailable || !legacyOptions.open) return;'));
+ assert.ok(html.includes('id="nyx-google-group"'));
+ assert.ok(html.includes('id="nyx-mega-group"'));
+ assert.ok(html.includes('id="nyx-add"'));
+ assert.ok(html.includes('data-provider="google-drive"'));
+ assert.ok(html.includes('data-provider="mega"'));
+ assert.ok(html.includes('data-provider="existing-rclone"'));
 });
