@@ -34,6 +34,11 @@ test('public-facing empty panel starts with a + and no private storage inventory
 test('the + shows friendly provider choices without requiring a technical remote name',()=>{
  const html=CONNECTIONS_PANEL_HTML;
  assert.match(html,/classList\.toggle\('nyx-adding'\)/);
+ assert.match(html,/body:not\(\.nyx-adding\) #nyx-setup\{display:none\}/);
+ assert.match(html,/<div id="nyx-setup">/);
+ assert.match(html,/id="nyx-add"[^>]+aria-expanded="false"/);
+ assert.match(html,/Add new drive<\/button>/);
+ assert.match(html,/background:linear-gradient\(120deg,#10a867,#058a58\)/);
  assert.match(html,/classList\.toggle\('nyx-empty',!hasConnections\)/);
  assert.match(html,/data\.connections\.some\(c=>c&&c\.status!=='revoked'\)/);
  assert.match(html,/id="rclone-new-provider"/);
