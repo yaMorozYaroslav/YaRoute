@@ -33,8 +33,20 @@ body:not(.nyx-adding) #nyx-setup{display:none}
  margin:4px 7px 9px 0;font-weight:600}
 .setup-subtitle{font-size:13px;opacity:.76}
 .card{border-radius:10px}
-#rclone-linked-list .card{padding:14px;border:1px solid #92929233;margin:10px 0}
-#rclone-linked-list .card:first-child{border-top:1px solid #92929233}
+.nyx-provider-list .card{padding:14px;border:1px solid #92929233;margin:10px 0;border-radius:12px}
+.nyx-provider-list .card:first-child{border-top:1px solid #92929233}
+.nyx-provider-group{margin:10px 0;border:1px solid #92929255;border-radius:13px;
+ background:color-mix(in srgb,currentColor 2%,transparent)}
+.nyx-provider-group[hidden]{display:none}
+.nyx-provider-group summary{display:flex;align-items:center;gap:10px;padding:12px 14px;
+ font-size:14px;font-weight:700;cursor:pointer;list-style:none}
+.nyx-provider-group summary::-webkit-details-marker{display:none}
+.nyx-provider-group summary::before{content:'▸';opacity:.6;font-size:13px}
+.nyx-provider-group[open] summary::before{content:'▾'}
+.nyx-provider-group summary:focus-visible{outline:2px solid #10a867;outline-offset:2px}
+.nyx-provider-group .nyx-provider-count{margin-left:auto;font-weight:500;opacity:.72;
+ background:color-mix(in srgb,currentColor 9%,transparent);padding:2px 9px;border-radius:999px}
+.nyx-provider-list{padding:0 12px 12px}
 .connected-title{font-size:16px;font-weight:600;margin:12px 0 6px}
 #rclone-new-form{align-items:flex-end}
 #rclone-new-form label{flex-direction:column;align-items:flex-start}
@@ -51,7 +63,7 @@ body.nyx-existing #nyx-legacy-options{display:block}
 body.nyx-empty:not(.nyx-adding) header,body.nyx-empty:not(.nyx-adding) section,
 body.nyx-empty:not(.nyx-adding) #message{display:none}
 body.nyx-empty.nyx-adding header,body.nyx-empty.nyx-adding section:not(.storage-section){display:none}
-body.nyx-empty.nyx-adding section.storage-section>#rclone-linked-list,body.nyx-empty.nyx-adding section.storage-section>.connected-title{display:none}
+
 body.nyx-empty.nyx-adding #nyx-add{box-shadow:0 3px 12px #05966926}
 h1{font-size:22px;margin:0 0 5px}h2{font-size:17px;margin:0 0 8px}
 p{margin:4px 0 12px}small,.muted{opacity:.72}
@@ -89,13 +101,21 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <button id="nyx-cloud-create" type="submit">Continue →</button>
 </form>
 <p><small>🔒 NestNyx stores account credentials in an encrypted vault. Disconnect anytime.</small></p>
-<div class="connected-title">✅ Your linked accounts</div>
-<div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
 <details id="nyx-legacy-options" hidden>
 <summary>🧰 Existing Rclone · Advanced</summary>
 <p class="muted">For your existing private configuration. Account names stay hidden until you choose to show them. This does not import credentials into the new encrypted vault.</p>
 <button type="button" id="nyx-legacy-load">Show existing remotes</button>
 <div id="nyx-legacy-list" role="status" aria-live="polite"></div>
+</details>
+</div>
+<div id="nyx-linked-accounts" aria-live="polite">
+<details class="nyx-provider-group" id="nyx-google-group" hidden>
+<summary>🌈 Google Drive <span class="nyx-provider-count" id="nyx-google-count">0</span></summary>
+<div class="nyx-provider-list" id="nyx-google-list"></div>
+</details>
+<details class="nyx-provider-group" id="nyx-mega-group" hidden>
+<summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">0</span></summary>
+<div class="nyx-provider-list" id="nyx-mega-list"></div>
 </details>
 </div>
 </section>
@@ -112,7 +132,13 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 (function(){
 'use strict';
 const root=document.getElementById('connection-list');
-const rcloneLinkedRoot=document.getElementById('rclone-linked-list');
+const googleGroup=document.getElementById('nyx-google-group');
+const megaGroup=document.getElementById('nyx-mega-group');
+const googleList=document.getElementById('nyx-google-list');
+const megaList=document.getElementById('nyx-mega-list');
+const googleCount=document.getElementById('nyx-google-count');
+const megaCount=document.getElementById('nyx-mega-count');
+let revealProvider=null;
 let megaSetupEnabled=false, legacyAvailable=false, boundRemoteKeys=new Set();
 const providerChoice=document.getElementById("rclone-new-provider");
 const newCloudLabel=document.getElementById("rclone-new-label");
@@ -227,9 +253,21 @@ legacyLoad.addEventListener('click',()=>showLegacyRemotes());
 function render(connections){
  root.replaceChildren();
  const linked=connections.filter(c=>['google-drive','mega'].includes(c.provider)&&c.status!=='revoked');
+ const google=linked.filter(c=>c.provider==='google-drive');
+ const mega=linked.filter(c=>c.provider==='mega');
  boundRemoteKeys=new Set(linked.map(c=>c.provider+':'+c.externalAccountId));
- rcloneLinkedRoot.replaceChildren();
- if(!linked.length)rcloneLinkedRoot.append(el('p','No accounts yet. Click + to connect Google Drive or MEGA.'));
+ for(const {group,list,count,items,provider} of [
+   {group:googleGroup,list:googleList,count:googleCount,items:google,provider:'google-drive'},
+   {group:megaGroup,list:megaList,count:megaCount,items:mega,provider:'mega'},
+ ]){
+   const wasHidden=group.hidden;
+   group.hidden=items.length===0;
+   count.textContent=items.length+' '+(items.length===1?'account':'accounts');
+   if(!items.length)group.open=false;
+   else if(revealProvider===provider)group.open=true;
+   else if(wasHidden)group.open=items.length===1;
+   list.replaceChildren();
+ }
  for(const c of linked){
    const box=el('div');box.className='card';
    const title=el('div');title.className='row';
@@ -307,9 +345,10 @@ function render(connections){
      browser.append(controls,results);
      box.append(browser);
    }
-   rcloneLinkedRoot.append(box);
+   (c.provider==='mega'?megaList:googleList).append(box);
  }
 
+ revealProvider=null;
  const github=connections.filter(c=>c.provider==='github'&&c.status!=='revoked');
  if(!github.length)root.append(el('p','No GitHub connections yet. Add one above.'));
  for(const c of github){
@@ -439,6 +478,7 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
  try{
   await call('nyx_rclone_connection_link',{provider,remoteName,name});
   document.getElementById('rclone-new-label').value='';
+  revealProvider=provider;
   await refresh();
   document.body.classList.remove('nyx-adding');
   quickAdd.setAttribute('aria-expanded','false');
