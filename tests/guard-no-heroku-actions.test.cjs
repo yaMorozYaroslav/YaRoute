@@ -8,7 +8,7 @@ test('GitHub Actions rejects Heroku deployment and broad deployment credentials'
  assert.deepEqual(prohibitedHerokuActions({
   'ci.yml':'name: CI\nsteps:\n - run: npm test\n',
   'heroku.yml':'env:\n  HEROKU_API_KEY: SECRET_REFERENCE',
-  'push.yml':'run: git push https://heroku:xxxx@git.heroku.com/app.git HEAD:main',
+  'push.yml':'run: git push https://git.heroku.com/app.git HEAD:main',
   'api.yml':'run: curl https://api.heroku.com/apps/myapp/config-vars',
  }),['api.yml','heroku.yml','push.yml']);
  assert.deepEqual(prohibitedHerokuActions({
