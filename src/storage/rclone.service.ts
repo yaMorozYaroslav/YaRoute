@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 @Injectable()
 export class RcloneService implements OnModuleInit {
@@ -21,6 +22,53 @@ export class RcloneService implements OnModuleInit {
     }
     if (!fs.existsSync(this.configPath)) {
       throw new Error('No rclone config available. Set RCLONE_CONFIG_B64 or RCLONE_CONFIG_PATH.');
+    }
+  }
+
+  /**
+   * Run a bounded read-only provider probe with an exclusive temporary config.
+   * No process-wide Rclone config, inherited NYX credentials, stdout or stderr
+   * are returned to the caller. The config file is always removed afterwards.
+   */
+  async probeIsolated(remote:string,profile:string):Promise<boolean> {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if (!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
+        typeof profile !== 'string' || Buffer.byteLength(profile,'utf8')>32768) {
+      throw new Error('RCLONE_PROFILE_INVALID');
+    }
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nyx-rclone-account-'));
+    fs.chmodSync(dir,0o700);
+    const config=path.join(dir,'config.conf');
+    try {
+      fs.writeFileSync(config,profile,{mode:0o600,flag:'wx'});
+      fs.chmodSync(config,0o600);
+      const env:NodeJS.ProcessEnv={};
+      // Intentionally avoid provider credentials, NYX_* and RCLONE_* vars
+      // from the shared server process. The config path is explicit.
+      for(const k of ['PATH','HOME','TMPDIR','SSL_CERT_FILE','SSL_CERT_DIR',
+        'HTTPS_PROXY','HTTP_PROXY','NO_PROXY']){
+        if(process.env[k])env[k]=process.env[k];
+      }
+      return await new Promise<boolean>(resolve=>{
+        let settled=false, output=0, exceeded=false;
+        const finish=(ok:boolean)=>{
+          if(settled)return;
+          settled=true;resolve(ok);
+        };
+        const child=spawn(this.binary,
+          ['--config',config,'about',remote+':','--json','--contimeout','5s','--timeout','12s'],
+          {env,stdio:['ignore','pipe','pipe'],timeout:16000});
+        for(const stream of [child.stdout,child.stderr]){
+          stream.on('data',(chunk:Buffer)=>{
+            output+=chunk.length;
+            if(output>16384 && !exceeded){exceeded=true;child.kill();}
+          });
+        }
+        child.on('error',()=>finish(false));
+        child.on('close',code=>finish(code===0&&!exceeded));
+      });
+    } finally {
+      fs.rmSync(dir,{recursive:true,force:true});
     }
   }
 

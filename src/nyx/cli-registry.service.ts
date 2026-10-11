@@ -42,6 +42,13 @@ export class NyxCliRegistryService {
       }
       const cli = cliSchema.parse(parseJson(text));
       if (!Object.keys(cli.commands).length) throw new Error();
+      // A Head-defined command without a meaningful Head purpose is not
+      // an executable endpoint. Never substitute MCP titles, guessed prose
+      // or a private execution profile for this canonical description.
+      for (const definition of Object.values(cli.commands)) {
+        const purpose = (definition as { purpose?: unknown }).purpose;
+        if (typeof purpose !== 'string' || purpose.trim().length < 8) throw new Error();
+      }
       const names = new Set(Object.keys(cli.commands).map(x => x.toLowerCase()));
       if (names.size !== Object.keys(cli.commands).length) throw new Error();
       for (const command of Object.values(cli.commands)) for (const alias of command.aliases ?? []) {
