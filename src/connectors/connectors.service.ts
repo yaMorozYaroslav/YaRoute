@@ -187,6 +187,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     const c=await this.owned(owner,id);
     if(c.provider!=='google-drive' || c.status==='revoked') throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
     const {clientId}=googleOAuthConfiguration();
+    await this.db().query('DELETE FROM nyx_google_drive_oauth_states WHERE expires_at<=now()');
     const state=randomBytes(32).toString('base64url');
     const verifier=randomBytes(32).toString('base64url');
     const digest=createHash('sha256').update(state).digest('hex');
