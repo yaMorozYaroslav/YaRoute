@@ -223,6 +223,32 @@ function render(connections){
      show('Connection revoked in Neon. Vault credentials removed if provisioned; existing private legacy Rclone config is unchanged.');
    }));
    box.append(edit);
+   if(c.status==='active' && c.connectionType==='isolated-credential-vault'){
+     const browser=el('div');browser.className='card';
+     browser.append(el('p','Read-only file and folder names (max 50 results).'));
+     const folder=input('');
+     folder.placeholder='Folder path (blank for root)';
+     folder.maxLength=512;
+     const results=el('ul');
+     const controls=el('div');controls.className='row';
+     controls.append(folder,button('Browse folder',async()=>{
+       results.replaceChildren(el('li','Loading…'));
+       try{
+         const data=await call('nyx_rclone_connection_ls',{id:c.id,folder:folder.value.trim()});
+         if(data?.connectionId!==c.id || data?.schema!=='nyx.storage.rclone.list.v1' ||
+            !Array.isArray(data.entries)) throw Error('Invalid folder list');
+         results.replaceChildren();
+         for(const item of data.entries.slice(0,50)){
+           if(typeof item?.name!=='string' || typeof item?.isDirectory!=='boolean')continue;
+           results.append(el('li',(item.isDirectory?'📁 ':'📄 ')+item.name));
+         }
+         if(!results.children.length)results.append(el('li','Empty folder'));
+         if(data.truncated)results.append(el('li','More entries exist; open a narrower folder.'));
+       }catch(e){results.replaceChildren(el('li','Unable to list folder'));show(e.message,true);}
+     }));
+     browser.append(controls,results);
+     box.append(browser);
+   }
    rcloneLinkedRoot.append(box);
  }
 
