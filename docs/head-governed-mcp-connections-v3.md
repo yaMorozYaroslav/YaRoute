@@ -56,3 +56,32 @@ The panel supports **Link account**, **Rename**, **Test access** and **Unlink** 
 4. An OAuth subject cannot operate on a connection ID owned by another subject.
 5. Public mode rejects operator-wide Rclone linking and probes; configured-only provider status is not represented as verified OAuth.
 6. After approved deploy, verify \`/health.commit\`, panel v3 UI, GitHub API behavior, database rows and private Rclone probe.
+
+
+## Opt-in per-connection encrypted vault and isolated Rclone probe
+
+The private runtime now contains an **optional, disabled-by-default** credential isolation path:
+
+- \`NYX_RCLONE_VAULT_ENABLED=true\`: switches linked-account probes to owner-bound encrypted profiles **without fallback** to process-wide Rclone credentials. New account references may be created before provisioning. The public multi-user Rclone runtime is still disabled.
+- \`NYX_RCLONE_CREDENTIAL_KEY\`: independently managed 32-byte symmetric AES-GCM key, supplied as canonical base64 in the trusted server environment. Never commit, transmit in chat, put in Head/Body, or expose in logs. Store a recoverable backup using your own secure secret-management process; the current implementation does not automate key rotation.
+- Existing \`DATABASE_URL\`: provisions the optional \`nyx_rclone_credential_vault\` table alongside the existing \`nyx_connector_connections\` table in your **existing Neon PostgreSQL**, with no new database or external paid infrastructure.
+- Stored ciphertext is authenticated using the tuple \`(OAuth owner, connection UUID, provider, remote name)\`; exact-owner SQL selects are also joined against a non-revoked connection row. The vault validates that incoming Rclone config has exactly one matching Drive/MEGA remote profile.
+- \`scripts/provision-rclone-account.mjs\`: **trusted server-side only**. Reads one profile over stdin and stores it after verifying the owner/connection/provider/remote match. This is deliberately **not** an MCP input, HTTP endpoint or credential text field. Provider OAuth setup and profile acquisition remain manual and outside ChatGPT.
+- \`RcloneService.probeIsolated\`: runs only a bounded \`rclone about\` command, with a private temporary \`0600\` configuration file, a restricted subprocess environment, sanitized boolean result, and guaranteed local cleanup. No copies, deletes or indexing are permitted in this path.
+- \`McpAuthService\` now **fails closed in private mode unless \`NYX_PRIVATE_OAUTH_SUBJECTS\` contains exactly one unique subject**. This is necessary because the legacy storage and NYX handoff routes are still process-wide. In public connector-only mode, multi-subject GitHub access continues to use owner-scoped APIs with no Rclone routes.
+
+### Safe release sequence
+
+1. Review the GitHub PR and run complete CI. Confirm the **one-subject private OAuth allowlist** before shipping or you can intentionally lose private MCP access.
+2. Verify the existing Neon \`DATABASE_URL\` works in the target runtime; the PR cannot inspect or configure it. Do not publish it.
+3. Configure an independently managed \`NYX_RCLONE_CREDENTIAL_KEY\` in private hosting secrets. This is a new secret value to manage; it is never provided to ChatGPT.
+4. Add a pending connection in the panel for each target Google Drive/MEGA account. In the trusted server shell, provision its single-remote Rclone config using the stdin-only operator script, never through GitHub, MCP, shell argv or chat.
+5. **Only after every required profile is available**, enable \`NYX_RCLONE_VAULT_ENABLED=true\`. An unprovisioned account will show \`ISOLATED_CREDENTIAL_NOT_PROVISIONED\`; the old shared configuration is never used as a fallback.
+6. Merge and deploy manually through the existing deployment workflow after approval; verify \`/health.commit\`, private OAuth, panel v3, correct owner linkage, encrypted vault reads, local temp cleanup, and negative cross-owner probes. There is no automatic deploy in this PR.
+
+### Deliberate limits
+
+- No user-facing credential form, managed Google OAuth, MEGA password exchange, provider unlink/revocation, remote write, transfer or token refresh persistence.
+- No public-mode Rclone access, and no claim that existing process-wide legacy storage tools have become tenant-isolated.
+- The encrypted vault is a controlled internal foundation, **not** a complete self-service per-user storage OAuth implementation.
+- Existing staged H29/B25/F82 files do **not** replace canonical H28/B24/F80 until the Yaro CAN lifecycle verifies and promotes them.
