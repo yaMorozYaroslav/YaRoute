@@ -20,6 +20,10 @@ body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
 #rclone-new-form{align-items:flex-end}
 #rclone-new-form label{flex-direction:column;align-items:flex-start}
 #rclone-new-form button{font-weight:600}
+#nyx-legacy-options{margin-top:12px;padding-top:8px;border-top:1px solid #92929233;font-size:12px}
+#nyx-legacy-options summary{cursor:pointer;opacity:.78;max-width:max-content}
+#nyx-legacy-options summary:hover{opacity:1}
+#nyx-legacy-list .row{padding:5px 0;border-top:1px solid #92929222}
 body.nyx-empty:not(.nyx-adding) header,body.nyx-empty:not(.nyx-adding) section,
 body.nyx-empty:not(.nyx-adding) #message{display:none}
 body.nyx-empty.nyx-adding header,body.nyx-empty.nyx-adding section:not(.storage-section){display:none}
@@ -63,6 +67,12 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <p><small>🔒 NestNyx stores account credentials in an encrypted vault. Disconnect anytime.</small></p>
 <div class="connected-title">✅ Your linked accounts</div>
 <div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
+<details id="nyx-legacy-options" hidden>
+<summary>⚙️ Advanced · Existing Rclone</summary>
+<p class="muted">Private setup only. Reuse a previously configured remote without removing its credentials. No remotes are loaded until you ask.</p>
+<button type="button" id="nyx-legacy-load">Show existing remotes</button>
+<div id="nyx-legacy-list" role="status" aria-live="polite"></div>
+</details>
 </section>
 <section><h2>🐙 Add GitHub connection</h2><form id="new-form" class="row">
 <span>Provider: <strong>GitHub</strong></span>
@@ -78,7 +88,10 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 'use strict';
 const root=document.getElementById('connection-list');
 const rcloneLinkedRoot=document.getElementById('rclone-linked-list');
-let megaSetupEnabled=false;
+let megaSetupEnabled=false, legacyAvailable=false, boundRemoteKeys=new Set();
+const legacyOptions=document.getElementById('nyx-legacy-options');
+const legacyLoad=document.getElementById('nyx-legacy-load');
+const legacyList=document.getElementById('nyx-legacy-list');
 const quickAdd=document.getElementById('nyx-add');
 quickAdd.addEventListener('click',()=>{
  document.body.classList.toggle('nyx-adding');
@@ -130,9 +143,55 @@ function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.
 function button(name,handler){const b=el('button',name);b.type='button';b.addEventListener('click',async()=>{
  b.disabled=true;try{await handler();}catch(e){show(e.message,true);}finally{b.disabled=false;}});return b;}
 function input(value){const n=el('input');n.type='text';n.value=value||'';n.maxLength=80;return n;}
+async function showLegacyRemotes(){
+ if(!legacyAvailable || !legacyOptions.open) return;
+ legacyList.replaceChildren(el('span','Loading configured remotes…'));
+ try{
+  const data=await call('nyx_rclone_connections_list',{});
+  if(data?.schema!=='nyx.storage.rclone.connections.v1' ||
+     data.status!=='configured_not_live_verified' || !Array.isArray(data.remotes)){
+    throw Error('Private Rclone inventory unavailable');
+  }
+  const remotes=data.remotes.filter(x=>x &&
+    (x.provider==='google-drive'||x.provider==='mega') &&
+    typeof x.name==='string' &&
+    /^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(x.name)).slice(0,40);
+  legacyList.replaceChildren();
+  if(!remotes.length){
+    legacyList.append(el('p','No existing remotes found.'));return;
+  }
+  for(const remote of remotes){
+    const line=el('div');line.className='row';
+    line.append(el('small',(remote.provider==='mega'?'🗄️ ':'🌈 ')+remote.name));
+    if(boundRemoteKeys.has(remote.provider+':'+remote.name)){
+      line.append(el('small','Already linked'));
+    }else{
+      const label=input(remote.name.slice(0,80));
+      label.placeholder='Display name';
+      line.append(label,button('Link',async()=>{
+        const name=label.value.trim();
+        if(!name)throw Error('Enter a display name');
+        await call('nyx_rclone_connection_link',{
+          provider:remote.provider,remoteName:remote.name,name,
+        });
+        await refresh();
+        await showLegacyRemotes();
+        show('Existing private remote linked; credentials were not migrated.');
+      }));
+    }
+    legacyList.append(line);
+  }
+ }catch(e){
+  legacyList.replaceChildren(el('small','Unable to load private remotes.'));
+  show(e.message,true);
+ }
+}
+legacyLoad.addEventListener('click',()=>showLegacyRemotes());
+
 function render(connections){
  root.replaceChildren();
  const linked=connections.filter(c=>['google-drive','mega'].includes(c.provider)&&c.status!=='revoked');
+ boundRemoteKeys=new Set(linked.map(c=>c.provider+':'+c.externalAccountId));
  rcloneLinkedRoot.replaceChildren();
  if(!linked.length)rcloneLinkedRoot.append(el('p','No accounts yet. Click + to connect Google Drive or MEGA.'));
  for(const c of linked){
@@ -312,6 +371,11 @@ async function refresh(){
  const data=await call('nyx_connections_list',{});
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
  megaSetupEnabled=data.megaSelfServiceEnabled===true;
+ legacyAvailable=data.legacyInventoryAvailable===true;
+ legacyOptions.hidden=!legacyAvailable;
+ if(!legacyAvailable){
+   legacyOptions.open=false;legacyList.replaceChildren();
+ }
  const hasConnections=data.connections.some(c=>c&&c.status!=='revoked');
  document.body.classList.toggle('nyx-empty',!hasConnections);
  if(hasConnections){document.body.classList.remove('nyx-adding');quickAdd.setAttribute('aria-expanded','false');}
