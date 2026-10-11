@@ -11,17 +11,34 @@ export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <style>
 :root{color-scheme:light dark;font:14px/1.5 system-ui,sans-serif}
 body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
-#nyx-add{display:inline-flex;align-items:center;justify-content:center;min-width:42px;min-height:42px;
- font-weight:600;font-size:24px;line-height:1;background:transparent;border:1px solid #8888;border-radius:12px}
-#nyx-quick{display:flex;align-items:center;gap:12px;margin-bottom:10px}
-#nyx-add:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
-.provider-hint{display:inline-block;border-radius:8px;padding:5px 9px;background:#8882;margin:4px 4px 5px 0}
+#nyx-add{display:inline-flex;align-items:center;justify-content:center;gap:9px;
+ min-height:44px;padding:10px 18px;border-radius:14px;color:#fff;
+ background:linear-gradient(120deg,#10a867,#058a58);border:1px solid #0b7f50;
+ box-shadow:0 3px 12px #05966926;font-weight:750;font-size:14px;line-height:1.2}
+#nyx-add:focus-visible,#rclone-new-provider:focus-visible{outline:3px solid #31d69c;outline-offset:3px}
+#nyx-add[aria-expanded="true"]{background:linear-gradient(120deg,#058a58,#08764f)}
+@media(prefers-reduced-motion:no-preference){#nyx-add{transition:filter .15s,transform .15s}#nyx-add:hover{transform:translateY(-1px)}}
+#nyx-quick{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;
+ padding:12px;border-radius:16px;border:1px solid #92929233;background:color-mix(in srgb,currentColor 3%,transparent)}
+#nyx-quick .brand{letter-spacing:.1px;font-size:17px}
+#nyx-quick .subtitle{display:block;font-size:11px;opacity:.65}
+#nyx-quick .spacer{flex:1}
+#nyx-add:hover{filter:brightness(1.08)}
+.provider-hint{display:inline-flex;align-items:center;border:1px solid #92929233;
+ border-radius:11px;padding:8px 12px;background:color-mix(in srgb,currentColor 4%,transparent);
+ margin:4px 7px 9px 0;font-weight:600}
+.setup-subtitle{font-size:13px;opacity:.76}
+.card{border-radius:10px}
+#rclone-linked-list .card{padding:14px;border:1px solid #92929233;margin:10px 0}
+#rclone-linked-list .card:first-child{border-top:1px solid #92929233}
 .connected-title{font-size:16px;font-weight:600;margin:12px 0 6px}
 #rclone-new-form{align-items:flex-end}
 #rclone-new-form label{flex-direction:column;align-items:flex-start}
 #rclone-new-form button{font-weight:600}
 #nyx-legacy-options{margin-top:12px;padding-top:8px;border-top:1px solid #92929233;font-size:12px}
-#nyx-legacy-options summary{cursor:pointer;opacity:.78;max-width:max-content}
+#nyx-legacy-options summary{cursor:pointer;opacity:.78;max-width:max-content;font-weight:650;
+ padding:6px 2px}
+#nyx-legacy-options summary:focus-visible{outline:2px solid #10a867;outline-offset:2px}
 #nyx-legacy-options summary:hover{opacity:1}
 #nyx-legacy-list .row{padding:5px 0;border-top:1px solid #92929222}
 body.nyx-existing #nyx-cloud-name,body.nyx-existing #nyx-cloud-create{display:none}
@@ -31,7 +48,7 @@ body.nyx-empty:not(.nyx-adding) header,body.nyx-empty:not(.nyx-adding) section,
 body.nyx-empty:not(.nyx-adding) #message{display:none}
 body.nyx-empty.nyx-adding header,body.nyx-empty.nyx-adding section:not(.storage-section){display:none}
 body.nyx-empty.nyx-adding section.storage-section>#rclone-linked-list,body.nyx-empty.nyx-adding section.storage-section>.connected-title{display:none}
-body.nyx-empty.nyx-adding #nyx-add{background:#8882}
+body.nyx-empty.nyx-adding #nyx-add{box-shadow:0 3px 12px #05966926}
 h1{font-size:22px;margin:0 0 5px}h2{font-size:17px;margin:0 0 8px}
 p{margin:4px 0 12px}small,.muted{opacity:.72}
 header{margin-bottom:16px}section{border:1px solid #92929255;border-radius:12px;padding:14px;margin:12px 0}
@@ -50,20 +67,20 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .controls{display:flex;flex-wrap:wrap;gap:7px}
 </style></head>
 <body class="nyx-empty"><div id="nyx-quick">
-<strong>☁️ NestNyx</strong>
-<button type="button" id="nyx-add" aria-label="Add Google Drive or MEGA connection" aria-expanded="false" title="Add a cloud connection">+</button>
-<small class="muted">Your connections</small>
+<div><strong class="brand">☁️ NestNyx</strong><span class="subtitle">Your cloud connections</span></div>
+<span class="spacer"></span>
+<button type="button" id="nyx-add" aria-label="Add new drive" aria-controls="rclone-new-form" aria-expanded="false" title="Add a new cloud drive"><span aria-hidden="true">＋</span> Add new drive</button>
 </div><header><h1>☁️ My cloud connections</h1>
 <p class="muted">Connect your own cloud accounts. Each connection belongs to you.</p>
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
-<section class="storage-section"><h2>➕ Add a cloud connection</h2>
-<p>Choose a provider, then authorize it. Never share passwords or recovery keys in chat.</p>
-<div class="provider-hint">🌈 Google Drive · Read-only</div>
-<div class="provider-hint">🗄️ MEGA · Secure setup</div>
+<section class="storage-section"><h2>✨ Connect a cloud drive</h2>
+<p class="setup-subtitle">Choose a provider and continue to secure sign-in. Never put passwords or recovery keys in chat.</p>
+<div class="provider-hint">🌈 Google Drive · OAuth</div>
+<div class="provider-hint">🗄️ MEGA · Private setup</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 <form id="rclone-new-form" class="row">
-<label>Provider <select id="rclone-new-provider"><option value="google-drive">🌈 Google Drive</option><option value="mega">🗄️ MEGA</option><option value="existing-rclone" hidden disabled>⚙️ Existing Rclone · Advanced</option></select></label>
+<label>Provider <select id="rclone-new-provider"><option value="google-drive">🌈 Google Drive</option><option value="mega">🗄️ MEGA</option><option value="existing-rclone" hidden disabled>🧰 Existing Rclone · Advanced</option></select></label>
 <label id="nyx-cloud-name">Name your connection <input id="rclone-new-label" type="text" maxlength="80" required placeholder="My files"></label>
 <button id="nyx-cloud-create" type="submit">Continue →</button>
 </form>
@@ -71,8 +88,8 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="connected-title">✅ Your linked accounts</div>
 <div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
 <details id="nyx-legacy-options" hidden>
-<summary>⚙️ Advanced · Existing Rclone</summary>
-<p class="muted">Private setup only. Reuse a previously configured remote without removing its credentials. No remotes are loaded until you ask.</p>
+<summary>🧰 Existing Rclone · Advanced</summary>
+<p class="muted">For your existing private configuration. Account names stay hidden until you choose to show them. This does not import credentials into the new encrypted vault.</p>
 <button type="button" id="nyx-legacy-load">Show existing remotes</button>
 <div id="nyx-legacy-list" role="status" aria-live="polite"></div>
 </details>
@@ -405,7 +422,7 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
  event.preventDefault();
  const provider=providerChoice.value;
  if(provider==='existing-rclone'){
-   show('Choose an existing Rclone account below; do not create a new cloud connection.');
+   show('🧰 Use Show existing remotes below to select a private Rclone account.');
    return;
  }
  const remoteName='nyx_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,9);
@@ -418,7 +435,7 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
   await call('nyx_rclone_connection_link',{provider,remoteName,name});
   document.getElementById('rclone-new-label').value='';
   await refresh();
-  show('Account reference created. Continue with provider authorization below.');
+  show('✅ Added to your account. Complete provider sign-in to connect.');
  }catch(e){show(e.message,true);}
 });
 document.getElementById('new-form').addEventListener('submit',async e=>{
