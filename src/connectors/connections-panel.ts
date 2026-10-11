@@ -103,12 +103,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <button id="nyx-cloud-create" type="submit">Continue →</button>
 </form>
 <p><small>🔒 NestNyx stores account credentials in an encrypted vault. Disconnect anytime.</small></p>
-<details id="nyx-legacy-options" hidden>
-<summary>🧰 Existing Rclone · Advanced</summary>
-<p class="muted">For your existing private configuration. Account names stay hidden until you choose to show them. This does not import credentials into the new encrypted vault.</p>
-<button type="button" id="nyx-legacy-load">Show existing remotes</button>
-<div id="nyx-legacy-list" role="status" aria-live="polite"></div>
-</details>
+
 </div>
 <div id="nyx-linked-accounts" aria-live="polite">
 <details class="nyx-provider-group" id="nyx-google-group" hidden>
@@ -119,8 +114,17 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">0</span></summary>
 <div class="nyx-provider-list" id="nyx-mega-list"></div>
 </details>
+<details id="nyx-legacy-options" class="nyx-provider-group" hidden>
+<summary>🧰 Rclone <span class="nyx-provider-count">Private</span></summary>
+<p class="muted">For your existing private configuration. Account names stay hidden until you choose to show them. This does not import credentials into the new encrypted vault.</p>
+<button type="button" id="nyx-legacy-load">Show existing remotes</button>
+<div id="nyx-legacy-list" role="status" aria-live="polite"></div>
+</details>
 </div>
 </section>
+<details class="nyx-provider-group" id="nyx-other-group">
+<summary>🧩 Other services <span class="nyx-provider-count" id="nyx-other-count">0 accounts</span></summary>
+<div class="nyx-provider-list">
 <section><h2>🐙 Add GitHub connection</h2><form id="new-form" class="row">
 <span>Provider: <strong>GitHub</strong></span>
 <label>Name <input id="new-name" type="text" maxlength="80" placeholder="My development projects" required></label>
@@ -129,6 +133,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <section><div class="row" style="justify-content:space-between"><h2>🐙 GitHub connections</h2><button id="refresh">Refresh GitHub</button></div>
 <div id="connection-list" aria-live="polite">Loading…</div></section>
 <section><h2>🔐 Technical safeguards</h2><p>Only verified GitHub App installation access and repository-scoped API operations are exposed. No Git, Heroku, or Vercel CLI, infrastructure API, workflow dispatch, plan changes, billing, or payment controls.</p></section>
+</div></details>
 <div id="message" role="status" aria-live="polite"></div>
 <script>
 (function(){
@@ -152,9 +157,9 @@ function updateProviderChoice(){
  const existing=legacyAvailable && providerChoice.value==='existing-rclone';
  document.body.classList.toggle('nyx-existing',existing);
  newCloudLabel.required=!existing;
- legacyOptions.hidden=!existing;
+ legacyOptions.hidden=!legacyAvailable;
  if(existing)legacyOptions.open=true;
- else {legacyOptions.open=false;legacyList.replaceChildren();}
+ if(!legacyAvailable){legacyOptions.open=false;legacyList.replaceChildren();}
 }
 providerChoice.addEventListener('change',updateProviderChoice);
 quickAdd.addEventListener('click',()=>{
@@ -263,12 +268,13 @@ function render(connections){
    {group:megaGroup,list:megaList,count:megaCount,items:mega,provider:'mega'},
  ]){
    const wasHidden=group.hidden;
-   group.hidden=items.length===0;
+   group.hidden=false;
    count.textContent=items.length+' '+(items.length===1?'account':'accounts');
    if(!items.length)group.open=false;
    else if(revealProvider===provider)group.open=true;
    else if(wasHidden)group.open=items.length===1;
    list.replaceChildren();
+   if(!items.length)list.append(el('p','No connections yet. Use the green + to add one.'));
  }
  for(const c of linked){
    const box=el('div');box.className='card';
@@ -352,6 +358,7 @@ function render(connections){
 
  revealProvider=null;
  const github=connections.filter(c=>c.provider==='github'&&c.status!=='revoked');
+ document.getElementById('nyx-other-count').textContent=github.length+' '+(github.length===1?'account':'accounts');
  if(!github.length)root.append(el('p','No GitHub connections yet. Add one above.'));
  for(const c of github){
   const box=el('div');box.className='card';
