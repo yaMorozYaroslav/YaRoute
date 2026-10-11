@@ -9,7 +9,7 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v2\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\/connections\/v3\.html/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
@@ -58,4 +58,31 @@ test('ChatGPT gets separate authenticated conversation-tab and global-sidebar la
  assert.ok(!mcp.includes("entrypoints:[{type:'global'},{type:'thread'}]"));
  // This production change intentionally does not expose unfinished public storage.
  assert.ok(mcp.includes("Google Drive and MEGA migration remains under separate review"));
+});
+
+test('green add menu is accessible and provider lists stay visible when closed',()=>{
+ const panel=src('src/connectors/connections-panel.ts');
+ for(const id of ['nyx-add','nyx-add-menu','nyx-google-group','nyx-mega-group',
+    'nyx-rclone-group','nyx-other-group','nyx-google-count','nyx-mega-count',
+    'nyx-rclone-count','nyx-other-count','new-github-container']){
+   assert.ok(panel.includes('id="'+id+'"'),id);
+ }
+ assert.match(panel,/aria-controls="nyx-add-menu" aria-expanded="false"/);
+ assert.match(panel,/addMenu\.hidden=!addMenu\.hidden/);
+ assert.ok(panel.indexOf('id="nyx-add-menu"')<panel.indexOf('id="nyx-google-group"'));
+ assert.ok(panel.indexOf('id="nyx-google-group"')<panel.indexOf('id="nyx-other-group"'));
+ assert.match(panel,/document\.getElementById\('nyx-other-count'\)\.textContent/);
+});
+test('existing MEGA and Drive remotes use read-only private inventory, never credential forms',()=>{
+ const panel=src('src/connectors/connections-panel.ts');
+ const mcp=src('src/mcp/mcp.service.ts');
+ assert.match(panel,/call\('nyx_rclone_connections_list',\{\}\)/);
+ assert.match(panel,/data\?\.status!=='configured_not_live_verified'/);
+ assert.match(panel,/el\('strong',remote\.name\)/);
+ assert.match(panel,/Configured · not connectivity-tested/);
+ assert.match(panel,/New Google Drive\/MEGA authorization is not enabled in production/);
+ assert.doesNotMatch(panel,/nyx_connection_create.{0,180}provider:.*mega/s);
+ assert.doesNotMatch(panel,/type="password"/);
+ assert.match(mcp,/provider:z\.literal\('github'\)/);
+ assert.match(src('src/connectors/connectors.service.ts'),/provider !== 'github'/);
 });
