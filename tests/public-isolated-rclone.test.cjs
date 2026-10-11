@@ -129,7 +129,10 @@ test('public Yaro capability discovery does not claim private commands are regis
  assert.match(mcp,/blocked_pending_per_user_yaro_workspace/);
  assert.match(mcp,/if \(process\.env\.NYX_DEPLOYMENT_MODE==='public'\) return server/);
  const panel=fs.readFileSync(path.join(__dirname,'../src/connectors/connections-panel.ts'),'utf8');
- assert.doesNotMatch(panel,/nyx_rclone_connections_list|Configured in Rclone|renderRclone/);
+ assert.doesNotMatch(panel,/Configured in Rclone|renderRclone/);
+ assert.match(panel,/<details id="nyx-legacy-options" hidden>/);
+ assert.match(panel,/legacyOptions\.hidden=!legacyAvailable/);
+ assert.match(panel,/if\(!legacyAvailable \|\| !legacyOptions\.open\) return/);
  assert.match(mcp,/provider:z\.enum\(\['google-drive','mega'\]\)/);
 });
 
