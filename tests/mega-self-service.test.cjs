@@ -25,7 +25,7 @@ test('MEGA page explains direct credentials, permissions and never requests reco
   assert.match(html,/value="manage"/);
   assert.match(html,/value="read"/);
   assert.match(html,/not active until separate permission-enforced tools/);
-  assert.match(html,/MEGA API key or recovery key/);
+  assert.match(html,/No API key or recovery key is required/);
   assert.match(html,/action="\/connect\/mega\/setup"/);
   assert.match(html,/<textarea[^>]+name="profile"/);
   assert.match(html,/name="state"/);
@@ -143,8 +143,8 @@ test('Direct MEGA password is obscured through Rclone stdin; only resulting sing
   assert.match(txt,/type = mega/);
   assert.match(txt,/pass = /);
   assert.ok(!txt.includes('sample-test-only-password'));
-  await assert.rejects(()=>obscureMegaPassword('password\\nexfil'),/MEGA_PASSWORD_INVALID/);
-  assert.throws(()=>megaProfile('bad\\nremote','sample@example.com',result),/MEGA_SETUP_INPUT_INVALID/);
+  await assert.rejects(()=>obscureMegaPassword('password'+String.fromCharCode(10)+'exfil'),/MEGA_PASSWORD_INVALID/);
+  assert.throws(()=>megaProfile('bad'+String.fromCharCode(10)+'remote','sample@example.com',result),/MEGA_SETUP_INPUT_INVALID/);
 
   const stored=[],prefs=[];
   const svc=new MegaSetupService({
