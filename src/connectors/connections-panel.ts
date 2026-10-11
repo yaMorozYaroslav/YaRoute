@@ -515,14 +515,32 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
    show('Enter a valid provider, remote name and label.',true);return;
  }
  try{
-  await call('nyx_rclone_connection_link',{provider,remoteName,name});
+  const linked=await call('nyx_rclone_connection_link',{provider,remoteName,name});
   document.getElementById('rclone-new-label').value='';
   providerChoice.value='';
   revealProvider=provider;
   await refresh();
   document.body.classList.remove('nyx-adding');
   quickAdd.setAttribute('aria-expanded','false');
-  show('✅ Added to your account. Complete provider sign-in to connect.');
+  if(provider==='google-drive'){
+    // Only a verified owned connection ID from the backend is accepted.
+    // The OAuth token exchange happens at NestNyx's callback, never in chat.
+    try{
+      if(typeof linked?.id!=='string')throw Error('Missing connection identifier');
+      const consent=await call('nyx_rclone_connection_begin_google',{id:linked.id});
+      if(consent?.connectionId!==linked.id ||
+         !consent.authorizationUrl?.startsWith('https://accounts.google.com/o/oauth2/v2/auth?')){
+        throw Error('Invalid Google consent URL');
+      }
+      await request('ui/open-link',{url:consent.authorizationUrl});
+      show('Google consent opened. Authorize read-only access, then return and refresh.');
+    }catch(signInError){
+      show('Pending Drive connection saved. Google sign-in did not start: '+
+           signInError.message+'. Use Sign in with Google on that connection to retry.',true);
+    }
+  }else{
+    show('Connection saved as pending. Complete provider sign-in to connect.');
+  }
  }catch(e){show(e.message,true);}
 });
 document.getElementById('new-form').addEventListener('submit',async e=>{
