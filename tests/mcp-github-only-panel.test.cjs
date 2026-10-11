@@ -32,3 +32,14 @@ test('MCP panel is auxiliary and does not modify Head CLI definitions',()=>{
  assert.match(mcp,/nyx_connections_panel/);
  assert.match(mcp,/not all Head commands guaranteed/);
 });
+
+test('ChatGPT gets sidebar and conversation tab links to the authenticated panel',()=>{
+ const mcp=src('src/mcp/mcp.service.ts');
+ assert.ok(mcp.includes("'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]}"));
+ assert.ok(mcp.includes("title:'☁️ NestNyx Connections'"));
+ assert.ok(mcp.includes("inputSchema:z.object({})"));
+ assert.ok(mcp.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
+ // This release intentionally does not advertise unimplemented public storage.
+ assert.ok(mcp.includes("Google Drive and MEGA migration remains under separate review"));
+ assert.doesNotMatch(mcp,/NYX_PUBLIC_CONNECTORS_ENABLED|NYX_MEGA_SELF_SERVICE_ENABLED/);
+});
