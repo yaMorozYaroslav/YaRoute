@@ -33,7 +33,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
 <section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
-<p class="muted">Public mode supports owner-scoped Google Drive via read-only OAuth. Private NYX can also discover legacy remotes. MEGA is excluded from the public release.</p>
+<p class="muted">Google Drive uses read-only OAuth for every user, including the operator. MEGA is optional, using separately provisioned credentials encrypted per owner. Private shared remotes are never visible to public users.</p>
 <div id="rclone-list" aria-live="polite">Loading configured drives…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 <form id="rclone-new-form" class="row">
@@ -42,9 +42,9 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <label>Label <input id="rclone-new-label" type="text" maxlength="80" required placeholder="Personal files"></label>
 <button type="submit">Create account reference</button>
 </form>
-<p><small>Google Drive uses read-only OAuth consent. Public MEGA account creation is disabled; credentials are never entered in this panel.</small></p>
+<p><small>MEGA account creation makes a pending reference only. To connect MEGA, a trusted server operator must securely provision your own Rclone profile. Do not paste passwords, recovery codes or config into ChatGPT.</small></p>
 <h2>Linked Rclone accounts (Neon)</h2>
-<p class="muted">Each link has an immutable connection ID and an authenticated owner. Unlink deletes vault credentials and attempts Google token revocation. Legacy private remotes remain configured.</p>
+<p class="muted">Each link has an immutable connection ID and an authenticated owner. Unlink deletes vault credentials and attempts Google token revocation. MEGA users must separately invalidate sessions with the provider when needed. Private legacy remotes are not modified.</p>
 <div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
 </section>
 <section><h2>Add GitHub connection</h2><form id="new-form" class="row">
@@ -205,10 +205,10 @@ function render(connections){
      }catch(e){probe.textContent='Check failed';show(e.message,true);}
    }),probe);
    edit.append(button('Unlink',async()=>{
-     if(!confirm('Disconnect? Local vault credentials will be deleted and Google revocation attempted. MEGA or provider-side sessions may need separate revocation.'))return;
+     if(!confirm('Disconnect? Local vault credentials will be deleted and Google revocation attempted. MEGA session revocation must be handled at the provider.'))return;
      await call('nyx_connection_disconnect',{id:c.id});
      await refresh();
-     show('Account reference revoked in Neon; provider credentials remain configured.');
+     show('Connection revoked in Neon. Vault credentials removed if provisioned; existing private legacy Rclone config is unchanged.');
    }));
    box.append(edit);
    rcloneLinkedRoot.append(box);
@@ -314,8 +314,7 @@ async function refresh(){
  const legacy=data.legacyInventoryAvailable!==false;
  // MEGA is a private legacy provider only. Never offer it to public tenants.
  const megaOption=document.querySelector('#rclone-new-provider option[value="mega"]');
- if(megaOption){megaOption.hidden=!legacy;megaOption.disabled=!legacy;}
- if(!legacy)document.getElementById('rclone-new-provider').value='google-drive';
+ if(megaOption){megaOption.hidden=false;megaOption.disabled=false;}
  document.getElementById('rclone-refresh').hidden=!legacy;
  if(!legacy){
   rcloneRoot.replaceChildren(el('p','Global remote inventory is not exposed to public users; create an isolated account reference below.'));
@@ -330,8 +329,7 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
  const provider=document.getElementById('rclone-new-provider').value;
  const remoteName=document.getElementById('rclone-new-remote').value.trim();
  const name=document.getElementById('rclone-new-label').value.trim();
- const publicMode=document.getElementById('rclone-refresh').hidden;
- if((publicMode ? provider!=='google-drive' : !['google-drive','mega'].includes(provider)) ||
+ if(!['google-drive','mega'].includes(provider) ||
     !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName) || !name){
    show('Enter a valid provider, remote name and label.',true);return;
  }
