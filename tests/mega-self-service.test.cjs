@@ -1,0 +1,97 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {ConnectorsService}=require('../dist/connectors/connectors.service');
+const {MegaSetupService}=require('../dist/connectors/mega-setup.service');
+const {megaSetupPage}=require('../dist/connectors/mega-setup.controller');
+
+const state='s'.repeat(43);
+const remote='mega_personal';
+const profile='['+remote+']\ntype = mega\nuser = sample@example.com\npass = '+'A'.repeat(32)+'\n';
+
+function flags(t){
+  const keys=['NYX_MEGA_SELF_SERVICE_ENABLED','NYX_RCLONE_VAULT_ENABLED','NYX_PUBLIC_URL'];
+  const old=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
+  t.after(()=>{for(const [k,v] of Object.entries(old))
+    v===undefined?delete process.env[k]:process.env[k]=v;});
+  Object.assign(process.env,{NYX_MEGA_SELF_SERVICE_ENABLED:'true',
+    NYX_RCLONE_VAULT_ENABLED:'true',NYX_PUBLIC_URL:'https://nestnyx.example'});
+}
+
+test('MEGA form teaches local Rclone profile setup without requesting recovery key or direct account password',()=>{
+  const html=megaSetupPage(state,remote);
+  assert.match(html,/rclone config/);
+  assert.match(html,/MEGA API key or recovery key/);
+  assert.match(html,/action="\/connect\/mega\/setup"/);
+  assert.match(html,/<textarea[^>]+name="profile"/);
+  assert.match(html,/name="state"/);
+  assert.doesNotMatch(html,/name="password"/);
+  assert.doesNotMatch(html,/name="recoveryKey"/);
+  assert.throws(()=>megaSetupPage('invalid','good'),/MEGA_SETUP_LINK_INVALID/);
+  assert.throws(()=>megaSetupPage(state,'bad"><script>'),/MEGA_SETUP_LINK_INVALID/);
+});
+
+test('owner-bound MEGA setup state is expiring, one-use and rejects other tenant',async t=>{
+  flags(t);
+  const row={id:'123e4567-e89b-42d3-a456-426614174000',
+    ownerId:'oauth:alice',provider:'mega',externalAccountId:remote,status:'pending'};
+  const states=new Map();
+  const vault={isEnabled:()=>true};
+  const svc=new ConnectorsService({},vault);
+  svc.repository={get:async id=>id===row.id?row:null};
+  svc.registry={list:async()=>[]};
+  svc.pool={query:async(sql,args)=>{
+    if(sql.startsWith('DELETE FROM nyx_mega_setup_states WHERE expires_at<=now()')){
+      states.clear();return{rowCount:0,rows:[]};
+    }
+    if(sql.includes('INSERT INTO nyx_mega_setup_states')){
+      states.set(args[0],{owner_id:args[1],connection_id:args[2]});
+      return {rowCount:1,rows:[]};
+    }
+    if(sql.startsWith('SELECT owner_id,connection_id FROM nyx_mega_setup_states')){
+      const v=states.get(args[0]);
+      return {rowCount:v?1:0,rows:v?[v]:[]};
+    }
+    if(sql.startsWith('DELETE FROM nyx_mega_setup_states WHERE state_digest=')){
+      const v=states.get(args[0]);states.delete(args[0]);
+      return {rowCount:v?1:0,rows:v?[v]:[]};
+    }
+    throw Error('Unexpected SQL');
+  }};
+  await assert.rejects(()=>svc.beginMegaSetup('oauth:bob',row.id),/CONNECTOR_NOT_FOUND/);
+  const started=await svc.beginMegaSetup('oauth:alice',row.id);
+  const url=new URL(started.setupUrl);
+  assert.equal(url.origin,'https://nestnyx.example');
+  assert.equal(url.pathname,'/connect/mega/setup');
+  assert.equal(started.expiresInSeconds,600);
+  const token=url.searchParams.get('state');
+  assert.equal(token.length,43);
+  assert.deepEqual(await svc.inspectMegaSetupState(token),{remote});
+  const consumed=await svc.consumeMegaSetupState(token);
+  assert.equal(consumed.ownerId,'oauth:alice');
+  assert.equal(consumed.remote,remote);
+  await assert.rejects(()=>svc.consumeMegaSetupState(token),/MEGA_SETUP_STATE_EXPIRED/);
+});
+
+test('MEGA setup only accepts one bounded remote profile, never plaintext recovery codes or other remotes',async t=>{
+  flags(t);
+  const stored=[];
+  const connections={consumeMegaSetupState:async()=>({
+    ownerId:'oauth:alice',connectionId:'123e4567-e89b-42d3-a456-426614174000',remote})};
+  const vault={isEnabled:()=>true,store:async(...args)=>{stored.push(args);return{stored:true}}};
+  const svc=new MegaSetupService(connections,vault);
+  const result=await svc.complete(state,profile);
+  assert.equal(result.stored,true);
+  assert.equal(result.verification,'unverified');
+  assert.equal(stored.length,1);
+  assert.equal(stored[0][0],'oauth:alice');
+  assert.equal(stored[0][2],'mega');
+  await assert.rejects(()=>svc.complete(state,
+    '[other]\ntype = mega\nuser = sample@example.com\npass = '+ 'A'.repeat(32)+'\n'),/RCLONE_PROFILE_INVALID/);
+  await assert.rejects(()=>svc.complete(state,
+    profile+'session_id = leaked-value\n'),/MEGA_PROFILE_INVALID/);
+  await assert.rejects(()=>svc.complete(state,
+    profile+'2fa = 123456\n'),/MEGA_PROFILE_INVALID/);
+  assert.equal(stored.length,1);
+  process.env.NYX_MEGA_SELF_SERVICE_ENABLED='false';
+  await assert.rejects(()=>svc.complete(state,profile),/MEGA_SELF_SERVICE_DISABLED/);
+});
