@@ -36,6 +36,12 @@ This runbook does **not** mean the release is ready to deploy. This multi-user b
 
 - The one-time link now displays MEGA email/password inputs and an optional advanced local Rclone profile field. No MEGA recovery key or vault encryption key is requested.
 - The form explains that the operator owns the server-side vault key and can decrypt stored credentials. This is **not end-to-end encryption**.
-- The `read` or `manage` choice is saved as an **intention** in an owner-scoped Neon table. Only read-only Rclone probes are implemented. Selecting manage does not enable any write/upload/delete tool. Do not advertise manage as an active ability until separate APIs enforce the requested permissions.
+- The `read` or `manage` choice is saved as an **intention** in an owner-scoped Neon table. Bounded, owner-authorized read-only cloud folder browsing (max 50 names per request, 30 calls/hour per owner/connection) and Rclone connection probes are implemented. Selecting manage does not enable any write/upload/delete tool. Do not advertise manage as an active ability until separate APIs enforce the requested permissions.
 - MEGA connections become `active` only if a provider-side read-only `lsf` check succeeds. This is rate limited across dynos. Direct web-form MEGA 2FA is not supported yet.
 - Before turning on `NYX_MEGA_SELF_SERVICE_ENABLED=true`, manually check HTTPS, disabled request-body logs, single-use links, current deployment SHA, and trial with a disposable MEGA account. No live credentials have been requested in this repository.
+
+## When to reconnect
+
+Do **not** reconnect while the current Heroku release still runs the old build. After manual operator deployment, verify `/health` reports the release SHA, confirm authenticated ChatGPT tools include `nyx_connections_panel`, `nyx_rclone_connection_begin_google`, `nyx_rclone_connection_begin_mega`, and `nyx_rclone_connection_ls`, then reconnect Google Drive via the panel's OAuth button and MEGA using its ten-minute secure setup form. Run `Test access`, refresh, and use `Browse folder` on the active account. Never paste credentials into ChatGPT.
+
+A private-mode deploy may allow **the existing single operator** to trial these tools without migrating canonical Yaro. It does **not** authorize multiple users. Public Yaro `ini`/`sum`/`execute` remain blocked until owner-bound workspace isolation has passed independent review and tests (issue #13). Do not represent private-mode trials as a public release.
