@@ -123,7 +123,13 @@ test('MEGA public connectivity checks are owner-scoped and atomically throttled'
   },{isEnabled:()=>true,load:async()=>profile});
   svc.repository={get:async key=>key===id?row:null};
   svc.registry={list:async()=>[row]};
+  let activationCount=0;
   svc.pool={query:async(sql,args)=>{
+    if(sql.includes('UPDATE nyx_connector_connections')){
+      assert.deepEqual(args,[id,'oauth:alice']);activationCount++;
+      row.status='active';
+      return{rowCount:1,rows:[]};
+    }
     assert.ok(sql.includes('nyx_mega_probe_limits'));
     assert.deepEqual(args,['oauth:alice',id]);
     return{rowCount:++callCount===1?1:0,rows:[]};
@@ -132,6 +138,8 @@ test('MEGA public connectivity checks are owner-scoped and atomically throttled'
   assert.equal((await svc.testRclone('oauth:alice',id)).status,'reachable');
   await assert.rejects(()=>svc.testRclone('oauth:alice',id),/MEGA_PROBE_COOLDOWN/);
   assert.equal(providerCalls,1);
+  assert.equal(activationCount,1);
+  assert.equal(row.status,'active');
 });
 
 test('Direct MEGA password is obscured through Rclone stdin; only resulting single profile is stored',async t=>{
