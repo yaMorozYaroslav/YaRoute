@@ -18,6 +18,8 @@ test('public connector mode has no global roots and shared Rclone executor is bl
  configure(t);
  const roots=new SharedRootsService();
  assert.deepEqual(roots.listAreas(),[]);
+ process.env.NYX_SHARED_ROOTS_JSON=JSON.stringify({OPERATOR:{remote:'shared',root:'.'}});
+ assert.deepEqual(new SharedRootsService().listAreas(),[]);
  const rclone=new RcloneService();
  assert.doesNotThrow(()=>rclone.onModuleInit());
  await assert.rejects(()=>rclone.run(['listremotes']),/LEGACY_RCLONE_PUBLIC_DISABLED/);
