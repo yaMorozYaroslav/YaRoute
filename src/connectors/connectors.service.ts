@@ -218,7 +218,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     if(q.rowCount!==1)throw new Error('MEGA_SETUP_STATE_EXPIRED');
     const c=await this.owned(q.rows[0].owner_id,q.rows[0].connection_id);
     if(c.provider!=='mega' || c.status==='revoked')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
-    return true;
+    return {remote:c.externalAccountId};
   }
 
   async consumeMegaSetupState(state:string) {
