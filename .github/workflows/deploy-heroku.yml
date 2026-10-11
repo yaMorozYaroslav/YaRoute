@@ -40,6 +40,20 @@ jobs:
             https://api.heroku.com/apps/dev-nest-nyx/features
           node scripts/verify-handoff-topology.mjs /tmp/formation.json /tmp/features.json
 
+      - name: Preflight private OAuth and Neon configuration (no secret output)
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$HEROKU_API_KEY"
+          umask 077
+          trap 'rm -f /tmp/nyx-release-config-private.json' EXIT
+          curl -fsS -o /tmp/nyx-release-config-private.json \
+            -H "Authorization: Bearer $HEROKU_API_KEY" \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            https://api.heroku.com/apps/dev-nest-nyx/config-vars
+          node scripts/verify-private-release-config.mjs /tmp/nyx-release-config-private.json
+
       - name: Sync public Heroku config
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
@@ -54,7 +68,7 @@ jobs:
             --data-binary @config/heroku-public.json \
             https://api.heroku.com/apps/dev-nest-nyx/config-vars
 
-      - name: Deploy YaRoute master to dev-nest-nyx
+      - name: Deploy reviewed branch SHA to existing dev-nest-nyx
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
