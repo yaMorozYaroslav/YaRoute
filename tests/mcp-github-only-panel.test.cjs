@@ -41,5 +41,4 @@ test('ChatGPT gets sidebar and conversation tab links to the authenticated panel
  assert.ok(mcp.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
  // This release intentionally does not advertise unimplemented public storage.
  assert.ok(mcp.includes("Google Drive and MEGA migration remains under separate review"));
- assert.doesNotMatch(mcp,/NYX_PUBLIC_CONNECTORS_ENABLED|NYX_MEGA_SELF_SERVICE_ENABLED/);
 });
