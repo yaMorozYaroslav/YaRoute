@@ -23,6 +23,11 @@ test('public-facing empty panel starts with a + and no private storage inventory
  assert.match(html,/async function showLegacyRemotes\(\)/);
  assert.match(html,/if\(!legacyAvailable \|\| !legacyOptions\.open\) return/);
  assert.match(html,/call\('nyx_rclone_connections_list',\{\}\)/);
+ assert.match(html,/<option value="existing-rclone" hidden disabled>/);
+ assert.match(html,/existing=legacyAvailable && providerChoice\.value==='existing-rclone'/);
+ assert.match(html,/newCloudLabel\.required=!existing/);
+ assert.match(html,/existingOption\.hidden=!legacyAvailable/);
+ assert.match(html,/existingOption\.disabled=!legacyAvailable/);
  assert.doesNotMatch(html,/Remote: |Areas: /);
 });
 
