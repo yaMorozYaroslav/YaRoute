@@ -7,7 +7,7 @@ const {spawnSync}=require('node:child_process');
 const {pathToFileURL}=require('node:url');
 const key=Buffer.alloc(32,7).toString('base64');
 const base={NYX_DEPLOYMENT_MODE:'private',NYX_PRIVATE_OAUTH_SUBJECTS:'subject-1',
- DATABASE_URL:'postgresql://dummy:dummy@example.test/nyx',
+ DATABASE_URL:'configured-nonsecret-placeholder',
  RCLONE_CONFIG_B64:'non-secret-fixture',
  NYX_RCLONE_VAULT_ENABLED:'true',NYX_RCLONE_CREDENTIAL_KEY:key};
 test('private release validator rejects unsafe conditions without exposing secrets',async()=>{
