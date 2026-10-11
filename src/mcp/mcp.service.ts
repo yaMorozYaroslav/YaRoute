@@ -88,7 +88,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_health','nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls'] : ['nyx_health','nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_health','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls'] : ['nyx_health','nyx_connections_home','nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -146,31 +146,52 @@ export class McpService {
       }]}),
     );
 
+    // Separate MCP Apps entrypoints preserve the existing ChatGPT
+    // conversation tab and sidebar launcher through the OAuth upgrade.
+    // The same owner-scoped, read-only result is used for both.
+    const connectionsPanelResult = async () => this.safeTool(async () => {
+      const ownerId = this.connectorOwner();
+      return {
+        schema:'nyx.connections.panel.v1',
+        ownerId,
+        connections:await this.connections.list(ownerId),
+        providers:[
+          {id:'github',availability:'oauth_ready_if_configured'},
+          ...((process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+             process.env.NYX_RCLONE_VAULT_ENABLED !== 'true') ? [] : [
+            {id:'google-drive',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true'
+              ? 'read_only_oauth_if_configured' : 'private_rclone_configuration_only'},
+            {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true'
+              ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
+          ]),
+        ],
+        note:'Google Drive sign-in requires separately configured Google OAuth and the encrypted vault. Refresh the ChatGPT app after verified deployment.',
+      };
+    });
+
     server.registerTool('nyx_connections_panel',{
       title:'☁️ NestNyx Connections',
-      description:'Open your personal cloud connections. Add Google Drive or MEGA from one clean, owner-scoped interface. Private legacy remotes are never listed in the panel. This is an MCP auxiliary tool, not a Yaro CLI command.',
+      description:'Open the NestNyx Connections conversation tab. Owner-scoped Google Drive OAuth requires the configured encrypted vault; no shared Rclone credentials.',
       inputSchema:z.object({}),
-      // OpenAI MCP extension: create a persistent sidebar launcher and a
-      // conversation tab without requiring a new message to the model.
       _meta:{
         ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
-        'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]},
+        'openai/ui':{entrypoints:[{type:'thread'}]},
         'openai/outputTemplate':CONNECTIONS_PANEL_URI,
       },
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-    },async()=>this.safeTool(async()=>({
-      schema:'nyx.connections.panel.v1',
-      ownerId:this.connectorOwner(),
-      connections:await this.connections.list(this.connectorOwner()),
-      providers:[
-        {id:'github',availability:'oauth_ready_if_configured'},
-        ...((process.env.NYX_DEPLOYMENT_MODE === 'public' && process.env.NYX_RCLONE_VAULT_ENABLED !== 'true') ? [] : [
-          {id:'google-drive',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'read_only_oauth_if_configured' : 'private_rclone_configuration_only'},
-          {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
-        ]),
-      ],
-      note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
-    })));
+    },connectionsPanelResult);
+
+    server.registerTool('nyx_connections_home',{
+      title:'☁️ NestNyx',
+      description:'Open the same owner-scoped Connections Panel from the ChatGPT sidebar.',
+      inputSchema:z.object({}),
+      _meta:{
+        ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
+        'openai/ui':{entrypoints:[{type:'global'}]},
+        'openai/outputTemplate':CONNECTIONS_PANEL_URI,
+      },
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },connectionsPanelResult);
 
     server.registerTool('nyx_connections_list',{
       title:'List my NestNyx connections',
