@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { googleCallbackUrl, googleOAuthConfiguration, revokeGoogleDriveProfile } from './google-drive-oauth';
+import { googleCallbackUrl, googleOAuthConfiguration, revokeGoogleDriveProfile } from './google-drive-oauth-config';
 import { Pool } from 'pg';
 import { StorageService } from '../storage/storage.service';
 import { RcloneCredentialVaultService } from '../storage/rclone-credential-vault.service';
