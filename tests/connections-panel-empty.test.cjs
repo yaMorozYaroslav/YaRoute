@@ -7,7 +7,7 @@ const {CONNECTIONS_PANEL_URI,CONNECTIONS_PANEL_HTML}=require('../dist/connectors
 
 test('public-facing empty panel starts with a + and no private storage inventory',()=>{
  const html=CONNECTIONS_PANEL_HTML;
- assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v5.html');
+ assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v6.html');
  assert.match(html,/<body class="nyx-empty">/);
  assert.match(html,/<button[^>]+id="nyx-add"[^>]+>.*Add new drive<\/button>/);
  assert.match(html,/aria-label="Add new drive"/);
@@ -61,4 +61,21 @@ test('embedded panel JavaScript parses without external dependencies',()=>{
  const script=CONNECTIONS_PANEL_HTML.match(/<script>([\s\S]*?)<\/script>/);
  assert.ok(script);
  assert.doesNotThrow(()=>new vm.Script(script[1]));
+});
+
+test('Drive and MEGA accounts are rendered in separate independent collapsible lists',()=>{
+ const html=CONNECTIONS_PANEL_HTML;
+ assert.match(html,/<details class="nyx-provider-group" id="nyx-google-group" hidden>/);
+ assert.match(html,/<details class="nyx-provider-group" id="nyx-mega-group" hidden>/);
+ assert.match(html,/<summary>🌈 Google Drive <span class="nyx-provider-count" id="nyx-google-count">0<\/span><\/summary>/);
+ assert.match(html,/<summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">0<\/span><\/summary>/);
+ assert.match(html,/const google=linked\.filter\(c=>c\.provider==='google-drive'\)/);
+ assert.match(html,/const mega=linked\.filter\(c=>c\.provider==='mega'\)/);
+ assert.match(html,/(c\.provider==='mega'\?megaList:googleList)\.append\(box\)/);
+ assert.match(html,/count\.textContent=items\.length\+' '\+/);
+ assert.match(html,/else if\(wasHidden\)group\.open=items\.length===1/);
+ assert.match(html,/revealProvider=provider/);
+ assert.ok(html.indexOf('<div id="nyx-linked-accounts"') > html.indexOf('</div>\n<div id="nyx-linked-accounts"')-1);
+ assert.ok(html.indexOf('<div id="nyx-linked-accounts"') > html.indexOf('<div id="nyx-setup">'));
+ assert.doesNotMatch(html,/id="rclone-linked-list"/);
 });
