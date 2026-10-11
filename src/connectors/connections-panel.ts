@@ -311,6 +311,13 @@ async function refresh(){
  const data=await call('nyx_connections_list',{});
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
  render(data.connections);
+ const legacy=data.legacyInventoryAvailable!==false;
+ document.getElementById('rclone-refresh').hidden=!legacy;
+ if(!legacy){
+  rcloneRoot.replaceChildren(el('p','Global remote inventory is not exposed to public users; create an isolated account reference below.'));
+  rcloneStatus.textContent='';
+ }
+ return legacy;
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
@@ -338,9 +345,9 @@ document.getElementById('new-form').addEventListener('submit',async e=>{
   document.getElementById('new-name').value='';show('Connection created. Authorize before using resources.');
  }catch(e){show(e.message,true);}
 });
-ready.then(()=>{
- refresh().catch(e=>show(e.message,true));
- refreshRclone();
+ready.then(async()=>{
+ const legacy=await refresh();
+ if(legacy)await refreshRclone();
 }).catch(e=>show('MCP Apps unavailable: '+e.message,true));
 })();
 </script></body></html>`;
