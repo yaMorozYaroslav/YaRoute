@@ -7,10 +7,10 @@ const {CONNECTIONS_PANEL_URI,CONNECTIONS_PANEL_HTML}=require('../dist/connectors
 
 test('public-facing empty panel starts with a + and no private storage inventory',()=>{
  const html=CONNECTIONS_PANEL_HTML;
- assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v6.html');
+ assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v7.html');
  assert.match(html,/<body class="nyx-empty">/);
  assert.match(html,/<button[^>]+id="nyx-add"[^>]+>＋<\/button>/);
- assert.match(html,/aria-label="Add new drive"/);
+ assert.match(html,/aria-label="Add connection"/);
  assert.match(html,/body:not\(\.nyx-adding\) #nyx-setup\{display:none\}/);
  assert.match(html,/<section class="storage-section">/);
  assert.match(html,/☁️ NestNyx/);
@@ -37,7 +37,7 @@ test('the + shows friendly provider choices without requiring a technical remote
  assert.match(html,/body:not\(\.nyx-adding\) #nyx-setup\{display:none\}/);
  assert.match(html,/<div id="nyx-setup">/);
  assert.match(html,/id="nyx-add"[^>]+aria-expanded="false"/);
- assert.match(html,/title="Add new drive">＋<\/button>/);
+ assert.match(html,/title="Add connection">＋<\/button>/);
  assert.match(html,/background:linear-gradient\(120deg,#10a867,#058a58\)/);
  assert.match(html,/classList\.toggle\('nyx-empty',!hasConnections\)/);
  assert.match(html,/data\.connections\.some\(c=>c&&c\.status!=='revoked'\)/);
@@ -110,4 +110,35 @@ test('green plus Google flow starts consent automatically and retains safe retry
  assert.match(html,/await request\('ui\/open-link',\{url:consent\.authorizationUrl\}\)/);
  assert.match(html,/Use Sign in with Google on that connection to retry/);
  assert.doesNotMatch(html,/<input[^>]+type="password"/);
+});
+
+
+test('Google, MEGA, GitHub and private Rclone setup share one green plus menu',()=>{
+ const html=CONNECTIONS_PANEL_HTML;
+ assert.equal((html.match(/id="nyx-add"/g)||[]).length,1);
+ assert.equal((html.match(/id="new-form"/g)||[]).length,1);
+ for(const provider of ['google-drive','mega','github','existing-rclone'])
+   assert.ok(html.includes('data-provider="'+provider+'"'));
+ assert.ok(html.includes('body:not(.nyx-adding) #nyx-setup{display:none}'));
+ assert.ok(html.includes('body:not(.nyx-github-selected) #new-form{display:none}'));
+ assert.ok(html.includes("document.body.classList.toggle('nyx-github-selected',selected==='github')"));
+ assert.ok(html.includes("else if(providerChoice.value==='github')document.getElementById('new-name').focus()"));
+ const setup=html.indexOf('<div id="nyx-setup">');
+ const githubForm=html.indexOf('id="new-form"');
+ const accountLists=html.indexOf('id="nyx-linked-accounts"');
+ assert.ok(setup>=0 && githubForm>setup && accountLists>githubForm);
+ assert.ok(html.indexOf('id="nyx-other-group"')>githubForm);
+});
+
+test('Rclone configuration stays private and shows option flags but never raw credentials',()=>{
+ const html=CONNECTIONS_PANEL_HTML;
+ assert.ok(html.includes("item.className='nyx-rclone-remote card'"));
+ assert.ok(html.includes("cfg?.inspection==='available'"));
+ assert.ok(html.includes('Configured Google scope: '));
+ assert.ok(html.includes('Requested access: '));
+ assert.ok(html.includes('Shared Drive binding configured: '));
+ assert.ok(html.includes('Root folder binding configured: '));
+ assert.ok(html.includes('Service account configured: '));
+ assert.ok(html.includes('Configured does not mean connected, reachable, or authorized for writes.'));
+ assert.ok(html.includes("if(!legacyAvailable || !legacyOptions.open) return"));
 });
