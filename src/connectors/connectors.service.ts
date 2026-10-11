@@ -369,8 +369,15 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
         `,[ownerId,connection.id]);
         if(permitted.rowCount!==1) throw new Error('MEGA_PROBE_COOLDOWN');
       }
-      return {connectionId:connection.id,...await this.storage.testIsolatedRcloneConnection(
-        connection.provider,connection.externalAccountId,profile)};
+      const probe=await this.storage.testIsolatedRcloneConnection(
+        connection.provider,connection.externalAccountId,profile);
+      if(connection.provider==='mega' && probe.status==='reachable' && connection.status==='pending'){
+        await this.db().query(`
+          UPDATE nyx_connector_connections SET status='active',updated_at=now()
+          WHERE id=$1 AND owner_id=$2 AND provider='mega' AND status='pending'
+        `,[connection.id,ownerId]);
+      }
+      return {connectionId:connection.id,...probe};
     }
     return { connectionId: connection.id,
       ...await this.storage.testRcloneConnection(connection.provider, connection.externalAccountId) };
