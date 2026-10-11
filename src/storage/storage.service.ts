@@ -134,6 +134,17 @@ export class StorageService {
       check:provider==='mega'?'isolated_rclone_lsf':'isolated_rclone_about',configurationChanged:false};
   }
 
+  async listIsolatedRcloneConnection(
+    provider:'google-drive'|'mega',remote:string,profile:string,folder:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE==='public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED!=='true')
+      throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if(!['google-drive','mega'].includes(provider))throw new Error('RCLONE_REMOTE_INVALID');
+    const listing=await this.rclone.listIsolated(remote,profile,folder);
+    return {schema:'nyx.storage.rclone.list.v1',provider,folder,
+      ...listing,readOnly:true,configurationChanged:false};
+  }
+
   validateCopyPayload(payload: CopyJobPayload) {
     this.validateFileRef(payload.source, 'source');
     this.validateFileRef(payload.destination, 'destination');
