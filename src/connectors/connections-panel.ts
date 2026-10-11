@@ -33,7 +33,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
 </header>
 <section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
-<p class="muted">Private mode discovers legacy configured remotes. Isolated-vault mode supports owner-scoped accounts. Google Drive supports read-only OAuth consent; MEGA requires trusted operator provisioning.</p>
+<p class="muted">Public mode supports owner-scoped Google Drive via read-only OAuth. Private NYX can also discover legacy remotes. MEGA is excluded from the public release.</p>
 <div id="rclone-list" aria-live="polite">Loading configured drives…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 <form id="rclone-new-form" class="row">
@@ -42,9 +42,9 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <label>Label <input id="rclone-new-label" type="text" maxlength="80" required placeholder="Personal files"></label>
 <button type="submit">Create account reference</button>
 </form>
-<p><small>Google Drive uses read-only OAuth consent in vault mode. MEGA credentials require trusted server administration. The panel never accepts credentials.</small></p>
+<p><small>Google Drive uses read-only OAuth consent. Public MEGA account creation is disabled; credentials are never entered in this panel.</small></p>
 <h2>Linked Rclone accounts (Neon)</h2>
-<p class="muted">Each link has its own immutable connection ID, editable name, and authenticated owner. Vault unlink removes encrypted credentials and attempts Google token revocation; MEGA sessions require provider-side revocation. Legacy remotes remain configured.</p>
+<p class="muted">Each link has an immutable connection ID and an authenticated owner. Unlink deletes vault credentials and attempts Google token revocation. Legacy private remotes remain configured.</p>
 <div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
 </section>
 <section><h2>Add GitHub connection</h2><form id="new-form" class="row">
@@ -312,6 +312,10 @@ async function refresh(){
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
  render(data.connections);
  const legacy=data.legacyInventoryAvailable!==false;
+ // MEGA is a private legacy provider only. Never offer it to public tenants.
+ const megaOption=document.querySelector('#rclone-new-provider option[value="mega"]');
+ if(megaOption){megaOption.hidden=!legacy;megaOption.disabled=!legacy;}
+ if(!legacy)document.getElementById('rclone-new-provider').value='google-drive';
  document.getElementById('rclone-refresh').hidden=!legacy;
  if(!legacy){
   rcloneRoot.replaceChildren(el('p','Global remote inventory is not exposed to public users; create an isolated account reference below.'));
@@ -326,7 +330,8 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
  const provider=document.getElementById('rclone-new-provider').value;
  const remoteName=document.getElementById('rclone-new-remote').value.trim();
  const name=document.getElementById('rclone-new-label').value.trim();
- if(!['google-drive','mega'].includes(provider) ||
+ const publicMode=document.getElementById('rclone-refresh').hidden;
+ if((publicMode ? provider!=='google-drive' : !['google-drive','mega'].includes(provider)) ||
     !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName) || !name){
    show('Enter a valid provider, remote name and label.',true);return;
  }
