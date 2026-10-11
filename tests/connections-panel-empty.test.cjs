@@ -71,11 +71,11 @@ test('Drive and MEGA accounts are rendered in separate independent collapsible l
  assert.match(html,/<summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">0<\/span><\/summary>/);
  assert.match(html,/const google=linked\.filter\(c=>c\.provider==='google-drive'\)/);
  assert.match(html,/const mega=linked\.filter\(c=>c\.provider==='mega'\)/);
- assert.match(html,/(c\.provider==='mega'\?megaList:googleList)\.append\(box\)/);
+ assert.ok(html.includes("(c.provider==='mega'?megaList:googleList).append(box);"));
  assert.match(html,/count\.textContent=items\.length\+' '\+/);
  assert.match(html,/else if\(wasHidden\)group\.open=items\.length===1/);
  assert.match(html,/revealProvider=provider/);
- assert.ok(html.indexOf('<div id="nyx-linked-accounts"') > html.indexOf('</div>\n<div id="nyx-linked-accounts"')-1);
+ assert.match(html, /<\/details>\s*<\/div>\s*<div id="nyx-linked-accounts"/);
  assert.ok(html.indexOf('<div id="nyx-linked-accounts"') > html.indexOf('<div id="nyx-setup">'));
  assert.doesNotMatch(html,/id="rclone-linked-list"/);
 });
