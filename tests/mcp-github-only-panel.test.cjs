@@ -32,3 +32,36 @@ test('MCP panel is auxiliary and does not modify Head CLI definitions',()=>{
  assert.match(mcp,/nyx_connections_panel/);
  assert.match(mcp,/not all Head commands guaranteed/);
 });
+
+test('Google OAuth release retains separate ChatGPT tab and global sidebar launchers',()=>{
+ const mcp=src('src/mcp/mcp.service.ts');
+ const tab=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_panel'"),
+   mcp.indexOf("server.registerTool('nyx_connections_home'"));
+ const home=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_home'"),
+   mcp.indexOf("server.registerTool('nyx_connections_list'"));
+ assert.ok(tab.startsWith("server.registerTool('nyx_connections_panel'"));
+ assert.ok(home.startsWith("server.registerTool('nyx_connections_home'"));
+ assert.ok(tab.includes("'openai/ui':{entrypoints:[{type:'thread'}]}"));
+ assert.ok(home.includes("'openai/ui':{entrypoints:[{type:'global'}]}"));
+ for(const item of [tab,home]){
+   assert.ok(item.includes("ui:{resourceUri:CONNECTIONS_PANEL_URI"));
+   assert.ok(item.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
+   assert.ok(item.includes("},connectionsPanelResult);"));
+   assert.ok(item.includes("readOnlyHint:true"));
+ }
+ assert.ok(mcp.includes("const ownerId = this.connectorOwner()"));
+ assert.ok(mcp.includes("connections:await this.connections.list(ownerId)"));
+ assert.ok(mcp.includes("'nyx_connections_home'"));
+});
+test('green plus offers direct Google OAuth while legacy Rclone is private',()=>{
+ const panel=src('src/connectors/connections-panel.ts');
+ const mcp=src('src/mcp/mcp.service.ts');
+ assert.match(panel,/id="nyx-add"/);
+ assert.match(panel,/data-provider="google-drive"/);
+ assert.match(panel,/Google Drive · Sign in with Google/);
+ assert.match(panel,/nyx_rclone_connection_begin_google/);
+ assert.match(mcp,/server\.registerTool\('nyx_rclone_connection_begin_google'/);
+ assert.match(mcp,/this\.connections\.beginGoogleDrive\(this\.connectorOwner\(\),id\)/);
+ assert.ok(mcp.indexOf("if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;") <
+           mcp.indexOf("server.registerTool('nyx_rclone_connections_list'"));
+});
