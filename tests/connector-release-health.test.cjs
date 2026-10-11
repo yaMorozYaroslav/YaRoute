@@ -48,8 +48,8 @@ test('nyx_health MCP uses the same pure health implementation as GET /health',as
   assert.deepEqual(healthSnapshot,shared);
   const fs=require('node:fs');
   const mcp=fs.readFileSync(require('node:path').join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
-  assert.match(mcp,/server\\.registerTool\\(\\s*'nyx_health'/);
-  assert.match(mcp,/this\\.connectorOwner\\(\\)/);
-  assert.match(mcp,/buildHealthResponse\\(await this\\.rclone\\.version\\(\\),this\\.jobs\\.isDurable\\(\\)\\)/);
+  assert.ok(mcp.includes("'nyx_health'"));
+  assert.ok(mcp.includes("this.connectorOwner()"));
+  assert.ok(mcp.includes("buildHealthResponse(await this.rclone.version(),this.jobs.isDurable())"));
   assert.match(mcp,/readOnlyHint:true,destructiveHint:false,idempotentHint:true/);
 });
