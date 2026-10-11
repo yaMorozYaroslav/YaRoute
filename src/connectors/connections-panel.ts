@@ -42,7 +42,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <label>Label <input id="rclone-new-label" type="text" maxlength="80" required placeholder="Personal files"></label>
 <button type="submit">Create account reference</button>
 </form>
-<p><small>MEGA account creation makes a pending reference only. To connect MEGA, a trusted server operator must securely provision your own Rclone profile. Do not paste passwords, recovery codes or config into ChatGPT.</small></p>
+<p><small>MEGA connections start pending. If secure setup is enabled, use the link created in this panel to upload one Rclone profile directly to NestNyx. Otherwise a trusted operator must provision it. Never paste your profile into ChatGPT.</small></p>
 <h2>Linked Rclone accounts (Neon)</h2>
 <p class="muted">Each link has an immutable connection ID and an authenticated owner. Unlink deletes vault credentials and attempts Google token revocation. MEGA users must separately invalidate sessions with the provider when needed. Private legacy remotes are not modified.</p>
 <div id="rclone-linked-list" aria-live="polite">Loading account links…</div>
@@ -62,7 +62,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 const root=document.getElementById('connection-list');
 const rcloneRoot=document.getElementById('rclone-list');
 const rcloneLinkedRoot=document.getElementById('rclone-linked-list');
-let boundRcloneKeys=new Set();let lastRcloneInventory=null;
+let boundRcloneKeys=new Set();let lastRcloneInventory=null;let megaSetupEnabled=false;
 const rcloneStatus=document.getElementById('rclone-status');
 const status=document.getElementById('message');
 const pending=new Map();let rpcId=0,connecting;
@@ -194,6 +194,18 @@ function render(connections){
        show('Complete Google consent, then return and refresh.');
      }));
    }
+   if(c.provider==='mega' && c.connectionType==='isolated-credential-vault' && megaSetupEnabled){
+     edit.append(button('Set up MEGA securely',async()=>{
+       const v=await call('nyx_rclone_connection_begin_mega',{id:c.id});
+       const u=new URL(v.setupUrl);
+       if(v?.connectionId!==c.id || u.protocol!=='https:' ||
+          u.pathname!=='/connect/mega/setup' || !/^[A-Za-z0-9_-]{43}$/.test(u.searchParams.get('state')||'')){
+         throw Error('Invalid MEGA setup link');
+       }
+       await request('ui/open-link',{url:v.setupUrl});
+       show('A secure, single-use setup form was opened. Return here to test access afterward.');
+     }));
+   }
    const probe=el('small','Not checked');
    edit.append(button('Test access',async()=>{
      probe.textContent='Checking…';
@@ -310,6 +322,7 @@ function render(connections){
 async function refresh(){
  const data=await call('nyx_connections_list',{});
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
+ megaSetupEnabled=data.megaSelfServiceEnabled===true;
  render(data.connections);
  const legacy=data.legacyInventoryAvailable!==false;
  // MEGA is a private legacy provider only. Never offer it to public tenants.
