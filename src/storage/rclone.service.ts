@@ -50,10 +50,15 @@ export class RcloneService implements OnModuleInit {
       const env:NodeJS.ProcessEnv={};
       // Intentionally avoid provider credentials, NYX_* and RCLONE_* vars
       // from the shared server process. The config path is explicit.
-      for(const k of ['PATH','HOME','TMPDIR','SSL_CERT_FILE','SSL_CERT_DIR',
+      for(const k of ['PATH','SSL_CERT_FILE','SSL_CERT_DIR',
         'HTTPS_PROXY','HTTP_PROXY','NO_PROXY']){
         if(process.env[k])env[k]=process.env[k];
       }
+      // Isolated providers cannot inherit the operator's home-directory
+      // credentials, ~/.config/rclone, ~/.netrc, or shared temporary files.
+      env.HOME=dir;
+      env.XDG_CONFIG_HOME=dir;
+      env.TMPDIR=dir;
       return await new Promise<boolean>(resolve=>{
         let settled=false, output=0, exceeded=false;
         const finish=(ok:boolean)=>{
