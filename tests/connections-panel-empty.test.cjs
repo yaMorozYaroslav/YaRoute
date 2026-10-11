@@ -9,10 +9,10 @@ test('public-facing empty panel starts with a + and no private storage inventory
  const html=CONNECTIONS_PANEL_HTML;
  assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v6.html');
  assert.match(html,/<body class="nyx-empty">/);
- assert.match(html,/<button[^>]+id="nyx-add"[^>]+>.*Add new drive<\/button>/);
+ assert.match(html,/<button[^>]+id="nyx-add"[^>]+>＋<\/button>/);
  assert.match(html,/aria-label="Add new drive"/);
  assert.match(html,/body\.nyx-empty:not\(\.nyx-adding\) section/);
- assert.match(html,/section\.storage-section/);
+ assert.match(html,/<section class="storage-section">/);
  assert.match(html,/☁️ NestNyx/);
  assert.doesNotMatch(html,/Configured in Rclone|Refresh drives/);
  assert.match(html,/<details id="nyx-legacy-options" hidden>/);
@@ -24,7 +24,7 @@ test('public-facing empty panel starts with a + and no private storage inventory
  assert.match(html,/if\(!legacyAvailable \|\| !legacyOptions\.open\) return/);
  assert.match(html,/call\('nyx_rclone_connections_list',\{\}\)/);
  assert.match(html,/<option value="existing-rclone" hidden disabled>/);
- assert.match(html,/existing=legacyAvailable && providerChoice\.value==='existing-rclone'/);
+ assert.match(html,/existing=legacyAvailable && selected==='existing-rclone'/);
  assert.match(html,/newCloudLabel\.required=!existing/);
  assert.match(html,/existingOption\.hidden=!legacyAvailable/);
  assert.match(html,/existingOption\.disabled=!legacyAvailable/);
@@ -37,13 +37,13 @@ test('the + shows friendly provider choices without requiring a technical remote
  assert.match(html,/body:not\(\.nyx-adding\) #nyx-setup\{display:none\}/);
  assert.match(html,/<div id="nyx-setup">/);
  assert.match(html,/id="nyx-add"[^>]+aria-expanded="false"/);
- assert.match(html,/Add new drive<\/button>/);
+ assert.match(html,/title="Add new drive">＋<\/button>/);
  assert.match(html,/background:linear-gradient\(120deg,#10a867,#058a58\)/);
  assert.match(html,/classList\.toggle\('nyx-empty',!hasConnections\)/);
  assert.match(html,/data\.connections\.some\(c=>c&&c\.status!=='revoked'\)/);
  assert.match(html,/id="rclone-new-provider"/);
- assert.match(html,/<option value="google-drive">🌈 Google Drive<\/option>/);
- assert.match(html,/<option value="mega">🗄️ MEGA<\/option>/);
+ assert.match(html,/<button type="button" data-provider="google-drive" aria-pressed="false">🌈 Google Drive/);
+ assert.match(html,/<button type="button" data-provider="mega" aria-pressed="false">🗄️ MEGA/);
  assert.match(html,/id="rclone-new-label"/);
  assert.doesNotMatch(html,/id="rclone-new-remote"/);
  assert.match(html,/remoteName='nyx_'/);
