@@ -16,7 +16,12 @@ export class RcloneService implements OnModuleInit {
       if (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') {
         throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
       }
-      // No global credentials or Rclone config materialization in public mode.
+      // Shared private credentials must not even be present in a public server.
+      // Retain the old config only in a separate encrypted rollback backup.
+      if (process.env.RCLONE_CONFIG_B64 || process.env.RCLONE_CONFIG_PATH ||
+          process.env.NYX_SHARED_ROOTS_JSON) {
+        throw new Error('PUBLIC_OPERATOR_RCLONE_CONFIG_FORBIDDEN');
+      }
       return;
     }
     const encoded = process.env.RCLONE_CONFIG_B64;
