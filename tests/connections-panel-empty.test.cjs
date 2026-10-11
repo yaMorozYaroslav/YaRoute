@@ -52,7 +52,10 @@ test('the + shows friendly provider choices without requiring a technical remote
 
 test('Connections Panel advertises one-click ChatGPT sidebar and chat-tab launchers',()=>{
  const mcp=fs.readFileSync(path.join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
- assert.match(mcp,/'openai\/ui':\{entrypoints:\[\{type:'global'\},\{type:'thread'\}\]\}/);
+ assert.match(mcp,/'openai\/ui':\{entrypoints:\[\{type:'thread'\}\]\}/);
+ assert.match(mcp,/'openai\/ui':\{entrypoints:\[\{type:'global'\}\]\}/);
+ assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
+ assert.match(mcp,/server\.registerTool\('nyx_connections_home'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
  assert.match(mcp,/title:'☁️ NestNyx Connections'/);
 });
