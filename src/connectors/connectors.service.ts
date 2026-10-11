@@ -66,6 +66,13 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       expires_at timestamptz NOT NULL
     )`);
     await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_google_oauth_expiry_idx ON nyx_google_drive_oauth_states(expires_at)');
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_mega_setup_states (
+      state_digest text PRIMARY KEY,
+      owner_id text NOT NULL,
+      connection_id text NOT NULL,
+      expires_at timestamptz NOT NULL
+    )`);
+    await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_mega_setup_expiry_idx ON nyx_mega_setup_states(expires_at)');
     this.registry = new ConnectorRegistry(this.repository);
   }
   async onModuleDestroy() { await this.pool?.end(); }
@@ -175,6 +182,59 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     return this.view(connection);
   }
 
+
+  /** Public MEGA uses a one-time owner-linked form, never a model-facing credential field. */
+  async beginMegaSetup(ownerId:string,id:string) {
+    if(process.env.NYX_MEGA_SELF_SERVICE_ENABLED!=='true' || !this.vault?.isEnabled()){
+      throw new Error('MEGA_SELF_SERVICE_DISABLED');
+    }
+    const c=await this.owned(this.owner(ownerId),id);
+    if(c.provider!=='mega' || c.status==='revoked') throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    const base=new URL(process.env.NYX_PUBLIC_URL || '');
+    if(base.protocol!=='https:' || base.username || base.password || base.pathname!=='/' ||
+       base.search || base.hash) throw new Error('MEGA_PUBLIC_URL_INVALID');
+    const state=randomBytes(32).toString('base64url');
+    const digest=createHash('sha256').update(state).digest('hex');
+    await this.db().query('DELETE FROM nyx_mega_setup_states WHERE expires_at<=now() OR (owner_id=$1 AND connection_id=$2)',[ownerId,id]);
+    await this.db().query(`INSERT INTO nyx_mega_setup_states
+      (state_digest,owner_id,connection_id,expires_at)
+      VALUES($1,$2,$3,now()+interval '10 minutes')`,
+      [digest,ownerId,id]);
+    const link=new URL('/connect/mega/setup',base.origin);
+    link.searchParams.set('state',state);
+    return {connectionId:id,provider:'mega',setupUrl:link.toString(),
+      expiresInSeconds:600,accountProfileRequired:true};
+  }
+
+  async inspectMegaSetupState(state:string) {
+    if(process.env.NYX_MEGA_SELF_SERVICE_ENABLED!=='true' || !this.vault?.isEnabled()){
+      throw new Error('MEGA_SELF_SERVICE_DISABLED');
+    }
+    if(typeof state!=='string' || !/^[A-Za-z0-9_-]{43}$/.test(state)){
+      throw new Error('MEGA_SETUP_STATE_INVALID');
+    }
+    const digest=createHash('sha256').update(state).digest('hex');
+    const q=await this.db().query('SELECT owner_id,connection_id FROM nyx_mega_setup_states WHERE state_digest=$1 AND expires_at>now()', [digest]);
+    if(q.rowCount!==1)throw new Error('MEGA_SETUP_STATE_EXPIRED');
+    const c=await this.owned(q.rows[0].owner_id,q.rows[0].connection_id);
+    if(c.provider!=='mega' || c.status==='revoked')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    return true;
+  }
+
+  async consumeMegaSetupState(state:string) {
+    if(process.env.NYX_MEGA_SELF_SERVICE_ENABLED!=='true' || !this.vault?.isEnabled()){
+      throw new Error('MEGA_SELF_SERVICE_DISABLED');
+    }
+    if(typeof state!=='string' || !/^[A-Za-z0-9_-]{43}$/.test(state)){
+      throw new Error('MEGA_SETUP_STATE_INVALID');
+    }
+    const digest=createHash('sha256').update(state).digest('hex');
+    const q=await this.db().query('DELETE FROM nyx_mega_setup_states WHERE state_digest=$1 AND expires_at>now() RETURNING owner_id,connection_id',[digest]);
+    if(q.rowCount!==1)throw new Error('MEGA_SETUP_STATE_EXPIRED');
+    const c=await this.owned(q.rows[0].owner_id,q.rows[0].connection_id);
+    if(c.provider!=='mega'||c.status==='revoked')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    return {ownerId:c.ownerId,connectionId:c.id,remote:c.externalAccountId};
+  }
 
   /**
    * Verified OAuth subject starts a Google read-only consent flow.
