@@ -75,7 +75,9 @@ export class StorageService {
             .map((item) => item.alias).sort(),
           state: 'configured' as const,
           // Explicitly allowlisted server-side metadata only; never raw config.
-          configuration: this.rclone.safeRemoteConfiguration(name, provider==='google-drive'?'drive':'mega'),
+          ...(typeof this.rclone.safeRemoteConfiguration==='function' ? {
+            configuration:this.rclone.safeRemoteConfiguration(name,provider==='google-drive'?'drive':'mega'),
+          } : {}),
         };
       });
     };
