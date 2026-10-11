@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { googleCallbackUrl, googleOAuthConfiguration } from './google-drive-oauth';
 import { Pool } from 'pg';
 import { StorageService } from '../storage/storage.service';
 import { RcloneCredentialVaultService } from '../storage/rclone-credential-vault.service';
@@ -57,6 +58,14 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       count integer NOT NULL,
       PRIMARY KEY(owner_id,window_hour)
     )`);
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_google_drive_oauth_states (
+      state_digest text PRIMARY KEY,
+      owner_id text NOT NULL,
+      connection_id text NOT NULL,
+      code_verifier text NOT NULL,
+      expires_at timestamptz NOT NULL
+    )`);
+    await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_google_oauth_expiry_idx ON nyx_google_drive_oauth_states(expires_at)');
     this.registry = new ConnectorRegistry(this.repository);
   }
   async onModuleDestroy() { await this.pool?.end(); }
@@ -164,6 +173,64 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     };
     await this.repository!.save(connection);
     return this.view(connection);
+  }
+
+
+  /**
+   * Verified OAuth subject starts a Google read-only consent flow.
+   * State and PKCE verifier live in Neon for at most ten minutes;
+   * only their derived challenge and opaque state leave the server.
+   */
+  async beginGoogleDrive(ownerId:string,id:string) {
+    const owner=this.owner(ownerId);
+    if (!this.vault?.isEnabled()) throw new Error('RCLONE_VAULT_NOT_CONFIGURED');
+    const c=await this.owned(owner,id);
+    if(c.provider!=='google-drive' || c.status==='revoked') throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
+    const {clientId}=googleOAuthConfiguration();
+    const state=randomBytes(32).toString('base64url');
+    const verifier=randomBytes(32).toString('base64url');
+    const digest=createHash('sha256').update(state).digest('hex');
+    const challenge=createHash('sha256').update(verifier).digest('base64url');
+    await this.db().query(
+      'INSERT INTO nyx_google_drive_oauth_states(state_digest,owner_id,connection_id,code_verifier,expires_at) VALUES($1,$2,$3,$4,now()+interval \'10 minutes\')',
+      [digest,owner,id,verifier]);
+    const url=new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id',clientId);
+    url.searchParams.set('redirect_uri',googleCallbackUrl());
+    url.searchParams.set('response_type','code');
+    url.searchParams.set('scope','https://www.googleapis.com/auth/drive.readonly');
+    url.searchParams.set('access_type','offline');
+    url.searchParams.set('prompt','consent');
+    url.searchParams.set('code_challenge',challenge);
+    url.searchParams.set('code_challenge_method','S256');
+    url.searchParams.set('state',state);
+    return {connectionId:id,provider:'google-drive',authorizationUrl:url.toString(),
+      expiresInSeconds:600,scope:'drive.readonly',credentialsShared:false};
+  }
+  async consumeGoogleDriveState(state:string) {
+    if(typeof state!=='string' || !/^[A-Za-z0-9_-]{43}$/.test(state)) {
+      throw new Error('GOOGLE_OAUTH_STATE_INVALID');
+    }
+    const digest=createHash('sha256').update(state).digest('hex');
+    const q=await this.db().query(
+      'DELETE FROM nyx_google_drive_oauth_states WHERE state_digest=$1 AND expires_at>now() RETURNING owner_id,connection_id,code_verifier',
+      [digest]);
+    if(q.rowCount!==1)throw new Error('GOOGLE_OAUTH_STATE_EXPIRED');
+    const row=q.rows[0];
+    const c=await this.owned(row.owner_id,row.connection_id);
+    if(c.provider!=='google-drive'||c.status==='revoked')throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
+    return {ownerId:c.ownerId,connectionId:c.id,remote:c.externalAccountId,
+      verifier:String(row.code_verifier)};
+  }
+  async activateGoogleDrive(ownerId:string,id:string) {
+    const c=await this.owned(ownerId,id);
+    if(c.provider!=='google-drive'||c.status==='revoked')throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
+    const q=await this.db().query(
+      "UPDATE nyx_connector_connections SET status='active',updated_at=now() WHERE id=$1 AND owner_id=$2 AND provider='google-drive' AND status='pending' RETURNING id",
+      [id,ownerId]);
+    // Reauthorizing an active connection is allowed; its owner remains unchanged.
+    if(!q.rowCount && c.status!=='active')throw new Error('GOOGLE_CONNECTION_NOT_ACTIVATED');
+    return {id,status:'active',provider:'google-drive'};
   }
 
   async testRclone(ownerId: string, id: string) {
