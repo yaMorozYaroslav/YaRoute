@@ -45,7 +45,7 @@ export class StorageService {
   /**
    * Private, metadata-only Rclone account inventory for the MCP connections UI.
    * Remote presence means configured, NOT that the provider is reachable.
-   * Never expose rclone.conf, account tokens, paths, provider options or secrets.
+   * Never expose rclone.conf, account tokens, paths, raw provider options or secrets.
    */
   async rcloneConnections() {
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
@@ -74,6 +74,8 @@ export class StorageService {
           aliases: areas.filter((item) => item.remote === name)
             .map((item) => item.alias).sort(),
           state: 'configured' as const,
+          // Explicitly allowlisted server-side metadata only; never raw config.
+          configuration: this.rclone.safeRemoteConfiguration(name, provider==='google-drive'?'drive':'mega'),
         };
       });
     };
