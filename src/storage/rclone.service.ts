@@ -34,7 +34,7 @@ export class RcloneService implements OnModuleInit {
    * No process-wide Rclone config, inherited NYX credentials, stdout or stderr
    * are returned to the caller. The config file is always removed afterwards.
    */
-  async probeIsolated(remote:string,profile:string):Promise<boolean> {
+  async probeIsolated(remote:string,profile:string,provider:'mega'|'google-drive'='google-drive'):Promise<boolean> {
     if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
     if (!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
@@ -66,7 +66,9 @@ export class RcloneService implements OnModuleInit {
           settled=true;resolve(ok);
         };
         const child=spawn(this.binary,
-          ['--config',config,'about',remote+':','--json','--contimeout','5s','--timeout','12s'],
+          provider==='mega' ?
+            ['--config',config,'lsf',remote+':','--max-depth','1','--contimeout','5s','--timeout','12s'] :
+            ['--config',config,'about',remote+':','--json','--contimeout','5s','--timeout','12s'],
           {env,stdio:['ignore','pipe','pipe'],timeout:16000});
         for(const stream of [child.stdout,child.stderr]){
           stream.on('data',(chunk:Buffer)=>{
