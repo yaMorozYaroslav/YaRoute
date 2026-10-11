@@ -3,23 +3,14 @@ import { Public } from './common/public.decorator';
 import { JobStoreService } from './storage/job-store.service';
 import { RcloneService } from './storage/rclone.service';
 
-@Controller('health')
-export class HealthController {
-  constructor(
-    private readonly rclone: RcloneService,
-    private readonly jobs: JobStoreService,
-  ) {}
-
-  @Public()
-  @Get()
-  async getHealth() {
-    const version = await this.rclone.version();
-    return {
+/** Shared, secret-free HTTP/MCP report. No deployment, write or remote networking. */
+export function buildHealthResponse(version:string,durableJobs:boolean) {
+  return {
       ok: true,
       service: 'NestNyx',
       commit: process.env.HEROKU_SLUG_COMMIT ?? require('./build-info.json').commit,
       rclone: version,
-      durableJobs: this.jobs.isDurable(),
+      durableJobs: durableJobs,
       // These are configuration/registration flags, not live provider proofs.
       // A deploy is reconnect-ready only after real OAuth/MEGA probes succeed.
       connectorRelease: {
@@ -37,5 +28,19 @@ export class HealthController {
         requiresLiveProviderVerification: true,
       },
     };
+}
+
+@Controller('health')
+export class HealthController {
+  constructor(
+    private readonly rclone: RcloneService,
+    private readonly jobs: JobStoreService,
+  ) {}
+
+  @Public()
+  @Get()
+  async getHealth() {
+    const version = await this.rclone.version();
+    return buildHealthResponse(version, this.jobs.isDurable());
   }
 }
