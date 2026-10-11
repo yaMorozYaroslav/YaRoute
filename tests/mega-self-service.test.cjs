@@ -9,12 +9,13 @@ const remote='mega_personal';
 const profile='['+remote+']\ntype = mega\nuser = sample@example.com\npass = '+'A'.repeat(32)+'\n';
 
 function flags(t){
-  const keys=['NYX_MEGA_SELF_SERVICE_ENABLED','NYX_RCLONE_VAULT_ENABLED','NYX_PUBLIC_URL'];
+  const keys=['NYX_MEGA_SELF_SERVICE_ENABLED','NYX_RCLONE_VAULT_ENABLED',
+    'NYX_PUBLIC_CONNECTORS_ENABLED','NYX_PUBLIC_URL'];
   const old=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
   t.after(()=>{for(const [k,v] of Object.entries(old))
     v===undefined?delete process.env[k]:process.env[k]=v;});
   Object.assign(process.env,{NYX_MEGA_SELF_SERVICE_ENABLED:'true',
-    NYX_RCLONE_VAULT_ENABLED:'true',NYX_PUBLIC_URL:'https://nestnyx.example'});
+    NYX_RCLONE_VAULT_ENABLED:'true',NYX_PUBLIC_CONNECTORS_ENABLED:'true',NYX_PUBLIC_URL:'https://nestnyx.example'});
 }
 
 test('MEGA form teaches local Rclone profile setup without requesting recovery key or direct account password',()=>{
