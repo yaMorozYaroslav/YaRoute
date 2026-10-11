@@ -126,7 +126,7 @@ test('public Yaro capability discovery does not claim private commands are regis
  assert.match(mcp,/provider:z\.enum\(\['google-drive','mega'\]\)/);
 });
 
-test('public cloud browsing only lists an active owner's own vaulted account',async t=>{
+test("public cloud browsing only lists an active owner's own vaulted account",async t=>{
  configure(t);
  const cid='123e4567-e89b-42d3-a456-426614174000';
  const rows=new Map([[cid,{id:cid,ownerId:'oauth:alice',provider:'mega',
