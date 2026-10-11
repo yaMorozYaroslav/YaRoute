@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v2.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v3.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -27,24 +27,62 @@ button:disabled{opacity:.5;cursor:wait}
 fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .capabilities{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:5px}
 .controls{display:flex;flex-wrap:wrap;gap:7px}
+
+#nyx-quick{display:flex;gap:12px;align-items:center;margin-bottom:12px;padding:12px;border:1px solid #92929255;border-radius:14px}
+#nyx-quick .spacer{flex:1}#nyx-quick .brand{font-size:17px;font-weight:700}
+#nyx-add{background:#087e52;color:white;border:1px solid #087e52;border-radius:12px;width:42px;height:42px;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
+#nyx-add:hover{background:#066841}
+#nyx-add-menu[hidden],#new-github-container[hidden]{display:none}
+#nyx-provider-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+#nyx-provider-choices button{text-align:left;padding:11px}
+#nyx-provider-choices small{display:block;font-weight:400;opacity:.7}
+.nyx-provider-group{border:1px solid #92929255;border-radius:12px;margin:9px 0}
+.nyx-provider-group>summary{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;font-weight:700;list-style:none}
+.nyx-provider-group>summary::-webkit-details-marker{display:none}
+.nyx-provider-group>summary:before{content:'▸';opacity:.65}
+.nyx-provider-group[open]>summary:before{content:'▾'}
+.nyx-provider-group summary:focus-visible,#nyx-add:focus-visible,#nyx-provider-choices button:focus-visible{outline:3px solid #18a56c;outline-offset:2px}
+.nyx-provider-count{margin-left:auto;background:#8882;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:500}
+.nyx-provider-list{padding:0 14px 14px}
+.nyx-provider-list .card{margin:5px 0}
+.provider-note{font-size:12px;opacity:.75}
 </style></head>
-<body><header><h1>⚙️ NestNyx connections</h1>
-<p class="muted">GitHub development permissions and your configured Google Drive / MEGA Rclone accounts. No billing, infrastructure control, or credential editing.</p>
-<div class="warn">GitHub branch, file-commit, draft PR and issue writes require additional GitHub App permissions and explicit per-repository grants. No direct default-branch writes, merges, workflow dispatch, Heroku or Vercel access.</div>
-</header>
-<section><div class="row" style="justify-content:space-between"><h2>Rclone storage connections</h2><button id="rclone-refresh" type="button">Refresh drives</button></div>
-<p class="muted">Google Drive and MEGA remotes detected in the private NYX Rclone configuration. Listed means configured, not connectivity-tested. Read-only display; no passwords or tokens.</p>
-<div id="rclone-list" aria-live="polite">Loading configured drives…</div>
-<div id="rclone-status" role="status" aria-live="polite"></div>
+<body>
+<div id="nyx-quick">
+<strong class="brand">☁️ NestNyx</strong><span class="muted">Connections</span><span class="spacer"></span>
+<button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">＋</button>
+</div>
+<section id="nyx-add-menu" hidden aria-label="Add a connection">
+<h2>Add a connection</h2>
+<div id="nyx-provider-choices" role="group" aria-label="Choose a provider">
+<button type="button" data-open="nyx-google-group">🌈 Google Drive<small>Show configured remotes; new OAuth pending</small></button>
+<button type="button" data-open="nyx-mega-group">🗄️ MEGA<small>Show configured remotes; new login pending</small></button>
+<button type="button" data-open="nyx-rclone-group">🧰 Existing Rclone<small>View private configuration metadata</small></button>
+<button type="button" data-open="nyx-other-group" data-github="true">🐙 GitHub<small>Create a named GitHub connection</small></button>
+</div>
+<p class="muted">Only GitHub creation is enabled. Google Drive and MEGA authentication is not released; never enter provider credentials in chat.</p>
 </section>
-<section><h2>Add GitHub connection</h2><form id="new-form" class="row">
-<span>Provider: <strong>GitHub</strong></span>
-<label>Name <input id="new-name" type="text" maxlength="80" placeholder="My development projects" required></label>
-<button type="submit">Add connection</button></form>
-<p><small>You can create multiple separately named, repo-scoped GitHub connections. No provider secrets are entered in this panel.</small></p></section>
-<section><div class="row" style="justify-content:space-between"><h2>GitHub connections</h2><button id="refresh">Refresh GitHub</button></div>
-<div id="connection-list" aria-live="polite">Loading…</div></section>
-<section><h2>Technical safeguards</h2><p>Only verified GitHub App installation access and repository-scoped API operations are exposed. No Git, Heroku, or Vercel CLI, infrastructure API, workflow dispatch, plan changes, billing, or payment controls.</p></section>
+<header><p class="muted">Existing connections grouped by provider. Rclone configuration is not proof of connectivity.</p>
+<div class="warn">GitHub permissions and repository writes require explicit grants. No default-branch writes, workflow dispatch, credential editing, billing or infrastructure actions.</div></header>
+<h2>Existing connections</h2>
+<details class="nyx-provider-group" id="nyx-google-group"><summary>🌈 Google Drive <span class="nyx-provider-count" id="nyx-google-count">Loading</span></summary>
+<div class="nyx-provider-list" id="nyx-google-list" aria-live="polite">Checking configured remotes…</div></details>
+<details class="nyx-provider-group" id="nyx-mega-group"><summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">Loading</span></summary>
+<div class="nyx-provider-list" id="nyx-mega-list" aria-live="polite">Checking configured remotes…</div></details>
+<details class="nyx-provider-group" id="nyx-rclone-group"><summary>🧰 Rclone <span class="nyx-provider-count" id="nyx-rclone-count">Private inventory</span></summary>
+<div class="nyx-provider-list"><p class="provider-note">Existing private Rclone metadata; remotes are listed under their providers above. This does not import, connect or modify credentials.</p>
+<button id="rclone-refresh" type="button">Refresh configured remotes</button>
+<div id="rclone-list" role="status" aria-live="polite">Loading…</div>
+<div id="rclone-status" role="status" aria-live="polite"></div>
+</div></details>
+<details class="nyx-provider-group" id="nyx-other-group"><summary>🧩 Other services · GitHub <span class="nyx-provider-count" id="nyx-other-count">Loading</span></summary>
+<div class="nyx-provider-list">
+<div id="new-github-container" hidden><h2>Add GitHub connection</h2>
+<form id="new-form" class="row"><label>Name <input id="new-name" type="text" maxlength="80" placeholder="My development projects" required></label><button type="submit">Create GitHub connection</button></form>
+<p class="muted">Multiple named, repository-scoped GitHub connections are supported. No secrets are entered here.</p></div>
+<div class="row" style="justify-content:space-between"><h2>GitHub connections</h2><button id="refresh" type="button">Refresh GitHub</button></div>
+<div id="connection-list" aria-live="polite">Loading…</div>
+</div></details>
 <div id="message" role="status" aria-live="polite"></div>
 <script>
 (function(){
@@ -98,33 +136,29 @@ function button(name,handler){const b=el('button',name);b.type='button';b.addEve
  b.disabled=true;try{await handler();}catch(e){show(e.message,true);}finally{b.disabled=false;}});return b;}
 function input(value){const n=el('input');n.type='text';n.value=value||'';n.maxLength=80;return n;}
 function renderRclone(data){
- rcloneRoot.replaceChildren();
  if(data?.schema!=='nyx.storage.rclone.connections.v1' ||
     data?.status!=='configured_not_live_verified' ||
     !Array.isArray(data.remotes))throw new Error('Invalid Rclone inventory response');
  const entries=data.remotes.filter(x=>x &&
-   ['google-drive','mega'].includes(x.provider) &&
-   typeof x.name==='string' && Array.isArray(x.aliases));
- if(!entries.length){
-  rcloneRoot.append(el('p','No Google Drive or MEGA remotes were reported by private Rclone.'));
-  return;
- }
- for(const provider of ['google-drive','mega']){
+  ['google-drive','mega'].includes(x.provider) &&
+  typeof x.name==='string' && Array.isArray(x.aliases));
+ for(const [provider,listId,countId] of [
+  ['google-drive','nyx-google-list','nyx-google-count'],
+  ['mega','nyx-mega-list','nyx-mega-count']]){
   const remotes=entries.filter(x=>x.provider===provider);
-  const group=el('div');group.className='card';
-  group.append(el('strong',provider==='google-drive'?'Google Drive':'MEGA'));
-  if(!remotes.length){
-   group.append(el('p','None configured.'));rcloneRoot.append(group);continue;
-  }
+  const list=document.getElementById(listId);list.replaceChildren();
+  document.getElementById(countId).textContent=remotes.length+' configured';
+  if(!remotes.length){list.append(el('p','None configured.'));continue;}
   for(const remote of remotes){
-   const line=el('div');line.className='row';
-   line.append(el('strong',remote.name),el('span','Configured in Rclone'));
+   const line=el('div');line.className='row card';
+   line.append(el('strong',remote.name),el('span','Configured · not connectivity-tested'));
    line.lastChild.className='badge';
    if(remote.aliases.length)line.append(el('small','Areas: '+remote.aliases.join(', ')));
-   group.append(line);
+   list.append(line);
   }
-  rcloneRoot.append(group);
  }
+ document.getElementById('nyx-rclone-count').textContent=entries.length+' configured';
+ rcloneRoot.replaceChildren(el('p',entries.length+' configured Drive/MEGA remotes. Expand each provider group to see names.'));
 }
 async function refreshRclone(){
  rcloneStatus.textContent='';
@@ -132,15 +166,19 @@ async function refreshRclone(){
   const data=await call('nyx_rclone_connections_list',{});
   renderRclone(data);
  }catch(e){
-  rcloneRoot.replaceChildren(el('p','Rclone inventory unavailable. Private NYX authorization and the configured Rclone runtime are required.'));
+  rcloneRoot.replaceChildren(el('p','Rclone inventory unavailable. Private NYX authorization is required.'));
+  for(const id of ['nyx-google-list','nyx-mega-list'])document.getElementById(id).replaceChildren(el('p','Inventory unavailable; no connection verified.'));
+  for(const id of ['nyx-google-count','nyx-mega-count','nyx-rclone-count'])document.getElementById(id).textContent='Unavailable';
   rcloneStatus.textContent=e?.message||'Unable to read configured remotes';
   rcloneStatus.className='error';
  }
 }
 function render(connections){
  root.replaceChildren();
- if(!connections.length){root.append(el('p','No connections yet. Add one above.'));return;}
- for(const c of connections.filter(c=>c.provider==='github')){
+ const github=connections.filter(c=>c && c.provider==='github' && c.status!=='revoked');
+ document.getElementById('nyx-other-count').textContent=github.length+' account'+(github.length===1?'':'s');
+ if(!github.length){root.append(el('p','No GitHub accounts yet. Use the green + button to add one.'));return;}
+ for(const c of github){
   const box=el('div');box.className='card';
   const title=el('div');title.className='row';
   title.append(el('strong',c.displayName),el('span',c.provider),el('span',c.status));
@@ -235,6 +273,28 @@ async function refresh(){
  const data=await call('nyx_connections_list',{});
  if(!data||!Array.isArray(data.connections))throw new Error('Invalid connection response');
  render(data.connections);
+}
+const quickAdd=document.getElementById('nyx-add');
+const addMenu=document.getElementById('nyx-add-menu');
+quickAdd.addEventListener('click',()=>{
+ addMenu.hidden=!addMenu.hidden;
+ quickAdd.setAttribute('aria-expanded',String(!addMenu.hidden));
+});
+for(const choice of document.querySelectorAll('#nyx-provider-choices button[data-open]')){
+ choice.addEventListener('click',()=>{
+  const target=document.getElementById(choice.dataset.open);
+  if(target)target.open=true;
+  if(choice.dataset.github==='true'){
+   document.getElementById('new-github-container').hidden=false;
+   document.getElementById('new-name').focus();
+  }else if(choice.dataset.open==='nyx-rclone-group'){
+   show('Rclone credentials must be managed privately on the server. Inventory is read-only.');
+  }else{
+   show('Existing configured remotes are listed here. New Google Drive/MEGA authorization is not enabled in production.');
+  }
+  addMenu.hidden=true;
+  quickAdd.setAttribute('aria-expanded','false');
+ });
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
