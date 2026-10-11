@@ -346,6 +346,20 @@ function render(connections){
    title.append(el('strong',(c.provider==='mega'?'🗄️ ':'🌈 ')+c.displayName),
      el('small',c.status==='active' ? '✅ Connected' : '⏳ Setup pending'));
    box.append(title);
+   const access=el('details');access.className='card nyx-account-access';
+   access.append(el('summary','Permissions & configuration'));
+   const vault=c.connectionType==='isolated-credential-vault';
+   access.append(el('p','Connection type: '+(vault?'Owner-scoped encrypted Rclone profile':'Private server Rclone reference')));
+   access.append(el('p','Panel operations: read-only browsing and access checks (subject to authorization).'));
+   if(c.provider==='google-drive' && vault){
+     access.append(el('p','Google OAuth requested scope: Drive read-only. No Drive write tool enabled.'));
+   }else if(c.provider==='mega'){
+     access.append(el('p','MEGA provider permissions: not inferred from configured credentials.'));
+   }else{
+     access.append(el('p','Provider scope: see private Rclone declared configuration; grant unverified.'));
+   }
+   access.append(el('p','Connection record: '+(c.status==='active'?'Active; test access to verify reachability':'Pending setup')));
+   box.append(access);
    const edit=el('div');edit.className='row';
    const name=input(c.displayName);
    edit.append(name,button('Rename',async()=>{
@@ -586,7 +600,12 @@ document.getElementById('new-form').addEventListener('submit',async e=>{
  e.preventDefault();const name=document.getElementById('new-name').value.trim();
  const provider='github';
  try{await call('nyx_connection_create',{provider,name});await refresh();
-  document.getElementById('new-name').value='';show('Connection created. Authorize before using resources.');
+  document.getElementById('new-name').value='';
+  providerChoice.value='';updateProviderChoice();
+  document.body.classList.remove('nyx-adding');
+  quickAdd.setAttribute('aria-expanded','false');
+  document.getElementById('nyx-other-group').open=true;
+  show('GitHub connection created. Authorize before using resources.');
  }catch(e){show(e.message,true);}
 });
 ready.then(()=>refresh()).catch(e=>show('Connections unavailable: '+e.message,true));
