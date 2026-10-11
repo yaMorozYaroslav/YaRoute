@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { googleCallbackUrl, googleOAuthConfiguration } from './google-drive-oauth';
+import { googleCallbackUrl, googleOAuthConfiguration, revokeGoogleDriveProfile } from './google-drive-oauth';
 import { Pool } from 'pg';
 import { StorageService } from '../storage/storage.service';
 import { RcloneCredentialVaultService } from '../storage/rclone-credential-vault.service';
@@ -292,6 +292,17 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
            (process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' && this.vault?.isEnabled())))) {
       throw new Error('CONNECTOR_PROVIDER_DISABLED');
     }
+    let providerRevoked=false;
+    // Best effort provider-side Google token revocation happens *before*
+    // local ciphertext destruction. Errors never expose tokens to callers.
+    if(previous.provider==='google-drive' && this.vault?.isEnabled()){
+      const profile=await this.vault.load(ownerId,id,'google-drive',previous.externalAccountId);
+      if(profile)providerRevoked=await revokeGoogleDriveProfile(profile);
+    }
+    if(previous.provider==='google-drive'||previous.provider==='mega'){
+      // If vault deletion fails, do not claim unlink completed.
+      await this.vault?.revoke(ownerId,id);
+    }
     await this.db().query(
       `UPDATE nyx_connector_connections SET status='revoked',
        capabilities='[]'::jsonb, provider_capabilities='[]'::jsonb,
@@ -301,11 +312,11 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     );
     await this.db().query('DELETE FROM nyx_connector_link_states WHERE owner_id=$1 AND connection_id=$2',
       [ownerId,id]);
-    if (previous.provider === 'google-drive' || previous.provider === 'mega') {
-      await this.vault?.revoke(ownerId,id);
-    }
-    return {id,status:'revoked',externalRevocationRequired:true,provider:previous.provider,
-      configurationChanged:false, metadataOnly:previous.provider !== 'github'};
+    return {id,status:'revoked',
+      externalRevocationRequired:previous.provider==='google-drive' ? !providerRevoked : true,
+      providerRevoked:previous.provider==='google-drive' && providerRevoked,
+      provider:previous.provider,configurationChanged:false,
+      metadataOnly:previous.provider !== 'github'};
   }
   /** Atomic owner-level hourly request budget across all NestJS instances. */
   async consumeQuota(ownerId:string, id:string) {
