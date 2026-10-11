@@ -70,5 +70,6 @@ test('Rclone probe is app-only, owner-scoped, and public mode omits legacy comma
   assert.match(panel, /nyx_rclone_connection_test/);
   assert.match(panel, /probe\.textContent/);
   assert.match(panel, /nyx_rclone_connection_link/);
-  assert.match(panel, /rclone-linked-list/);
+  assert.match(panel, /id="nyx-google-list"/);
+  assert.match(panel, /id="nyx-mega-list"/);
 });
