@@ -125,10 +125,16 @@ export class McpService {
     );
 
     server.registerTool('nyx_connections_panel',{
-      title:'Manage NestNyx connections',
-      description:'Open the GitHub-only NestNyx connections panel to authorize GitHub App and select repository permissions. This is an MCP auxiliary tool, not a Yaro CLI command.',
+      title:'☁️ NestNyx Connections',
+      description:'Open your private NestNyx connections panel in ChatGPT. This production version supports authenticated GitHub connections; Google Drive and MEGA migration remains under separate review.',
       inputSchema:z.object({}),
-      _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
+      _meta:{
+        ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
+        // OpenAI MCP Extensions: sidebar launcher + conversation content tab.
+        // This changes app discovery only and cannot grant more provider access.
+        'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]},
+        'openai/outputTemplate':CONNECTIONS_PANEL_URI,
+      },
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       schema:'nyx.connections.panel.v1',
