@@ -20,6 +20,22 @@ export class HealthController {
       commit: process.env.HEROKU_SLUG_COMMIT ?? require('./build-info.json').commit,
       rclone: version,
       durableJobs: this.jobs.isDurable(),
+      // These are configuration/registration flags, not live provider proofs.
+      // A deploy is reconnect-ready only after real OAuth/MEGA probes succeed.
+      connectorRelease: {
+        mode: process.env.NYX_DEPLOYMENT_MODE === 'public' ? 'public_connectors_only' : 'private_compatibility',
+        panelRegistered: true,
+        googleOAuthConfigured: Boolean(
+          process.env.NYX_PUBLIC_URL?.startsWith('https://') &&
+          process.env.NYX_GOOGLE_CLIENT_ID && process.env.NYX_GOOGLE_CLIENT_SECRET),
+        ownerVaultConfigured: Boolean(process.env.NYX_RCLONE_VAULT_ENABLED === 'true' &&
+          process.env.NYX_RCLONE_CREDENTIAL_KEY && process.env.DATABASE_URL),
+        megaFormEnabled: process.env.NYX_MEGA_SELF_SERVICE_ENABLED === 'true' &&
+          process.env.NYX_RCLONE_VAULT_ENABLED === 'true',
+        legacySharedRcloneAllowed: process.env.NYX_DEPLOYMENT_MODE !== 'public',
+        multiUserYaroReady: false,
+        requiresLiveProviderVerification: true,
+      },
     };
   }
 }
