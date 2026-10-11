@@ -57,8 +57,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div id="rclone-status" role="status" aria-live="polite"></div>
 <form id="rclone-new-form" class="row">
 <label>Provider <select id="rclone-new-provider"><option value="google-drive">🌈 Google Drive</option><option value="mega">🗄️ MEGA</option></select></label>
-<label>Connection ID <input id="rclone-new-remote" type="text" maxlength="120" pattern="[A-Za-z][A-Za-z0-9_.-]*" required placeholder="my_drive"></label>
-<label>Display name <input id="rclone-new-label" type="text" maxlength="80" required placeholder="My files"></label>
+<label>Name your connection <input id="rclone-new-label" type="text" maxlength="80" required placeholder="My files"></label>
 <button type="submit">Continue →</button>
 </form>
 <p><small>🔒 NestNyx stores account credentials in an encrypted vault. Disconnect anytime.</small></p>
@@ -322,7 +321,7 @@ document.getElementById('refresh').addEventListener('click',()=>refresh().catch(
 document.getElementById('rclone-new-form').addEventListener('submit',async event=>{
  event.preventDefault();
  const provider=document.getElementById('rclone-new-provider').value;
- const remoteName=document.getElementById('rclone-new-remote').value.trim();
+ const remoteName='nyx_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,9);
  const name=document.getElementById('rclone-new-label').value.trim();
  if(!['google-drive','mega'].includes(provider) ||
     !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName) || !name){
@@ -330,7 +329,6 @@ document.getElementById('rclone-new-form').addEventListener('submit',async event
  }
  try{
   await call('nyx_rclone_connection_link',{provider,remoteName,name});
-  document.getElementById('rclone-new-remote').value='';
   document.getElementById('rclone-new-label').value='';
   await refresh();
   show('Account reference created. Continue with provider authorization below.');
