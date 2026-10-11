@@ -33,12 +33,29 @@ test('MCP panel is auxiliary and does not modify Head CLI definitions',()=>{
  assert.match(mcp,/not all Head commands guaranteed/);
 });
 
-test('ChatGPT gets sidebar and conversation tab links to the authenticated panel',()=>{
+test('ChatGPT gets separate authenticated conversation-tab and global-sidebar launchers',()=>{
  const mcp=src('src/mcp/mcp.service.ts');
- assert.ok(mcp.includes("'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]}"));
- assert.ok(mcp.includes("title:'☁️ NestNyx Connections'"));
- assert.ok(mcp.includes("inputSchema:z.object({})"));
- assert.ok(mcp.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
- // This release intentionally does not advertise unimplemented public storage.
+ const thread=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_panel'"),
+   mcp.indexOf("server.registerTool('nyx_connections_home'"));
+ const global=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_home'"),
+   mcp.indexOf("server.registerTool('nyx_connections_list'"));
+ assert.ok(thread.startsWith("server.registerTool('nyx_connections_panel'"));
+ assert.ok(global.startsWith("server.registerTool('nyx_connections_home'"));
+ assert.ok(thread.includes("'openai/ui':{entrypoints:[{type:'thread'}]}"));
+ assert.ok(global.includes("'openai/ui':{entrypoints:[{type:'global'}]}"));
+ assert.ok(thread.includes("title:'☁️ NestNyx Connections'"));
+ assert.ok(global.includes("title:'☁️ NestNyx'"));
+ for(const tool of [thread,global]){
+   assert.ok(tool.includes("inputSchema:z.object({})"));
+   assert.ok(tool.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
+   assert.ok(tool.includes("ui:{resourceUri:CONNECTIONS_PANEL_URI"));
+   assert.ok(tool.includes("annotations:{readOnlyHint:true,destructiveHint:false"));
+   assert.ok(tool.includes("},connectionsPanelResult);"));
+ }
+ assert.ok(mcp.includes("const ownerId = this.connectorOwner()"));
+ assert.ok(mcp.includes("connections:await this.connections.list(ownerId)"));
+ assert.ok(mcp.includes("providers:[{id:'github'"));
+ assert.ok(!mcp.includes("entrypoints:[{type:'global'},{type:'thread'}]"));
+ // This production change intentionally does not expose unfinished public storage.
  assert.ok(mcp.includes("Google Drive and MEGA migration remains under separate review"));
 });
