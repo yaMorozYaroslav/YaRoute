@@ -41,6 +41,9 @@ test('owner-bound MEGA setup state is expiring, one-use and rejects other tenant
   svc.repository={get:async id=>id===row.id?row:null};
   svc.registry={list:async()=>[]};
   svc.pool={query:async(sql,args)=>{
+    if(sql.includes('INSERT INTO nyx_mega_setup_request_limits')){
+      return{rowCount:1,rows:[]};
+    }
     if(sql.startsWith('DELETE FROM nyx_mega_setup_states WHERE expires_at<=now()')){
       states.clear();return{rowCount:0,rows:[]};
     }
