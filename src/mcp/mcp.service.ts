@@ -96,9 +96,7 @@ export class McpService {
         title: 'Preview potential financial and operational loss (no execution)',
         description: 'Read-only conservative risk preview. Warns about CI, deployments, transfers, growth, recurring jobs, outages, data loss, and forbidden financial actions. Input metadata is unverified and no billing details are accessed. This tool NEVER grants permission or executes an operation.',
         inputSchema: z.object({
-          provider: process.env.NYX_DEPLOYMENT_MODE === 'public'
-            ? z.enum(['github','gitlab','google-drive','heroku','neon','other'])
-            : z.enum(['github','gitlab','google-drive','mega','heroku','neon','other']),
+          provider: z.enum(['github','gitlab','google-drive','mega','heroku','neon','other']),
           operation: z.string().min(1).max(80),
           paths: z.array(z.string().min(1).max(2048)).max(500).optional(),
           estimatedCalls: z.number().int().nonnegative().optional(),
@@ -132,7 +130,7 @@ export class McpService {
 
     server.registerTool('nyx_connections_panel',{
       title:'Manage NestNyx connections',
-      description:'Manage owner-scoped GitHub App and Google Drive encrypted-vault connections. MEGA remains private-only; legacy Rclone inventory is private-only. This is an MCP auxiliary tool, not a Yaro CLI command.',
+      description:'Manage owner-scoped GitHub, Google Drive OAuth and optional provisioned MEGA accounts. Public mode never accesses the operator-wide Rclone configuration. This is an MCP auxiliary tool, not a Yaro CLI command.',
       inputSchema:z.object({}),
       _meta:{ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},'openai/outputTemplate':CONNECTIONS_PANEL_URI},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
@@ -144,9 +142,7 @@ export class McpService {
         {id:'github',availability:'oauth_ready_if_configured'},
         ...((process.env.NYX_DEPLOYMENT_MODE === 'public' && process.env.NYX_RCLONE_VAULT_ENABLED !== 'true') ? [] : [
           {id:'google-drive',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'read_only_oauth_if_configured' : 'private_rclone_configuration_only'},
-          ...(process.env.NYX_DEPLOYMENT_MODE === 'public' ? [] : [
-            {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
-          ]),
+          {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true' ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
         ]),
       ],
       note:'GitHub authorization is required. Refresh the ChatGPT MCP connection to discover new tools.',
@@ -340,10 +336,9 @@ export class McpService {
     // Linking changes metadata only; no process-global Rclone configuration edits.
     server.registerTool('nyx_rclone_connection_link',{
       title:'Create one owner-scoped storage account reference',
-      description:'Create a pending owner-scoped Google Drive account; MEGA is available only in private legacy mode. Public MEGA requests fail closed.',
+      description:'Create a pending owner-scoped Drive or optional MEGA reference. MEGA credentials can only be provisioned through trusted server-side vault administration, never via ChatGPT.',
       inputSchema:z.object({
-        provider:process.env.NYX_DEPLOYMENT_MODE === 'public'
-          ? z.literal('google-drive') : z.enum(['google-drive','mega']),
+        provider:z.enum(['google-drive','mega']),
         remoteName:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
         name:z.string().min(1).max(80),
       }),
@@ -364,7 +359,7 @@ export class McpService {
 
     server.registerTool('nyx_rclone_connection_test',{
       title:'Check one owner-scoped Rclone account',
-      description:'Probe a configured owner-scoped Google Drive account; private mode also supports MEGA. Returns sanitized connectivity status; no file contents or secrets.',
+      description:'Probe one owned Google Drive or independently provisioned MEGA account. In public mode probes use encrypted per-owner vault credentials only; no shared Rclone config or files.',
       inputSchema:z.object({id:z.string().uuid()}),
       _meta:{ui:{visibility:['app']}},
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
