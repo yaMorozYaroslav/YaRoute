@@ -31,7 +31,7 @@ export class NyxCommandExecutor {
       const commands=order.map(name=>{
         const definition=definitions[name];
         const detail=definition as Record<string,unknown>;
-        const aliases=name==='hel'?['help',...(definition.aliases??[])]:definition.aliases??[];
+        const aliases=definition.aliases??[];
         const extras:Record<string,unknown>={};
         // All values are from the verified canonical Head and trimmed for
         // the help response; never infer command support from descriptions.
@@ -75,7 +75,7 @@ export class NyxCommandExecutor {
         schema: plan.contract.response,
         status: 'COMPLETE',
         canonical_command: 'hel',
-        syntax: {canonical:'Nyxhel',spaced:'nyx hel',compatibility:'nyx help'},
+        syntax: {canonical:'Nyxhel',spaced:'nyx hel',label:'Help'},
         command_count: commands.length,
         commands,
         markdown,
