@@ -26,6 +26,43 @@ export function assertSingleRcloneProfile(provider:ScopedRcloneProvider, remote:
   }
 }
 
+/**
+ * Only derived non-sensitive settings for one validated, owner-isolated vault
+ * profile. Never return raw values, tokens, emails, IDs, provider paths or URLs.
+ * An OAuth scope in Rclone config is requested access, NOT a verified grant.
+ */
+export function summarizeOwnedRcloneProfile(
+  provider:ScopedRcloneProvider,remote:string,profile:string,
+) {
+  assertSingleRcloneProfile(provider,remote,profile);
+  const options=new Map<string,string>();
+  for(const line of profile.split(/\r?\n/)){
+    const match=line.match(/^\s*([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$/i);
+    if(match && ['scope','team_drive','root_folder_id','service_account_credentials'].includes(match[1].toLowerCase())){
+      options.set(match[1].toLowerCase(),match[2].trim());
+    }
+  }
+  const declared=options.get('scope')?.toLowerCase();
+  const scope=provider==='google-drive' &&
+    ['drive','drive.readonly','drive.file','drive.metadata.readonly'].includes(declared??'')
+    ? declared as 'drive'|'drive.readonly'|'drive.file'|'drive.metadata.readonly'
+    : 'unknown' as const;
+  return {
+    source:'owner-scoped-encrypted-vault' as const,
+    declaredScope:scope,
+    requestedAccess: scope==='drive.readonly'||scope==='drive.metadata.readonly'
+      ? 'read-only-requested' as const
+      : scope==='drive'||scope==='drive.file'
+      ? 'write-capable-scope-requested-unverified' as const
+      : 'unknown' as const,
+    sharedDriveConfigured:provider==='google-drive'&&Boolean(options.get('team_drive')),
+    rootFolderConfigured:provider==='google-drive'&&Boolean(options.get('root_folder_id')),
+    serviceAccountConfigured:provider==='google-drive'&&Boolean(options.get('service_account_credentials')),
+    providerGrantVerified:false as const,
+    rcloneConfigEditable:false as const,
+  };
+}
+
 @Injectable()
 export class RcloneCredentialVaultService implements OnModuleInit, OnModuleDestroy {
   private pool?:Pool;
