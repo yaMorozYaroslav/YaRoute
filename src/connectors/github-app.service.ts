@@ -111,9 +111,36 @@ export class GithubAppService {
     }));
     if(!Number.isSafeInteger(accessible.total_count)||accessible.total_count>100 ||
       !Array.isArray(accessible.installations)) throw new Error('GITHUB_INSTALLATION_REVIEW_REQUIRED');
-    const id=Number(pending.installationId);
-    const matched=(accessible.installations as GitHubInstallation[]).find(i=>i.id===id);
-    if(!matched||matched.app_id!==githubAppConfig().appId) throw new Error('GITHUB_INSTALLATION_NOT_OWNED');
+    // Only consider installations GitHub confirms the OAuth user can access,
+    // and which belong to this exact GitHub App. Never trust caller-supplied IDs.
+    const eligible=(accessible.installations as GitHubInstallation[]).filter(i=>
+      Number.isSafeInteger(i?.id) && i.id>0 &&
+      i.app_id===githubAppConfig().appId &&
+      typeof i.account?.login==='string' && i.account.login.length>0);
+    let matched:GitHubInstallation|undefined;
+    if(pending.installationId==='auto'){
+      if(eligible.length===1){
+        matched=eligible[0];
+      }else if(eligible.length>1){
+        // A display label may help choose among multiple verified installs,
+        // but is NOT an authorization grant. Verify installation and repos below.
+        const connection=await this.connections.getOwned(pending.ownerId,pending.connectionId);
+        if(connection.provider!=='github' || connection.status!=='pending')
+          throw new Error('GITHUB_CONNECTION_NOT_PENDING');
+        const label=connection.displayName.trim().toLowerCase();
+        const exact=eligible.filter(i=>i.account?.login?.toLowerCase()===label);
+        if(exact.length!==1)throw new Error('GITHUB_INSTALLATION_CHOICE_REQUIRED');
+        matched=exact[0];
+      }else{
+        throw new Error('GITHUB_APP_INSTALLATION_REQUIRED');
+      }
+    }else{
+      if(!/^[1-9][0-9]{0,19}$/.test(pending.installationId))
+        throw new Error('GITHUB_INSTALLATION_INVALID');
+      matched=eligible.find(i=>String(i.id)===pending.installationId);
+      if(!matched)throw new Error('GITHUB_INSTALLATION_NOT_OWNED');
+    }
+    const id=matched.id;
     const verified=await requestGitHub('/app/installations/'+id,'GET',appJwt()) as GitHubInstallation;
     if(verified.id!==id||verified.app_id!==githubAppConfig().appId ||
       !verified.account?.login || verified.account.login!==matched.account?.login) {
