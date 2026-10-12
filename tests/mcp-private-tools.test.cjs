@@ -46,8 +46,13 @@ test('exposed NYX job status handles missing jobs without queueing work',()=>{
 test('scope of new compatibility tools does not mutate core NYX files',()=>{
  const mcp=source();
  const section=mcp.slice(mcp.indexOf("server.registerTool('nyx_head_status'"),
-   mcp.indexOf("server.registerTool(\n      'nyx_execute'"));
+   mcp.indexOf("server.registerTool(\n      'nyx_help'"));
  assert.doesNotMatch(section,/this\.commands\.execute|this\.jobs\.create|this\.storage\.executeCopy|this\.rclone\.run/);
+ const help=mcp.slice(mcp.indexOf("server.registerTool(\n      'nyx_help'"),
+   mcp.indexOf("server.registerTool(\n      'nyx_execute'"));
+ assert.match(help,/readOnlyHint: true/);
+ assert.match(help,/this\.commands\.execute\(\{ command: 'hel' \}/);
+ assert.doesNotMatch(help,/this\.jobs\.create|this\.storage\.executeCopy|this\.rclone\.run/);
  assert.match(mcp,/CONNECTIONS_PANEL_URI/);
  assert.match(mcp,/nyx_rclone_connections_list/);
 });
