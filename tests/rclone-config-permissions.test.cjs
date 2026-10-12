@@ -22,7 +22,7 @@ test('Rclone config permissions include only safe boolean flags and recognized s
   'client_secret = never-expose-secret',
   '[drive_unspecified]','type = drive','token = {"access_token":"hidden"}',
   '[drive_unknown]','type = drive','scope = https://malicious.invalid/do-not-echo',
-  '[mega_private]','type = mega','user = private-account@example.invalid','pass = do-not-echo',
+  '[mega_private]','type = mega','user = hidden-private-mega-user','pass = do-not-echo',
   '',
  ].join('\n'),{mode:0o600});
  process.env.NYX_DEPLOYMENT_MODE='private';
@@ -44,7 +44,7 @@ test('Rclone config permissions include only safe boolean flags and recognized s
    svc.safeRemoteConfiguration('mega_private','mega'),
  ]);
  for(const secret of ['never-expose','confidential-team-id','private-root-id',
-   'private-account@example.invalid','/local/account.json','malicious.invalid']){
+   'hidden-private-mega-user','/local/account.json','malicious.invalid']){
    assert.equal(exposed.includes(secret),false,secret);
  }
  process.env.NYX_DEPLOYMENT_MODE='public';
