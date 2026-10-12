@@ -9,9 +9,9 @@ const codeByDepth = { basic: 'B', normal: 'N', deep: 'D' } as const;
 export class NyxCommandResolver {
   resolve(cli: Cli, raw: CommandRequest) {
     const request = requestSchema.parse(raw);
-    // "help" is a transport-facing spelling of canonical Head command "hel".
-    // Never add a new Head command, and never override a real command named help.
-    const query = request.command.toLowerCase() === 'help' && !Object.prototype.hasOwnProperty.call(cli.commands,'help') ? 'hel' : request.command.toLowerCase();
+    // Resolve only explicit canonical Head command keys and aliases declared
+    // by Head. Human-readable long descriptions are never executable aliases.
+    const query = request.command.toLowerCase();
     const match = Object.entries(cli.commands).find(([name, c]) => name.toLowerCase() === query || c.aliases?.some(a => a.toLowerCase() === query));
     if (!match) throw new Error('UNKNOWN_COMMAND');
     const [name, definition] = match;
