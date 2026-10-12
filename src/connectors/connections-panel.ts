@@ -188,7 +188,13 @@ function renderRclone(data){
    info.append(el('p','Write access: Not tested'));
    const test=button('Test connection',async()=>{
      statusLabel.textContent='Connectivity: Testing read access…';
-     const result=await call('nyx_rclone_connection_test_read',{provider,name:remote.name});
+     let result;
+     try{result=await call('nyx_rclone_connection_test_read',{provider,name:remote.name});}
+     catch(e){
+       statusLabel.textContent='Connectivity: Read check failed';
+       badge.textContent='Read failed';
+       throw e;
+     }
      if(result?.schema!=='nyx.storage.rclone.read-probe.v1' ||
         result.provider!==provider||result.name!==remote.name ||
         result.writeAccess!=='not-tested' ||
