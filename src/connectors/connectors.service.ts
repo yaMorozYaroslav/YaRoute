@@ -522,11 +522,16 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async beginGithub(ownerId:string, id:string, installationId:string) {
+  async beginGithub(ownerId:string, id:string, installationId?:string) {
     await this.consumeQuota(ownerId,id);
     const c = await this.owned(ownerId,id);
     if (c.provider !== 'github' || c.status !== 'pending') throw new Error('GITHUB_CONNECTION_NOT_PENDING');
-    if (!/^[1-9][0-9]{0,19}$/.test(installationId)) throw new Error('GITHUB_INSTALLATION_INVALID');
+    // 'auto' is a server-side sentinel only. OAuth callback determines the
+    // actual installation from GitHub's provider-verified user installations.
+    if (installationId!==undefined && !/^[1-9][0-9]{0,19}$/.test(installationId)) {
+      throw new Error('GITHUB_INSTALLATION_INVALID');
+    }
+    const installationSelection=installationId ?? 'auto';
     const clientId = process.env.NYX_GITHUB_CLIENT_ID;
     const publicUrl = process.env.NYX_PUBLIC_URL;
     if (!clientId || !/^[a-zA-Z0-9_.-]+$/.test(clientId) ||
@@ -541,7 +546,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       `INSERT INTO nyx_connector_link_states
        (state_digest,owner_id,connection_id,provider,installation_id,expires_at)
        VALUES($1,$2,$3,'github',$4,now()+interval '10 minutes')`,
-      [digest,ownerId,id,installationId],
+      [digest,ownerId,id,installationSelection],
     );
     const url = new URL('https://github.com/login/oauth/authorize');
     url.searchParams.set('client_id',clientId);
@@ -549,7 +554,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     url.searchParams.set('state',state);
     // GitHub App user authorization. No extra classic OAuth scopes requested.
     return {url:url.toString(),expiresInSeconds:600,
-      message:'Install the NestNyx GitHub App on selected repositories first. Then authorize your GitHub identity via this link.'};
+      message:'Authorize your GitHub account. NestNyx will verify eligible GitHub App installations automatically; no installation ID is needed.'};
   }
   async consumeGithubState(state:string) {
     if (!state || !/^[A-Za-z0-9_-]{40,64}$/.test(state)) throw new Error('CONNECTOR_LINK_STATE_INVALID');
