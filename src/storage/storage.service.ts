@@ -74,6 +74,13 @@ export class StorageService {
           aliases: areas.filter((item) => item.remote === name)
             .map((item) => item.alias).sort(),
           state: 'configured' as const,
+          // Last on-demand connectivity check, if fresh; never infer write grant.
+          ...(() => {
+            const last=this.recentRcloneReadResults.get(provider+':'+name);
+            const age=last ? Date.now()-Date.parse(last.checkedAt) : Infinity;
+            return last && age>=0 && age<=15*60*1000
+              ? {lastReadCheck:{...last,writeAccess:'not-tested' as const}} : {};
+          })(),
           // Only server-allowlisted metadata; no raw config or credentials.
           ...(typeof this.rclone.safeRemoteConfiguration==='function' ? {
             configuration:this.rclone.safeRemoteConfiguration(name,provider==='google-drive'?'drive':'mega'),
@@ -91,6 +98,11 @@ export class StorageService {
       ],
     };
   }
+
+  // Only recent *explicitly requested* checks; not durable provider authorization.
+  private readonly recentRcloneReadResults=new Map<string,{
+    connectivity:'verified'|'failed'|'timeout';checkedAt:string;
+  }>();
 
   private readonly runningRcloneProbes=new Map<string,Promise<{
     schema:'nyx.storage.rclone.read-probe.v1';
@@ -128,7 +140,11 @@ export class StorageService {
       };
     })();
     this.runningRcloneProbes.set(key,attempt);
-    try{return await attempt;}
+    try{
+      const result=await attempt;
+      this.recentRcloneReadResults.set(key,{connectivity:result.connectivity,checkedAt:result.checkedAt});
+      return result;
+    }
     finally{this.runningRcloneProbes.delete(key);}
   }
 

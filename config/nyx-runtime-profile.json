@@ -3,6 +3,31 @@
   "authority": "user-authorized-runtime-configuration",
   "cliSha256": "70e8cd6a1e4c52c2a21145ab02cdccb36ceab5f1fcb0f368d32acaa4e8b6c1c4",
   "commands": {
+    "hel": {
+      "adapter": "context.help.v1",
+      "depth": {
+        "default": "basic",
+        "allowed": [
+          "basic"
+        ]
+      },
+      "arguments": {
+        "targets": false,
+        "maxTargets": 0
+      },
+      "sources": {
+        "basic": [],
+        "normal": [],
+        "deep": []
+      },
+      "pathsVisible": false,
+      "mutation": "none",
+      "verification": {
+        "sourceRead": true,
+        "artifactReadback": false
+      },
+      "response": "nyx.context.v1"
+    },
     "ini": {
       "adapter": "context.initialize.v1",
       "depth": {

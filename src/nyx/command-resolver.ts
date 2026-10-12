@@ -9,7 +9,10 @@ const codeByDepth = { basic: 'B', normal: 'N', deep: 'D' } as const;
 export class NyxCommandResolver {
   resolve(cli: Cli, raw: CommandRequest) {
     const request = requestSchema.parse(raw);
-    const match = Object.entries(cli.commands).find(([name, c]) => name.toLowerCase() === request.command.toLowerCase() || c.aliases?.some(a => a.toLowerCase() === request.command.toLowerCase()));
+    // "help" is a transport-facing spelling of canonical Head command "hel".
+    // Never add a new Head command, and never override a real command named help.
+    const query = request.command.toLowerCase() === 'help' && !Object.prototype.hasOwnProperty.call(cli.commands,'help') ? 'hel' : request.command.toLowerCase();
+    const match = Object.entries(cli.commands).find(([name, c]) => name.toLowerCase() === query || c.aliases?.some(a => a.toLowerCase() === query));
     if (!match) throw new Error('UNKNOWN_COMMAND');
     const [name, definition] = match;
     const contract = definition.execution;
@@ -60,7 +63,8 @@ export class NyxCommandResolver {
     }
 
     if (contract.adapter === 'context.initialize.v1' && (contract.mutation !== 'conversation-artifact' || !contract.handoffsKey || !contract.verification.artifactReadback)) throw new Error('INIT_CONTRACT_UNSAFE');
-    if (contract.adapter === 'context.read.v1' && contract.mutation !== 'none') throw new Error('READ_CONTRACT_UNSAFE');
+    if ((contract.adapter === 'context.read.v1' || contract.adapter === 'context.help.v1') && contract.mutation !== 'none') throw new Error('READ_CONTRACT_UNSAFE');
+    if (contract.adapter === 'context.help.v1' && (name !== 'hel' || contract.scope || contract.arguments.targets || contract.arguments.maxTargets !== 0 || contract.pathsVisible || contract.verification.artifactReadback || Object.values(contract.sources).some(s=>s.length))) throw new Error('HELP_CONTRACT_UNSAFE');
     if (contract.adapter === 'context.summarize.v1') {
       if (contract.mutation !== 'conversation-artifact' || !contract.handoffsKey || !contract.verification.artifactReadback) throw new Error('SUM_CONTRACT_UNSAFE');
       if (!request.conversationId) throw new Error('CONVERSATION_ID_REQUIRED');

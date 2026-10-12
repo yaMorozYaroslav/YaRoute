@@ -79,7 +79,7 @@ test('subprocess probe uses read-only lsf, discards stdout/stderr, bounds runtim
 test('UI presents per-remote expandable scope, connectivity, write status and test button',()=>{
  const ui=CONNECTIONS_PANEL_HTML;
  const mcp=fs.readFileSync(path.join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
- assert.match(CONNECTIONS_PANEL_URI,/v7\.html$/);
+ assert.match(CONNECTIONS_PANEL_URI,/v8\.html$/);
  for(const expression of [/el\('details'\)/,/className='nyx-remote card'/,
   /Configured scope:/,/Connectivity:/,/Write access: Not tested/,
   /Test connection/,/remoteReadChecks=new Map\(\)/,/result\.writeAccess!=='not-tested'/]){
@@ -95,4 +95,28 @@ test('UI presents per-remote expandable scope, connectivity, write status and te
  assert.match(tool,/readOnlyHint:true/);
  assert.match(tool,/visibility:\['app'\]/);
  assert.doesNotMatch(ui,/innerHTML=remote|JSON\.stringify\(remote\.configuration\)/);
+});
+
+test('private inventory reuses only fresh explicitly verified read evidence',async t=>{
+ const before=process.env.NYX_DEPLOYMENT_MODE;
+ t.after(()=>{if(before===undefined)delete process.env.NYX_DEPLOYMENT_MODE;else process.env.NYX_DEPLOYMENT_MODE=before;});
+ process.env.NYX_DEPLOYMENT_MODE='private';
+ let runs=0;
+ const service=new StorageService({
+  listAreas:()=>['MAIN'],
+  get:()=>({remote:'drive_one',root:'secret-folder',provider:'google-drive'}),
+ },{
+  listRemoteNamesByType:async type=>type==='drive'?['drive_one']:[],
+  probeRemoteRead:async()=>{runs++;return 'verified';},
+ });
+ let state=await service.rcloneConnections();
+ assert.equal(state.remotes[0].lastReadCheck,undefined);
+ await service.probeRcloneConnection('google-drive','drive_one');
+ state=await service.rcloneConnections();
+ assert.equal(runs,1);
+ assert.equal(state.remotes[0].lastReadCheck.connectivity,'verified');
+ assert.equal(state.remotes[0].lastReadCheck.writeAccess,'not-tested');
+ assert.ok(Number.isFinite(Date.parse(state.remotes[0].lastReadCheck.checkedAt)));
+ assert.equal(JSON.stringify(state).includes('secret-folder'),false);
+ assert.equal(state.remotes[0].aliases[0],'MAIN');
 });
