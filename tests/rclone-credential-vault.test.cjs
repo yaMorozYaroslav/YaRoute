@@ -62,7 +62,7 @@ test('vault mode never falls back to operator-wide Rclone credentials when unpro
  t.after(restore);process.env.NYX_RCLONE_VAULT_ENABLED='true';
  const {ConnectorsService}=require('../dist/connectors/connectors.service');
  const row={id,ownerId:'oauth:alice',provider:'google-drive',externalAccountId:'drive_personal',
-  displayName:'Drive',capabilities:[],providerCapabilities:[],resources:[],status:'pending'};
+  displayName:'Drive',capabilities:[],providerCapabilities:[],resources:[],status:'pending',credentialMode:'isolated-credential-vault'};
  let shared=0,isolated=0;
  const storage={testRcloneConnection:async()=>{shared++;throw Error('shared credentials forbidden');},
   testIsolatedRcloneConnection:async()=>{isolated++;return{schema:'nyx.storage.rclone.probe.v1',status:'reachable'};}};
