@@ -79,7 +79,7 @@ export class McpService {
         executionFailureFallback: false,
         commandEntrypoints: {
           execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
-          help: { tool: 'nyx_help', command: 'hel', mode: 'read-only' },
+          hel: { tool: 'nyx_hel', command: 'hel', mode: 'read-only' },
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
@@ -444,10 +444,10 @@ export class McpService {
     }));
 
     server.registerTool(
-      'nyx_help',
+      'nyx_hel',
       {
-        title: 'Help: list canonical Yaro commands and live support',
-        description: 'Read-only explanation of Head commands, syntax and scopes, with executable availability from the current verified runtime profile. Canonical command is hel; help is a spelling alias.',
+        title: 'Nyx hel: command reference and live support',
+        description: 'Read-only explanation of Head commands, syntax and scopes, with executable availability from the current verified runtime profile. Canonical short key: hel; full word Help is descriptive text only.',
         inputSchema: z.object({}),
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
