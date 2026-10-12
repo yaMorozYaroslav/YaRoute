@@ -80,28 +80,28 @@ test('GitHub setup starts OAuth without manual installation ID',async()=>{
 });
 
 test('automatically uses sole provider-confirmed NestNyx installation',async()=>{
- const r=await tryDiscovery([authorizedInstallation(987,'linuxofpower')],'Custom Label');
+ const r=await tryDiscovery([authorizedInstallation(987,'synthetic-test-user')],'Custom Label');
  assert.equal(r.error,undefined);
  assert.equal(r.result.status,'active');
- assert.deepEqual(r.activated[0].slice(0,4),['oauth:test','conn1','987','linuxofpower']);
+ assert.deepEqual(r.activated[0].slice(0,4),['oauth:test','conn1','987','synthetic-test-user']);
  assert.ok(!JSON.stringify(r.activated).includes('ghu_'));
 });
 test('with multiple verified installations, match connection label to exact GitHub account',async()=>{
  const r=await tryDiscovery([authorizedInstallation(987,'other-user'),
-   authorizedInstallation(321,'linuxofpower')],'linuxofpower');
+   authorizedInstallation(321,'synthetic-test-user')],'synthetic-test-user');
  assert.equal(r.error,undefined);
  assert.equal(r.result.status,'active');
  assert.equal(r.activated[0][2],'321');
 });
 test('ambiguous installation choice never selects first account or grants access',async()=>{
  const r=await tryDiscovery([authorizedInstallation(987,'other-user'),
-   authorizedInstallation(321,'linuxofpower')],'My projects');
+   authorizedInstallation(321,'synthetic-test-user')],'My projects');
  assert.match(String(r.error?.message),/GITHUB_INSTALLATION_CHOICE_REQUIRED/);
  assert.deepEqual(r.activated,[]);
  assert.ok(!r.calls.some(x=>x.includes('/app/installations/')));
 });
 test('no installed NestNyx app never activates pending connection',async()=>{
- const r=await tryDiscovery([{id:222,app_id:777,account:{login:'linuxofpower'}}],'linuxofpower');
+ const r=await tryDiscovery([{id:222,app_id:777,account:{login:'synthetic-test-user'}}],'synthetic-test-user');
  assert.match(String(r.error?.message),/GITHUB_APP_INSTALLATION_REQUIRED/);
  assert.deepEqual(r.activated,[]);
 });
