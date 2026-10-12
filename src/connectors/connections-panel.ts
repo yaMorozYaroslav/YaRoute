@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v3.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v4.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -188,13 +188,19 @@ function render(connections){
   ren.append(name,button('Rename',async()=>{await call('nyx_connection_rename',{id:c.id,name:name.value.trim()});await refresh();}));
   box.append(ren);
   if(c.provider==='github' && c.status==='pending'){
-    box.append(el('p','Install the NestNyx GitHub App on selected repositories. Copy its installation ID from your GitHub installation settings URL.'));
+    box.append(el('p','Connect without an installation ID. NestNyx verifies your installed GitHub App and selected repositories after you sign in.'));
+    box.append(el('small','If you have multiple NestNyx installations, name this connection exactly like the GitHub account or organization you want to connect.'));
     const row=el('div');row.className='row';
-    const inst=input('');inst.placeholder='GitHub installation ID';inst.inputMode='numeric';
-    row.append(inst,button('Authorize GitHub',async()=>{
-      const v=await call('nyx_connection_begin_github',{id:c.id,installationId:inst.value.trim()});
-      await ready;await request('ui/open-link',{url:v.url});
-      show('After authorizing in GitHub, return and click Refresh.');
+    row.append(button('Authorize GitHub',async()=>{
+      const v=await call('nyx_connection_begin_github',{id:c.id});
+      if(typeof v?.url!=='string')throw Error('GitHub sign-in link unavailable');
+      const oauth=new URL(v.url);
+      if(oauth.protocol!=='https:' || oauth.hostname!=='github.com' ||
+         oauth.pathname!=='/login/oauth/authorize')throw Error('Invalid GitHub sign-in URL');
+      await request('ui/open-link',{url:v.url});
+      show('Complete GitHub authorization, return here, then refresh.');
+    }),button('Installed GitHub Apps',async()=>{
+      await request('ui/open-link',{url:'https://github.com/settings/installations'});
     }));
     box.append(row);
   }
