@@ -141,7 +141,7 @@ test("public cloud browsing only lists an active owner's own vaulted account",as
  configure(t);
  const cid='123e4567-e89b-42d3-a456-426614174000';
  const rows=new Map([[cid,{id:cid,ownerId:'oauth:alice',provider:'mega',
-   externalAccountId:'alice_mega',status:'active'}]]);
+   externalAccountId:'alice_mega',status:'active',credentialMode:'isolated-credential-vault'}]]);
  let probes=0,globalCalls=0;
  const svc=new ConnectorsService({
    listIsolatedRcloneConnection:async(provider,name,profile,folder)=>{
