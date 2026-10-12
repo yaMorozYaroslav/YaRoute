@@ -12,7 +12,7 @@ export class NyxExecutionProfileService {
       try { return await this.applyText(await readFile(deployedPath, 'utf8'), cli, cliHash); }
       catch (error) { this.rethrowProfileError(error); }
     }
-    if (!locator.executionProfile) return { cli };
+    if (!locator.executionProfile) return { cli, keyReceipts: [] as Array<{ key: string; sha256: string }> };
     try { return await this.applyText(await this.store.read(locator.executionProfile, 128 * 1024), cli, cliHash); }
     catch (error) { this.rethrowProfileError(error); }
   }
