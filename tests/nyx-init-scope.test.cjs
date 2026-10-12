@@ -121,6 +121,54 @@ test('Voice oGN is valid global Normal and standalone oGN is rejected', async ()
   await assert.rejects(() => e.execute({ command: 'ini', args: ['oGN'], conversationId: 'bad' }), /MODIFIER_REQUIRES_TARGET/);
 });
 
+
+test('NoteFlow Normal adds 30/90-day and empty togive files without changing Voice or bare init', async () => {
+  const r = new MemoryResources();
+  const cli = makeCli();
+  const extras = [
+    ['todo_30', 'todo_30.md', '# Todo 30\\n'],
+    ['todo_90', 'todo_90.md', '# Todo 90\\n'],
+    ['togive', 'togive.md', ''],
+  ];
+  for (const [key, file, content] of extras) {
+    cli.commands.ini.execution.sources.normal.push({
+      key, required: true, visible: true, when: 'targeted',
+      perTarget: false, forTarget: 'NoteFlow', ref: ref(file),
+    });
+    r.files.set(file, content);
+  }
+  r.files.set('authority.json', JSON.stringify(cli));
+  const e = executor(r);
+  const note = await e.execute({ command: 'ini', args: ['NoteFlow', 'oGN'], conversationId: 'noteflow' });
+  assert.deepEqual(note.files_to_paste.map(f => f.name), [
+    'paths.md', 'maps.md', 'nyxcli.md', 'todo.md', 'todo_10.md', 'toget.md',
+    'todo_30.md', 'todo_90.md', 'togive.md',
+  ]);
+  assert.equal(note.files_to_paste.at(-1).content, '');
+  assert.equal(note.metadata.source_receipts.find(f => f.key === 'togive').bytes, 0);
+  assert.equal(note.metadata.modifier, 'oGN');
+  const voice = await e.execute({ command: 'ini', args: ['Voice'], conversationId: 'voice-extras' });
+  assert.deepEqual(voice.files_to_paste.map(f => f.name), [
+    'paths.md', 'maps.md', 'nyxcli.md', 'todo.md', 'todo_10.md', 'toget.md',
+  ]);
+  const bare = await e.execute({ command: 'ini', conversationId: 'bare-extras' });
+  assert.deepEqual(bare.files_to_paste.map(f => f.name), ['paths.md', 'maps.md', 'nyxcli.md']);
+});
+
+test('missing mandatory NoteFlow Normal file fails before any FIF checkpoint', async () => {
+  const r = new MemoryResources();
+  const cli = makeCli();
+  cli.commands.ini.execution.sources.normal.push({
+    key: 'todo_90', required: true, visible: true, when: 'targeted',
+    perTarget: false, forTarget: 'NoteFlow', ref: ref('todo_90.md'),
+  });
+  r.files.set('authority.json', JSON.stringify(cli));
+  await assert.rejects(() => executor(r).execute({
+    command: 'ini', args: ['NoteFlow'], conversationId: 'missing-90',
+  }), /REQUIRED_SOURCE_UNAVAILABLE:todo_90/);
+  assert.deepEqual(r.writes, []);
+});
+
 test('++ and -- keep FIF identity, preserve depth and append scope history', async () => {
   const r = new MemoryResources(); const e = executor(r);
   const first = await e.execute({ command: 'ini', args: ['Voice'], conversationId: 'same-chat' });
