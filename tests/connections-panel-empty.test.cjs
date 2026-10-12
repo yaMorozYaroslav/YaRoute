@@ -7,7 +7,7 @@ const {CONNECTIONS_PANEL_URI,CONNECTIONS_PANEL_HTML}=require('../dist/connectors
 
 test('public-facing empty panel starts with a + and no private storage inventory',()=>{
  const html=CONNECTIONS_PANEL_HTML;
- assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v7.html');
+ assert.equal(CONNECTIONS_PANEL_URI,'ui://nestnyx/connections/v8.html');
  assert.match(html,/<body class="nyx-empty">/);
  assert.match(html,/<button[^>]+id="nyx-add"[^>]+>＋<\/button>/);
  assert.match(html,/aria-label="Add connection"/);
