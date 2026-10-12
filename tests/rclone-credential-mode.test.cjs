@@ -6,8 +6,11 @@ const {PostgresConnectorRepository}=require('../dist/connectors/postgres-connect
 
 test('private legacy remotes remain distinct from owner-encrypted accounts as vault flag changes',async t=>{
  const prev=process.env.NYX_DEPLOYMENT_MODE;
+ const oldPublic=process.env.NYX_PUBLIC_CONNECTORS_ENABLED;
  t.after(()=>{if(prev===undefined)delete process.env.NYX_DEPLOYMENT_MODE;
-   else process.env.NYX_DEPLOYMENT_MODE=prev;});
+   else process.env.NYX_DEPLOYMENT_MODE=prev;
+   if(oldPublic===undefined)delete process.env.NYX_PUBLIC_CONNECTORS_ENABLED;
+   else process.env.NYX_PUBLIC_CONNECTORS_ENABLED=oldPublic;});
  process.env.NYX_DEPLOYMENT_MODE='private';
  const rows=new Map(),probes=[];
  let vaultOn=true;
@@ -48,6 +51,7 @@ test('private legacy remotes remain distinct from owner-encrypted accounts as va
  vaultOn=true;
  await assert.rejects(()=>svc.beginGoogleDrive('oauth:owner',legacy.id),/GOOGLE_CONNECTION_UNAVAILABLE/);
  process.env.NYX_DEPLOYMENT_MODE='public';
+ process.env.NYX_PUBLIC_CONNECTORS_ENABLED='true';
  const visible=await svc.list('oauth:owner');
  assert.deepEqual(visible.map(x=>x.id),[fresh.id]);
  await assert.rejects(()=>svc.testRclone('oauth:owner',legacy.id),/PRIVATE_RCLONE_CONNECTIONS_ONLY/);
