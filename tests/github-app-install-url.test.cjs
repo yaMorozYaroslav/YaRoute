@@ -65,7 +65,7 @@ test('new GitHub install tool is owner-scoped and never displays credentials',()
  assert.match(tool,/readOnlyHint:true/);
  assert.match(tool,/visibility:\['app'\]/);
  assert.doesNotMatch(tool,/installationId:/);
- assert.match(CONNECTIONS_PANEL_URI,/v5\.html/);
+ assert.match(CONNECTIONS_PANEL_URI,/v6\.html/);
  assert.match(CONNECTIONS_PANEL_HTML,/Install NestNyx App/);
  assert.match(CONNECTIONS_PANEL_HTML,/call\('nyx_connection_github_install_url',\{id:c\.id\}\)/);
  assert.match(CONNECTIONS_PANEL_HTML,/install\.hostname!=='github\.com'/);
