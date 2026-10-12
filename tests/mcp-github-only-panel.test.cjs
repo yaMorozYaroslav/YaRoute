@@ -9,7 +9,7 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v6\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\/connections\/v7\.html/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
@@ -80,7 +80,10 @@ test('existing MEGA and Drive remotes use read-only private inventory, never cre
  assert.match(panel,/call\('nyx_rclone_connections_list',\{\}\)/);
  assert.match(panel,/data\?\.status!=='configured_not_live_verified'/);
  assert.match(panel,/el\('strong',remote\.name\)/);
- assert.match(panel,/Configured · not connectivity-tested/);
+ assert.match(panel,/Connectivity: /);
+ assert.match(panel,/Write access: Not tested/);
+ assert.match(panel,/Test connection/);
+ assert.match(panel,/nyx_rclone_connection_test_read/);
  assert.match(panel,/New Google Drive\/MEGA authorization is not enabled in production/);
  assert.doesNotMatch(panel,/nyx_connection_create.{0,180}provider:.*mega/s);
  assert.doesNotMatch(panel,/type="password"/);
