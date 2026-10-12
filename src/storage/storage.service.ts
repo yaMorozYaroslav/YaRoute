@@ -92,6 +92,46 @@ export class StorageService {
     };
   }
 
+  private readonly runningRcloneProbes=new Map<string,Promise<{
+    schema:'nyx.storage.rclone.read-probe.v1';
+    provider:'google-drive'|'mega';name:string;
+    connectivity:'verified'|'failed'|'timeout';
+    writeAccess:'not-tested';checkedAt:string;
+  }>>();
+
+  /**
+   * Owner-private diagnostic for a remote already present in the permitted
+   * Rclone inventory. Never accepts an arbitrary remote or exposes provider
+   * output. Concurrent calls for the same remote share the same probe.
+   */
+  async probeRcloneConnection(provider:'google-drive'|'mega',name:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE==='public')
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if(!['google-drive','mega'].includes(provider) ||
+       !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(name))
+      throw new Error('RCLONE_REMOTE_INVALID');
+    const key=provider+':'+name;
+    const ongoing=this.runningRcloneProbes.get(key);
+    if(ongoing)return ongoing;
+    if(this.runningRcloneProbes.size>=3)
+      throw new Error('RCLONE_READ_PROBE_BUSY');
+    const attempt=(async()=>{
+      const type=provider==='google-drive'?'drive':'mega';
+      const available=await this.rclone.listRemoteNamesByType(type);
+      if(!available.includes(name))
+        throw new Error('RCLONE_REMOTE_NOT_CONFIGURED');
+      const connectivity=await this.rclone.probeRemoteRead(name);
+      return {
+        schema:'nyx.storage.rclone.read-probe.v1' as const,
+        provider,name,connectivity,writeAccess:'not-tested' as const,
+        checkedAt:new Date().toISOString(),
+      };
+    })();
+    this.runningRcloneProbes.set(key,attempt);
+    try{return await attempt;}
+    finally{this.runningRcloneProbes.delete(key);}
+  }
+
   validateCopyPayload(payload: CopyJobPayload) {
     this.validateFileRef(payload.source, 'source');
     this.validateFileRef(payload.destination, 'destination');
