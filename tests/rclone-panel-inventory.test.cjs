@@ -83,6 +83,7 @@ test('Rclone panel MCP tool is private-only; renders names as text, not HTML',()
  assert.match(panel,/nyx_rclone_connections_list/);
  assert.match(panel,/renderRclone/);
  assert.match(panel,/\['google-drive','mega'\]/);
- assert.match(panel,/line\.append\(el\('strong',remote\.name\)/);
+ assert.match(panel,/const name=el\('strong',remote\.name\)/);
+ assert.match(panel,/head\.append\(name,badge\)/);
  assert.doesNotMatch(panel,/<input[^>]*type="password"/);
 });
