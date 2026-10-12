@@ -8,9 +8,9 @@ const {CONNECTIONS_PANEL_HTML}=require('../dist/connectors/connections-panel');
 
 const envKeys=['NYX_GITHUB_APP_ID','NYX_GITHUB_APP_PRIVATE_KEY_B64',
  'NYX_GITHUB_CLIENT_ID','NYX_GITHUB_CLIENT_SECRET','NYX_PUBLIC_URL'];
-const privateKey=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({
+const privateKey=Buffer.from(generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({
  type:'pkcs8',format:'pem'
-}).toString('base64');
+}),'utf8').toString('base64');
 function setup(){
  const original=Object.fromEntries(envKeys.map(k=>[k,process.env[k]]));
  Object.assign(process.env,{
