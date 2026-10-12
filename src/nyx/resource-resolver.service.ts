@@ -32,9 +32,10 @@ export class NyxResourceResolver {
     const identities = new Map<string, typeof pending[number]>();
     for (const source of plan.contract.sources[plan.depth]) {
       if (source.when === 'targeted' && !plan.targets.length) continue;
+      if (source.forTarget && !plan.targets.some(t => t.toLowerCase() === source.forTarget!.toLowerCase())) continue;
       const keys = source.perTarget ? plan.targets.map(t => source.key.replaceAll('{target}', t)) : [source.key];
       for (const key of keys) {
-        const ref = key.toLowerCase() === 'nyxcli' ? locator.humanCli : this.route(resources, key);
+        const ref = source.ref ?? (key.toLowerCase() === 'nyxcli' ? locator.humanCli : this.route(resources, key));
         if (!ref) {
           if (source.required) throw new Error(`REQUIRED_SOURCE_UNAVAILABLE:${key}`);
           warnings.push(`OPTIONAL_SOURCE_UNAVAILABLE:${key}`); continue;
@@ -75,9 +76,10 @@ export class NyxResourceResolver {
     const identities = new Map<string, typeof pending[number]>();
     for (const source of plan.contract.sources[plan.depth]) {
       if (source.when === 'targeted' && !plan.targets.length) continue;
+      if (source.forTarget && !plan.targets.some(t => t.toLowerCase() === source.forTarget!.toLowerCase())) continue;
       const keys = source.perTarget ? plan.targets.map(t => source.key.replaceAll('{target}', t)) : [source.key];
       for (const key of keys) {
-        const ref = this.route(resources, key);
+        const ref = source.ref ?? this.route(resources, key);
         if (!ref) {
           if (source.required) throw new Error(`REQUIRED_SOURCE_UNAVAILABLE:${key}`);
           warnings.push(`OPTIONAL_SOURCE_UNAVAILABLE:${key}`); continue;
