@@ -59,6 +59,13 @@ test('real hel and help return consistent, canonical executable inventory withou
  const compat=await executor.execute({command:'help'});
  assert.deepEqual(compat,canonical);
  assert.equal(canonical.status,'COMPLETE');
+ assert.match(canonical.markdown,/# Nyx CLI — canonical command reference/);
+ assert.match(canonical.markdown,/nyx hel/);
+ assert.match(canonical.markdown,/nyx ini/);
+ assert.match(canonical.markdown,/nyx key/);
+ assert.equal(canonical.human_mirror.filename,'nyxcli.md');
+ assert.equal(canonical.human_mirror.verified_against_live_mirror,false);
+ assert.equal(canonical.commands.find(x=>x.name==='hel').canonicalSyntax,'Nyxhel');
  assert.equal(canonical.schema,'nyx.context.v1');
  assert.equal(canonical.command_count,4);
  assert.equal(canonical.metadata.command,'hel');
@@ -94,4 +101,42 @@ test('MCP offers a read-only explicit nyx_help tool without altering Head defini
  assert.match(src.slice(start,end),/readOnlyHint: true/);
  assert.match(src.slice(start,end),/this\.commands\.execute\(\{ command: 'hel' \}/);
  assert.match(src,/help: \{ tool: 'nyx_help', command: 'hel'/);
+});
+
+test('help covers every canonical command in Head order, including missing-order additions',async()=>{
+ const all=['hel','ini','key','mat','ske','inf','com','can','fin','upd','sav',
+   'gen','rec','che','dec','ded','execute','ext','abs','sum','ver'];
+ const order=all.filter(x=>x!=='ver');
+ const {executor}=make();
+ const original=executor.registry.current;
+ executor.registry.current=async()=>({
+  cli:cliSchema.parse({
+   schema:'nyx.yarocli.v1',version:'v004',
+   canonical_command_order:order,
+   human_mirror:{filename:'nyxcli.md'},
+   commands:Object.fromEntries(all.map(name=>[name,{
+    purpose:'Official Head explanation for '+name,
+    ...(name==='key'?{dependency:'active key list'}:{}),
+   }])),
+  }),
+  hash:'0'.repeat(64),
+ });
+ const originalProfile=executor.profiles.apply;
+ executor.profiles.apply=async(_,cli)=>({cli:{
+  ...cli,commands:{
+   ...cli.commands,
+   hel:{...cli.commands.hel,execution:loadedProfile.commands.hel},
+   ini:{...cli.commands.ini,execution:loadedProfile.commands.ini},
+   sum:{...cli.commands.sum,execution:loadedProfile.commands.sum},
+  },
+ },hash:'test-profile'});
+ const result=await executor.execute({command:'help'});
+ assert.equal(result.command_count,21);
+ assert.deepEqual(result.commands.map(x=>x.name),all);
+ assert.ok(result.commands.every(x=>result.markdown.includes('nyx '+x.name)));
+ assert.equal(result.commands.find(x=>x.name==='key').details.dependency,'active key list');
+ assert.equal(result.commands.filter(x=>x.executable).length,3);
+ assert.equal(result.human_mirror.completeness,'not-guaranteed');
+ executor.registry.current=original;
+ executor.profiles.apply=originalProfile;
 });
