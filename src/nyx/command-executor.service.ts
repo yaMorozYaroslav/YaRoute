@@ -80,8 +80,8 @@ export class NyxCommandExecutor {
         commands,
         markdown,
         human_mirror:{
-          filename:typeof profile.cli.human_mirror?.filename==='string'
-            ?profile.cli.human_mirror.filename:'nyxcli.md',
+          filename:typeof (profile.cli.human_mirror as {filename?:unknown}|undefined)?.filename==='string'
+            ?(profile.cli.human_mirror as {filename:string}).filename:'nyxcli.md',
           relationship:'compact-human-mirror-not-command-authority',
           completeness:'not-guaranteed',
           verified_against_live_mirror:false,
