@@ -52,10 +52,13 @@ test('Rclone config permissions include only safe boolean flags and recognized s
 });
 
 test('Rclone permission sections are read-only and never render raw config or secret inputs',()=>{
- assert.match(CONNECTIONS_PANEL_URI,/v6\.html$/);
+ assert.match(CONNECTIONS_PANEL_URI,/v7\.html$/);
  const ui=CONNECTIONS_PANEL_HTML;
- assert.match(ui,/Permissions & Rclone configuration/);
- assert.match(ui,/Declared Google OAuth scope:/);
+ assert.match(ui,/Configured scope:/);
+ assert.match(ui,/Connectivity:/);
+ assert.match(ui,/Write access: Not tested/);
+ assert.match(ui,/Test connection/);
+ assert.match(ui,/Declared OAuth scope:/);
  assert.match(ui,/Root folder restriction configured:/);
  assert.match(ui,/Service account configured:/);
  assert.match(ui,/MEGA remote: account permissions cannot be inferred/);
