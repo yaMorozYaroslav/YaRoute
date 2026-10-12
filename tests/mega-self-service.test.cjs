@@ -38,7 +38,7 @@ test('MEGA page explains direct credentials, permissions and never requests reco
 test('owner-bound MEGA setup state is expiring, one-use and rejects other tenant',async t=>{
   flags(t);
   const row={id:'123e4567-e89b-42d3-a456-426614174000',
-    ownerId:'oauth:alice',provider:'mega',externalAccountId:remote,status:'pending'};
+    ownerId:'oauth:alice',provider:'mega',externalAccountId:remote,status:'pending',credentialMode:'isolated-credential-vault'};
   const states=new Map();
   const vault={isEnabled:()=>true};
   const svc=new ConnectorsService({},vault);
