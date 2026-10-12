@@ -112,7 +112,7 @@ test('MEGA public connectivity checks are owner-scoped and atomically throttled'
   process.env.NYX_DEPLOYMENT_MODE='public';
   const id='123e4567-e89b-42d3-a456-426614174000';
   const row={id,ownerId:'oauth:alice',provider:'mega',
-    externalAccountId:remote,displayName:'Alice MEGA',status:'pending'};
+    externalAccountId:remote,displayName:'Alice MEGA',status:'pending',credentialMode:'isolated-credential-vault'};
   let callCount=0,providerCalls=0;
   const svc=new ConnectorsService({
     testRcloneConnection:async()=>{throw Error('shared config must be disabled');},
