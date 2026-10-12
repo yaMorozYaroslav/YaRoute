@@ -35,7 +35,10 @@ export class GithubOAuthController {
         '<main style="font:16px system-ui;margin:3rem;max-width:36rem">'+
         '<h1>Connection was not completed</h1><p>The request expired, was denied, '+
         'or does not match an installation you can access. '+
-        'Start a new connection authorization from NestNyx in ChatGPT.</p></main>',
+        'Make sure the NestNyx GitHub App is installed on your chosen account. '+
+        'If you have several NestNyx installations, rename the pending connection '+
+        'to the exact GitHub user or organization name and try Authorize again. '+
+        'No installation ID is required.</p></main>',
       );
     }
   }

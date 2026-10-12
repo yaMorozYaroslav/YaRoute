@@ -219,8 +219,8 @@ export class McpService {
 
     server.registerTool('nyx_connection_begin_github',{
       title:'Authorize my GitHub App installation',
-      description:'One-time, state-bound GitHub user OAuth authorization. Requires a manually installed GitHub App. Does not reveal credentials.',
-      inputSchema:z.object({id:z.string().uuid(),installationId:z.string().regex(/^[1-9][0-9]{0,19}$/)}),
+      description:'One-time, state-bound GitHub OAuth. Auto-discovers an eligible installed GitHub App under the authorized GitHub account; ambiguous installations fail closed.',
+      inputSchema:z.object({id:z.string().uuid(),installationId:z.string().regex(/^[1-9][0-9]{0,19}$/).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,installationId})=>this.safeTool(()=>
       this.connections.beginGithub(this.connectorOwner(),id,installationId)));
