@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v7.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v8.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -162,7 +162,11 @@ function renderRclone(data){
    const head=el('summary');
    const name=el('strong',remote.name);
    const key=provider+':'+remote.name;
-   const previous=remoteReadChecks.get(key);
+   const reported=remote.lastReadCheck;
+   const recent=reported && ['verified','failed','timeout'].includes(reported.connectivity) &&
+     reported.writeAccess==='not-tested' && typeof reported.checkedAt==='string'
+     ? reported : undefined;
+   const previous=remoteReadChecks.get(key)||recent;
    const badge=el('span',previous?.connectivity==='verified'?'Read verified':
      previous?.connectivity==='failed'?'Read failed':
      previous?.connectivity==='timeout'?'Timed out':'Not tested');
@@ -184,6 +188,10 @@ function renderRclone(data){
      previous?.connectivity==='failed'?'Read check failed':
      previous?.connectivity==='timeout'?'Read check timed out':'Not tested'));
    statusLabel.setAttribute('aria-live','polite');
+   if(previous?.checkedAt){
+     const when=new Date(previous.checkedAt);
+     if(!Number.isNaN(when.getTime()))info.append(el('small','Last read check: '+when.toLocaleString()));
+   }
    info.append(statusLabel);
    info.append(el('p','Write access: Not tested'));
    const test=button('Test connection',async()=>{
