@@ -11,6 +11,8 @@ import * as z from 'zod/v4';
 import { InitService } from '../init/init.service';
 import { JobStoreService } from '../storage/job-store.service';
 import { StorageService } from '../storage/storage.service';
+import { RcloneService } from '../storage/rclone.service';
+import { buildHealthResponse } from '../health.controller';
 import { CopyJobPayload } from '../storage/storage.types';
 import { assessPotentialFinancialLoss } from '../connectors/financial-risk-preflight';
 import { ConnectorsService } from '../connectors/connectors.service';
@@ -36,6 +38,7 @@ export class McpService {
     private readonly connections: ConnectorsService,
     private readonly github: GithubReadonlyConnector,
     private readonly githubWrites: GithubWriteConnector,
+    private readonly rclone: RcloneService,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -76,14 +79,32 @@ export class McpService {
         routing: 'head_resolve_then_mcp_capability_then_mcp_or_gpt',
         unsupportedOnlyFallback: true,
         executionFailureFallback: false,
-        commandEntrypoints: {
+        commandEntrypoints: process.env.NYX_DEPLOYMENT_MODE === 'public' ? {
+          execute: { status: 'blocked_pending_per_user_yaro_workspace' },
+          ini: { status: 'blocked_pending_per_user_yaro_workspace' },
+          sum: { status: 'blocked_pending_per_user_yaro_workspace' },
+        } : {
           execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
           ini: { tool: 'nyx_ini', status: 'registered' },
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
-        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview'] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+        auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ? ['nyx_health','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls'] : ['nyx_health','nyx_connections_home','nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_panel','nyx_rclone_connections_list','nyx_rclone_connection_link','nyx_rclone_connection_test','nyx_rclone_connection_begin_google','nyx_rclone_connection_begin_mega','nyx_rclone_connection_ls','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
+    );
+
+    server.registerTool(
+      'nyx_health',
+      {
+        title: 'Check deployed NestNyx health and release commit',
+        description: 'Read-only health snapshot generated within the authenticated NestNyx server. Reports the same commit, service status, Rclone runtime version, durable-job status and connector feature flags as GET /health. Does not assert Google or MEGA login success, modify storage, deploy, or change billing.',
+        inputSchema: z.object({}),
+        annotations: {readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },
+      async () => this.safeTool(async () => {
+        this.connectorOwner();
+        return buildHealthResponse(await this.rclone.version(),this.jobs.isDurable());
+      }),
     );
 
     server.registerTool(
@@ -119,28 +140,38 @@ export class McpService {
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_PANEL_HTML,
         _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
-          'openai/widgetCSP':{redirect_domains:['https://github.com']},
+          'openai/widgetCSP':{redirect_domains:['https://github.com','https://accounts.google.com',
+            ...(process.env.NYX_PUBLIC_URL?.startsWith('https://') ? [process.env.NYX_PUBLIC_URL.replace(/\/$/,'')] : [])]},
           'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
       }]}),
     );
 
-    // Separate global and thread entrypoints make each launcher independently
-    // discoverable. Both reuse the SAME authenticated, read-only view payload.
-    // No storage, Head authority, provider grants or credential paths are changed.
+    // Separate MCP Apps entrypoints preserve the existing ChatGPT
+    // conversation tab and sidebar launcher through the OAuth upgrade.
+    // The same owner-scoped, read-only result is used for both.
     const connectionsPanelResult = async () => this.safeTool(async () => {
       const ownerId = this.connectorOwner();
       return {
         schema:'nyx.connections.panel.v1',
         ownerId,
         connections:await this.connections.list(ownerId),
-        providers:[{id:'github',availability:'oauth_ready_if_configured'}],
-        note:'GitHub authorization is required. Refresh ChatGPT plugin discovery after deployment.',
+        providers:[
+          {id:'github',availability:'oauth_ready_if_configured'},
+          ...((process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+             process.env.NYX_RCLONE_VAULT_ENABLED !== 'true') ? [] : [
+            {id:'google-drive',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true'
+              ? 'read_only_oauth_if_configured' : 'private_rclone_configuration_only'},
+            {id:'mega',availability:process.env.NYX_RCLONE_VAULT_ENABLED === 'true'
+              ? 'trusted_provisioning_only' : 'private_rclone_configuration_only'},
+          ]),
+        ],
+        note:'Google Drive sign-in requires separately configured Google OAuth and the encrypted vault. Refresh the ChatGPT app after verified deployment.',
       };
     });
 
     server.registerTool('nyx_connections_panel',{
       title:'☁️ NestNyx Connections',
-      description:'Open the NestNyx connections conversation tab. Production supports authenticated GitHub connections only; Google Drive and MEGA migration remains under separate review.',
+      description:'Open the NestNyx Connections conversation tab. Owner-scoped Google Drive OAuth requires the configured encrypted vault; no shared Rclone credentials.',
       inputSchema:z.object({}),
       _meta:{
         ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
@@ -152,7 +183,7 @@ export class McpService {
 
     server.registerTool('nyx_connections_home',{
       title:'☁️ NestNyx',
-      description:'Open NestNyx Connections from the global ChatGPT sidebar. Same owner-scoped GitHub panel; no provider authorization or storage mutation.',
+      description:'Open the same owner-scoped Connections Panel from the ChatGPT sidebar.',
       inputSchema:z.object({}),
       _meta:{
         ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
@@ -164,11 +195,14 @@ export class McpService {
 
     server.registerTool('nyx_connections_list',{
       title:'List my NestNyx connections',
-      description:'Read owner-scoped connections and resource permissions without exposing secrets.',
+      description:'Read owner-scoped GitHub and vault-enabled Rclone account metadata from the existing Neon/PostgreSQL registry without exposing credentials.',
       inputSchema:z.object({}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async()=>this.safeTool(async()=>({
       connections:await this.connections.list(this.connectorOwner()),
+      legacyInventoryAvailable:process.env.NYX_DEPLOYMENT_MODE!=='public',
+      isolatedVaultEnabled:process.env.NYX_RCLONE_VAULT_ENABLED==='true',
+      megaSelfServiceEnabled:process.env.NYX_MEGA_SELF_SERVICE_ENABLED==='true' && process.env.NYX_RCLONE_VAULT_ENABLED==='true',
     })));
 
     server.registerTool('nyx_connection_create',{
@@ -181,7 +215,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_rename',{
       title:'Rename my connection',
-      description:'Change a display label without moving authorization or changing identity.',
+      description:'Rename one owned GitHub or authorized Rclone connection without changing identity, provider grants, or Rclone configuration.',
       inputSchema:z.object({id:z.string().uuid(),name:z.string().min(1).max(80)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async({id,name})=>this.safeTool(()=>
@@ -211,7 +245,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_disconnect',{
       title:'Disconnect one NestNyx account',
-      description:'Revoke local connection permissions and selected resources. Provider App uninstall must be done by user in provider UI.',
+      description:'Disable owned connection metadata. Vault-managed Rclone credential ciphertext is deleted; provider-side revocation may still be needed. Does not edit a global Rclone config.',
       inputSchema:z.object({id:z.string().uuid()}),
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
     },async({id})=>this.safeTool(()=>
@@ -219,8 +253,8 @@ export class McpService {
 
     server.registerTool('nyx_connection_begin_github',{
       title:'Authorize my GitHub App installation',
-      description:'One-time, state-bound GitHub user OAuth authorization. Requires a manually installed GitHub App. Does not reveal credentials.',
-      inputSchema:z.object({id:z.string().uuid(),installationId:z.string().regex(/^[1-9][0-9]{0,19}$/)}),
+      description:'One-time, state-bound GitHub OAuth authorization. Auto-identifies user-accessible app installations; no manual installation ID needed. Ambiguous accounts fail closed.',
+      inputSchema:z.object({id:z.string().uuid(),installationId:z.string().regex(/^[1-9][0-9]{0,19}$/).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,installationId})=>this.safeTool(()=>
       this.connections.beginGithub(this.connectorOwner(),id,installationId)));
@@ -342,6 +376,59 @@ export class McpService {
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,title,body})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.githubWrites.createIssue(this.connectorOwner(),id,repo,title,body))));
+
+    // Multi-account references are persisted in the existing Neon PostgreSQL
+    // connector registry with immutable IDs and authenticated owner IDs.
+    // Linking changes metadata only; no process-global Rclone configuration edits.
+    server.registerTool('nyx_rclone_connection_link',{
+      title:'Create one owner-scoped storage account reference',
+      description:'Create a pending owner-scoped Drive or optional MEGA reference. MEGA credentials can only be provisioned through trusted server-side vault administration, never via ChatGPT.',
+      inputSchema:z.object({
+        provider:z.enum(['google-drive','mega']),
+        remoteName:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
+        name:z.string().min(1).max(80),
+        existingPrivate:z.boolean().optional(),
+      }),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    },async({provider,remoteName,name,existingPrivate})=>this.safeTool(()=>
+      this.connections.createRclone(this.connectorOwner(),provider,remoteName,name,existingPrivate===true)));
+
+
+    server.registerTool('nyx_rclone_connection_begin_google',{
+      title:'Authorize an owned Google Drive account (read-only OAuth)',
+      description:'Create a single-use Google PKCE consent URL for an owned Drive connection. Does not expose tokens, grant write access or use shared Rclone credentials.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.connections.beginGoogleDrive(this.connectorOwner(),id)));
+
+    server.registerTool('nyx_rclone_connection_begin_mega',{
+      title:'Create a one-time secure MEGA setup form',
+      description:'Generate a 10-minute owner-bound HTTPS setup link. Users configure Rclone on their own device and paste a single profile directly into the NestNyx web form. Never supply credentials to ChatGPT. Disabled until manually enabled on the server.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>this.connections.beginMegaSetup(this.connectorOwner(),id)));
+
+    server.registerTool('nyx_rclone_connection_test',{
+      title:'Check one owner-scoped Rclone account',
+      description:'Probe one owned Google Drive or independently provisioned MEGA account. In public mode probes use encrypted per-owner vault credentials only; no shared Rclone config or files.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.connections.testRclone(this.connectorOwner(),id)));
+
+
+    server.registerTool('nyx_rclone_connection_ls',{
+      title:'Browse one owned connected cloud folder (read-only)',
+      description:'List up to 50 file or directory names from one owned, active Google Drive or MEGA connection. Enforced per-account hourly quota and isolated Rclone credentials. No download, write, copy, move, or deletion.',
+      inputSchema:z.object({id:z.string().uuid(),folder:z.string().max(512).optional()}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,folder})=>this.safeTool(()=>
+      this.connections.listRclone(this.connectorOwner(),id,folder??'')));
 
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.

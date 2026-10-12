@@ -45,7 +45,7 @@ export class StorageService {
   /**
    * Private, metadata-only Rclone account inventory for the MCP connections UI.
    * Remote presence means configured, NOT that the provider is reachable.
-   * Never expose rclone.conf, account tokens, paths, provider options or secrets.
+   * Never expose rclone.conf, account tokens, paths, raw provider options or secrets.
    */
   async rcloneConnections() {
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
@@ -74,6 +74,10 @@ export class StorageService {
           aliases: areas.filter((item) => item.remote === name)
             .map((item) => item.alias).sort(),
           state: 'configured' as const,
+          // Explicitly allowlisted server-side metadata only; never raw config.
+          ...(typeof this.rclone.safeRemoteConfiguration==='function' ? {
+            configuration:this.rclone.safeRemoteConfiguration(name,provider==='google-drive'?'drive':'mega'),
+          } : {}),
         };
       });
     };
@@ -86,6 +90,63 @@ export class StorageService {
         ...summarize('mega', megaNames),
       ],
     };
+  }
+
+
+  /**
+   * An authenticated, private-only connectivity check for an existing remote.
+   * Never returns Rclone output or errors (which can contain provider details).
+   * This does not mutate rclone.conf or claim credentials were renewed.
+   */
+  async testRcloneConnection(provider: 'google-drive' | 'mega', name: string) {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    }
+    if (!['google-drive', 'mega'].includes(provider) ||
+        typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(name)) {
+      throw new Error('RCLONE_REMOTE_INVALID');
+    }
+    const inventory = await this.rcloneConnections();
+    if (!inventory.remotes.some(remote => remote.provider === provider && remote.name === name)) {
+      throw new Error('RCLONE_REMOTE_NOT_CONFIGURED');
+    }
+    try {
+      // "about" only checks provider account/quota access; no ls, file contents,
+      // credential output, remote config writes or destructive operations.
+      await this.rclone.run(['about', name + ':', '--json', '--contimeout', '5s', '--timeout', '12s'], 16384);
+      return { schema: 'nyx.storage.rclone.probe.v1', provider, name,
+        status: 'reachable', check: 'rclone_about', configurationChanged: false };
+    } catch {
+      // "about" may be unsupported even for a working remote.
+      return { schema: 'nyx.storage.rclone.probe.v1', provider, name,
+        status: 'unverified', check: 'rclone_about',
+        reason: 'PROBE_FAILED_OR_UNSUPPORTED', configurationChanged: false };
+    }
+  }
+
+  /** Single-account isolated Rclone probe using an encrypted-vault profile. */
+  async testIsolatedRcloneConnection(
+    provider:'google-drive'|'mega',remote:string,profile:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if(!['google-drive','mega'].includes(provider) ||
+       !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote))throw new Error('RCLONE_REMOTE_INVALID');
+    const ok=await this.rclone.probeIsolated(remote,profile,provider);
+    return {schema:'nyx.storage.rclone.probe.v1',provider,name:remote,
+      status:ok?'reachable':'unverified',
+      ...(ok?{}:{reason:'PROBE_FAILED_OR_UNSUPPORTED'}),
+      check:provider==='mega'?'isolated_rclone_lsf':'isolated_rclone_about',configurationChanged:false};
+  }
+
+  async listIsolatedRcloneConnection(
+    provider:'google-drive'|'mega',remote:string,profile:string,folder:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE==='public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED!=='true')
+      throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if(!['google-drive','mega'].includes(provider))throw new Error('RCLONE_REMOTE_INVALID');
+    const listing=await this.rclone.listIsolated(remote,profile,folder);
+    return {schema:'nyx.storage.rclone.list.v1',provider,folder,
+      ...listing,readOnly:true,configurationChanged:false};
   }
 
   validateCopyPayload(payload: CopyJobPayload) {

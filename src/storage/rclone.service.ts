@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 @Injectable()
 export class RcloneService implements OnModuleInit {
@@ -12,7 +13,16 @@ export class RcloneService implements OnModuleInit {
     // A process-wide rclone.conf contains one operator's storage credentials.
     // Never start a public multi-user service with that configuration.
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
-      throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
+      if (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') {
+        throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
+      }
+      // Shared private credentials must not even be present in a public server.
+      // Retain the old config only in a separate encrypted rollback backup.
+      if (process.env.RCLONE_CONFIG_B64 || process.env.RCLONE_CONFIG_PATH ||
+          process.env.NYX_SHARED_ROOTS_JSON) {
+        throw new Error('PUBLIC_OPERATOR_RCLONE_CONFIG_FORBIDDEN');
+      }
+      return;
     }
     const encoded = process.env.RCLONE_CONFIG_B64;
     if (encoded) {
@@ -24,9 +34,183 @@ export class RcloneService implements OnModuleInit {
     }
   }
 
+  /**
+   * Run a bounded read-only provider probe with an exclusive temporary config.
+   * No process-wide Rclone config, inherited NYX credentials, stdout or stderr
+   * are returned to the caller. The config file is always removed afterwards.
+   */
+  async probeIsolated(remote:string,profile:string,provider:'mega'|'google-drive'='google-drive'):Promise<boolean> {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if (!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
+        typeof profile !== 'string' || Buffer.byteLength(profile,'utf8')>32768) {
+      throw new Error('RCLONE_PROFILE_INVALID');
+    }
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nyx-rclone-account-'));
+    fs.chmodSync(dir,0o700);
+    const config=path.join(dir,'config.conf');
+    try {
+      fs.writeFileSync(config,profile,{mode:0o600,flag:'wx'});
+      fs.chmodSync(config,0o600);
+      const env:NodeJS.ProcessEnv={};
+      // Intentionally avoid provider credentials, NYX_* and RCLONE_* vars
+      // from the shared server process. The config path is explicit.
+      for(const k of ['PATH','SSL_CERT_FILE','SSL_CERT_DIR',
+        'HTTPS_PROXY','HTTP_PROXY','NO_PROXY']){
+        if(process.env[k])env[k]=process.env[k];
+      }
+      // Isolated providers cannot inherit the operator's home-directory
+      // credentials, ~/.config/rclone, ~/.netrc, or shared temporary files.
+      env.HOME=dir;
+      env.XDG_CONFIG_HOME=dir;
+      env.TMPDIR=dir;
+      return await new Promise<boolean>(resolve=>{
+        let settled=false, output=0, exceeded=false;
+        const finish=(ok:boolean)=>{
+          if(settled)return;
+          settled=true;resolve(ok);
+        };
+        const child=spawn(this.binary,
+          provider==='mega' ?
+            ['--config',config,'lsf',remote+':','--max-depth','1','--contimeout','5s','--timeout','12s'] :
+            ['--config',config,'about',remote+':','--json','--contimeout','5s','--timeout','12s'],
+          {env,stdio:['ignore','pipe','pipe'],timeout:16000});
+        for(const stream of [child.stdout,child.stderr]){
+          stream.on('data',(chunk:Buffer)=>{
+            output+=chunk.length;
+            if(output>16384 && !exceeded){exceeded=true;child.kill();}
+          });
+        }
+        child.on('error',()=>finish(false));
+        child.on('close',code=>finish(code===0&&!exceeded));
+      });
+    } finally {
+      fs.rmSync(dir,{recursive:true,force:true});
+    }
+  }
+
+  /** Owner-isolated, read-only, bounded listing; never accept shell flags or global config. */
+  async listIsolated(remote:string,profile:string,folder:string='') {
+    if(process.env.NYX_DEPLOYMENT_MODE==='public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED!=='true')throw new Error('PUBLIC_RCLONE_RUNTIME_DISABLED');
+    if(!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
+       typeof profile!=='string' || Buffer.byteLength(profile,'utf8')>32768 ||
+       typeof folder!=='string' || folder.length>512 || folder.startsWith('/') ||
+       /[\\\x00-\x1f\x7f]/.test(folder) ||
+       folder.split('/').some(x=>x==='.'||x==='..'||(folder!==''&&!x))) {
+      throw new Error('RCLONE_LIST_PATH_INVALID');
+    }
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nyx-rclone-list-'));
+    fs.chmodSync(dir,0o700);
+    const config=path.join(dir,'config.conf');
+    try{
+      fs.writeFileSync(config,profile,{mode:0o600,flag:'wx'});
+      const env:NodeJS.ProcessEnv={HOME:dir,XDG_CONFIG_HOME:dir,TMPDIR:dir};
+      for(const k of ['PATH','SSL_CERT_FILE','SSL_CERT_DIR',
+        'HTTPS_PROXY','HTTP_PROXY','NO_PROXY']){
+        if(process.env[k])env[k]=process.env[k];
+      }
+      const raw=await new Promise<string>((resolve,reject)=>{
+        const child=spawn(this.binary,[
+          '--config',config,'lsjson',remote+':'+folder,
+          '--max-depth','1','--contimeout','5s','--timeout','15s',
+        ],{env,stdio:['ignore','pipe','pipe'],timeout:22000});
+        let stdout='',size=0,invalid=false;
+        child.stdout.on('data',(data:Buffer)=>{
+          size+=data.length;
+          if(size>65536){invalid=true;child.kill();return;}
+          stdout+=data.toString('utf8');
+        });
+        // Discard stderr to avoid returning provider details or credential values.
+        child.stderr.on('data',()=>{});
+        child.on('error',()=>reject(new Error('RCLONE_LIST_FAILED')));
+        child.on('close',code=>{
+          if(code!==0 || invalid)reject(new Error('RCLONE_LIST_FAILED'));
+          else resolve(stdout);
+        });
+      });
+      let parsed:unknown;
+      try{parsed=JSON.parse(raw);}catch{throw new Error('RCLONE_LIST_FAILED');}
+      if(!Array.isArray(parsed))throw new Error('RCLONE_LIST_FAILED');
+      const limited=parsed.slice(0,50).map((v:any)=>{
+        if(!v || typeof v.Name!=='string' || typeof v.IsDir!=='boolean')
+          throw new Error('RCLONE_LIST_FAILED');
+        return {name:v.Name.slice(0,255),isDirectory:v.IsDir,
+          size:Number.isSafeInteger(v.Size)&&v.Size>=0?v.Size:null};
+      });
+      return {entries:limited,truncated:parsed.length>50};
+    }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  }
+
   async version(): Promise<string> {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      return new Promise<string>(resolve => {
+        const child = spawn(this.binary, ['version'], {
+          env: { PATH: process.env.PATH }, stdio: ['ignore','pipe','ignore'], timeout: 5000,
+        });
+        let version = '';
+        child.stdout.on('data', (data:Buffer) => {
+          version += data.toString('utf8');
+          if (version.length > 1024) child.kill();
+        });
+        child.on('error', () => resolve('unavailable'));
+        child.on('close', code => resolve(code === 0 ?
+          (version.split('\n')[0]?.trim() || 'unknown') : 'unavailable'));
+      });
+    }
     const { stdout } = await this.run(['version']);
     return stdout.split('\n')[0]?.trim() || 'unknown';
+  }
+
+  /**
+   * Private-operator-only safe configuration summary.
+   * Never return a configuration value other than a fixed, recognized scope;
+   * never return token, secret, user ID, path or root identifier.
+   * Declared scope is NOT a successful authorization or a write grant.
+   */
+  safeRemoteConfiguration(remote:string, type:'drive'|'mega') {
+    const unavailable={inspection:'unavailable' as const,declaredScope:'unknown' as const,
+      requestedAccess:'unknown' as const,sharedDriveConfigured:false,
+      rootFolderConfigured:false,serviceAccountConfigured:false};
+    if(process.env.NYX_DEPLOYMENT_MODE==='public')throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if(!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
+       (type!=='drive'&&type!=='mega'))throw new Error('RCLONE_REMOTE_INVALID');
+    try{
+      const stat=fs.statSync(this.configPath);
+      if(!stat.isFile()||stat.size>512*1024)return unavailable;
+      const raw=fs.readFileSync(this.configPath,'utf8');
+      const values=new Map<string,string>();
+      let inSection=false;
+      for(const line of raw.split(/\r?\n/)){
+        const section=line.match(/^\s*\[([^\]\r\n]+)\]\s*$/);
+        if(section){inSection=section[1]===remote;continue;}
+        if(!inSection||/^\s*[#;]/.test(line))continue;
+        const option=line.match(/^\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+        if(option && ['type','scope','team_drive','root_folder_id','service_account_file',
+                      'service_account_credentials'].includes(option[1].toLowerCase())){
+          values.set(option[1].toLowerCase(),option[2]);
+        }
+      }
+      if(values.get('type')!==type)return unavailable;
+      const configuredScope=values.get('scope')?.trim().toLowerCase()??'';
+      const scope = type==='drive' &&
+        ['drive','drive.readonly','drive.file','drive.metadata.readonly'].includes(configuredScope)
+        ? configuredScope as 'drive'|'drive.readonly'|'drive.file'|'drive.metadata.readonly'
+        : 'unknown';
+      return {inspection:'available' as const,declaredScope:scope,
+        requestedAccess:scope==='drive.readonly'||scope==='drive.metadata.readonly'
+          ? 'read-only-requested' as const
+          : scope==='drive'||scope==='drive.file'
+          ? 'write-capable-scope-requested-unverified' as const
+          : 'unknown' as const,
+        sharedDriveConfigured:type==='drive'&&Boolean(values.get('team_drive')?.trim()),
+        rootFolderConfigured:type==='drive'&&Boolean(values.get('root_folder_id')?.trim()),
+        serviceAccountConfigured:type==='drive'&&Boolean(
+          values.get('service_account_file')?.trim()||values.get('service_account_credentials')?.trim()),
+      };
+    }catch{
+      return unavailable;
+    }
   }
 
   async listRemoteNamesByType(type: string): Promise<string[]> {
@@ -60,6 +244,8 @@ export class RcloneService implements OnModuleInit {
   }
 
   async run(args: string[], maxOutputBytes?: number): Promise<{ stdout: string; stderr: string }> {
+    // Legacy arbitrary-argument Rclone executor cannot operate with public tenants.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') throw new Error('LEGACY_RCLONE_PUBLIC_DISABLED');
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, ['--config', this.configPath, ...args], {
         env: process.env,

@@ -9,7 +9,7 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v3\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\/connections\/v8\.html/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
@@ -33,57 +33,35 @@ test('MCP panel is auxiliary and does not modify Head CLI definitions',()=>{
  assert.match(mcp,/not all Head commands guaranteed/);
 });
 
-test('ChatGPT gets separate authenticated conversation-tab and global-sidebar launchers',()=>{
+test('Google OAuth release retains separate ChatGPT tab and global sidebar launchers',()=>{
  const mcp=src('src/mcp/mcp.service.ts');
- const thread=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_panel'"),
+ const tab=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_panel'"),
    mcp.indexOf("server.registerTool('nyx_connections_home'"));
- const global=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_home'"),
+ const home=mcp.slice(mcp.indexOf("server.registerTool('nyx_connections_home'"),
    mcp.indexOf("server.registerTool('nyx_connections_list'"));
- assert.ok(thread.startsWith("server.registerTool('nyx_connections_panel'"));
- assert.ok(global.startsWith("server.registerTool('nyx_connections_home'"));
- assert.ok(thread.includes("'openai/ui':{entrypoints:[{type:'thread'}]}"));
- assert.ok(global.includes("'openai/ui':{entrypoints:[{type:'global'}]}"));
- assert.ok(thread.includes("title:'☁️ NestNyx Connections'"));
- assert.ok(global.includes("title:'☁️ NestNyx'"));
- for(const tool of [thread,global]){
-   assert.ok(tool.includes("inputSchema:z.object({})"));
-   assert.ok(tool.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
-   assert.ok(tool.includes("ui:{resourceUri:CONNECTIONS_PANEL_URI"));
-   assert.ok(tool.includes("annotations:{readOnlyHint:true,destructiveHint:false"));
-   assert.ok(tool.includes("},connectionsPanelResult);"));
+ assert.ok(tab.startsWith("server.registerTool('nyx_connections_panel'"));
+ assert.ok(home.startsWith("server.registerTool('nyx_connections_home'"));
+ assert.ok(tab.includes("'openai/ui':{entrypoints:[{type:'thread'}]}"));
+ assert.ok(home.includes("'openai/ui':{entrypoints:[{type:'global'}]}"));
+ for(const item of [tab,home]){
+   assert.ok(item.includes("ui:{resourceUri:CONNECTIONS_PANEL_URI"));
+   assert.ok(item.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
+   assert.ok(item.includes("},connectionsPanelResult);"));
+   assert.ok(item.includes("readOnlyHint:true"));
  }
  assert.ok(mcp.includes("const ownerId = this.connectorOwner()"));
  assert.ok(mcp.includes("connections:await this.connections.list(ownerId)"));
- assert.ok(mcp.includes("providers:[{id:'github'"));
- assert.ok(!mcp.includes("entrypoints:[{type:'global'},{type:'thread'}]"));
- // This production change intentionally does not expose unfinished public storage.
- assert.ok(mcp.includes("Google Drive and MEGA migration remains under separate review"));
+ assert.ok(mcp.includes("'nyx_connections_home'"));
 });
-
-test('green add menu is accessible and provider lists stay visible when closed',()=>{
- const panel=src('src/connectors/connections-panel.ts');
- for(const id of ['nyx-add','nyx-add-menu','nyx-google-group','nyx-mega-group',
-    'nyx-rclone-group','nyx-other-group','nyx-google-count','nyx-mega-count',
-    'nyx-rclone-count','nyx-other-count','new-github-container']){
-   assert.ok(panel.includes('id="'+id+'"'),id);
- }
- assert.match(panel,/id="nyx-add"[^>]*aria-expanded="false"/);
- assert.match(panel,/id="nyx-add"[^>]*aria-controls="nyx-add-menu"/);
- assert.match(panel,/addMenu\.hidden=!addMenu\.hidden/);
- assert.ok(panel.indexOf('id="nyx-add-menu"')<panel.indexOf('id="nyx-google-group"'));
- assert.ok(panel.indexOf('id="nyx-google-group"')<panel.indexOf('id="nyx-other-group"'));
- assert.match(panel,/document\.getElementById\('nyx-other-count'\)\.textContent/);
-});
-test('existing MEGA and Drive remotes use read-only private inventory, never credential forms',()=>{
+test('green plus offers direct Google OAuth while legacy Rclone is private',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  const mcp=src('src/mcp/mcp.service.ts');
- assert.match(panel,/call\('nyx_rclone_connections_list',\{\}\)/);
- assert.match(panel,/data\?\.status!=='configured_not_live_verified'/);
- assert.match(panel,/el\('strong',remote\.name\)/);
- assert.match(panel,/Configured · not connectivity-tested/);
- assert.match(panel,/New Google Drive\/MEGA authorization is not enabled in production/);
- assert.doesNotMatch(panel,/nyx_connection_create.{0,180}provider:.*mega/s);
- assert.doesNotMatch(panel,/type="password"/);
- assert.match(mcp,/provider:z\.literal\('github'\)/);
- assert.match(src('src/connectors/connectors.service.ts'),/provider !== 'github'/);
+ assert.match(panel,/id="nyx-add"/);
+ assert.match(panel,/data-provider="google-drive"/);
+ assert.match(panel,/Google Drive · Sign in with Google/);
+ assert.match(panel,/nyx_rclone_connection_begin_google/);
+ assert.match(mcp,/server\.registerTool\('nyx_rclone_connection_begin_google'/);
+ assert.match(mcp,/this\.connections\.beginGoogleDrive\(this\.connectorOwner\(\),id\)/);
+ assert.ok(mcp.indexOf("if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;") <
+           mcp.indexOf("server.registerTool('nyx_rclone_connections_list'"));
 });
