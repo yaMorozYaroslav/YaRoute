@@ -88,8 +88,8 @@ test('help cannot invent a canonical command or bypass unsafe bindings',()=>{
 });
 test('MCP offers a read-only explicit nyx_help tool without altering Head definitions',()=>{
  const src=repo('src/mcp/mcp.service.ts');
- const start=src.indexOf("'nyx_help'");
- const end=src.indexOf("'nyx_execute'",start);
+ const start=src.indexOf("server.registerTool(\n      'nyx_help'");
+ const end=src.indexOf("server.registerTool(\n      'nyx_execute'",start);
  assert.ok(start>=0&&end>start);
  assert.match(src.slice(start,end),/readOnlyHint: true/);
  assert.match(src.slice(start,end),/this\.commands\.execute\(\{ command: 'hel' \}/);
