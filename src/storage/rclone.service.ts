@@ -80,6 +80,49 @@ export class RcloneService implements OnModuleInit {
     }
   }
 
+  /**
+   * Bounded read-only connectivity check. It lists at most the root directory
+   * and discards all filenames, output, provider errors and credentials.
+   * It NEVER tests, requests, or implies write access.
+   */
+  async probeRemoteRead(remote:string):Promise<'verified'|'failed'|'timeout'> {
+    if(process.env.NYX_DEPLOYMENT_MODE==='public')
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if(!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote))
+      throw new Error('RCLONE_REMOTE_INVALID');
+    return new Promise(resolve=>{
+      let settled=false;
+      let outputBytes=0;
+      // Bound both runtime and output. Do not return stderr, even on failure.
+      const child=spawn(this.binary,[
+        '--config',this.configPath,'lsf',remote+':',
+        '--max-depth','1','--format','p',
+      ],{env:process.env,stdio:['ignore','pipe','pipe']});
+      const finish=(status:'verified'|'failed'|'timeout')=>{
+        if(settled)return;
+        settled=true;
+        clearTimeout(timer);
+        resolve(status);
+      };
+      const timer=setTimeout(()=>{
+        child.kill('SIGKILL');
+        finish('timeout');
+      },25000);
+      // Allow runtime to wait for this bounded operation.
+      const count=(chunk:Buffer|string)=>{
+        outputBytes+=Buffer.byteLength(chunk);
+        if(outputBytes>1024*1024){
+          child.kill('SIGKILL');
+          finish('failed');
+        }
+      };
+      child.stdout.on('data',count);
+      child.stderr.on('data',count);
+      child.once('error',()=>finish('failed'));
+      child.once('close',code=>finish(code===0?'verified':'failed'));
+    });
+  }
+
   async listRemoteNamesByType(type: string): Promise<string[]> {
     const { stdout } = await this.run(['listremotes', '--type', type, '--exact']);
     return stdout

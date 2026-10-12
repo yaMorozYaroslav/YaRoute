@@ -374,6 +374,16 @@ export class McpService {
       return this.storage.rcloneConnections();
     }));
 
+    server.registerTool('nyx_rclone_connection_test_read',{
+      title:'Test configured Rclone read connectivity',
+      description:'Probe read-only root listing for a configured remote; no write test.',
+      inputSchema:z.object({provider:z.enum(['google-drive','mega']),name:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/)}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({provider,name})=>this.safeTool(()=>{
+      this.connectorOwner();
+      return this.storage.probeRcloneConnection(provider,name);
+    }));
     // Private-only operational tools. These are MCP auxiliaries and must not
     // silently introduce new canonical Yaro CLI commands or execution contracts.
     server.registerTool('nyx_head_status',{
