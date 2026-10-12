@@ -95,6 +95,32 @@ test('promoted FIB member tampering blocks further SUM promotion', async () => {
 });
 
 
+
+test('active key sources are read before command dispatch and pinned changes fail closed', async () => {
+  const r = resources();
+  const cli = makeCli();
+  const cliHash = sha256(JSON.stringify(cli));
+  const keyText = 'accepted pending init rule v1';
+  const profile = {
+    schema: 'nyx.runtime-profile.v1',
+    authority: 'user-authorized-runtime-configuration',
+    cliSha256: cliHash,
+    commands: { begin: contract() },
+    keySources: [{ key: 'active_key', ref: ref('current-key.txt'), sha256: sha256(keyText) }],
+  };
+  r.files.set('profile.json', JSON.stringify(profile));
+  r.files.set('current-key.txt', keyText);
+  const service = new NyxExecutionProfileService(r);
+  const located = { ...locator, executionProfile: ref('profile.json') };
+  const before = await service.apply(located, cli, cliHash);
+  assert.deepEqual(before.keyReceipts, [{ key: 'active_key', sha256: sha256(keyText) }]);
+  assert.ok(r.reads.includes('current-key.txt'));
+  r.files.set('current-key.txt', 'accepted pending init rule v2');
+  await assert.rejects(() => service.apply(located, cli, cliHash), /KEY_PREFLIGHT_CHANGED_REQUIRES_CHATGPT:active_key/);
+  r.files.delete('current-key.txt');
+  await assert.rejects(() => service.apply(located, cli, cliHash), /KEY_PREFLIGHT_SOURCE_UNAVAILABLE:active_key/);
+});
+
 test('private profile is bound to current canonical CLI and cannot introduce commands', async () => {
  const r = resources(); const cli = makeCli(); const hash = sha256(JSON.stringify(cli)); const profile = { schema: 'nyx.runtime-profile.v1', authority: 'user-authorized-runtime-configuration', cliSha256: hash, commands: { begin: contract() } }; r.files.set('profile.json', JSON.stringify(profile)); const loc = { ...locator, executionProfile: ref('profile.json') }; const service = new NyxExecutionProfileService(r);
  assert.equal((await service.apply(loc, cli, hash)).cli.commands.begin.execution.depth.default, 'basic');

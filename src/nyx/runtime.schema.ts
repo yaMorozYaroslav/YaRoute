@@ -18,6 +18,7 @@ export const locatorSchema = z.object({
 export const sourceSchema = z.object({
   key: z.string().min(1).max(128), required: z.boolean(), visible: z.boolean(),
   when: z.enum(['always', 'targeted']).default('always'), perTarget: z.boolean().default(false),
+  forTarget: name.optional(), ref: refSchema.optional(),
 }).strict();
 export const scopeConfigSchema = z.object({
   default: scopeSchema,
@@ -47,6 +48,7 @@ export const profileSchema = z.object({
   authority: z.literal('user-authorized-runtime-configuration'),
   cliSha256: z.string().regex(/^[a-f0-9]{64}$/),
   commands: z.record(name, executionSchema),
+  keySources: z.array(z.object({ key: name, ref: refSchema, sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).default([]),
 }).strict();
 export const sumPayloadSchema = z.object({
   title: z.string().min(1).max(200),
