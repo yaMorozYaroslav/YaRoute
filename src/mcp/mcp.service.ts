@@ -387,11 +387,12 @@ export class McpService {
         provider:z.enum(['google-drive','mega']),
         remoteName:z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/),
         name:z.string().min(1).max(80),
+        existingPrivate:z.boolean().optional(),
       }),
       _meta:{ui:{visibility:['app']}},
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
-    },async({provider,remoteName,name})=>this.safeTool(()=>
-      this.connections.createRclone(this.connectorOwner(),provider,remoteName,name)));
+    },async({provider,remoteName,name,existingPrivate})=>this.safeTool(()=>
+      this.connections.createRclone(this.connectorOwner(),provider,remoteName,name,existingPrivate===true)));
 
 
     server.registerTool('nyx_rclone_connection_begin_google',{
