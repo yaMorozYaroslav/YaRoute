@@ -50,6 +50,23 @@ async function requestGitHub(path:string,method:'GET'|'POST',token:string,body?:
   });
   return boundedJson(response);
 }
+/**
+ * The configured GitHub App's own installation page, resolved with its
+ * server-only App JWT. Never construct a URL from a client-supplied slug.
+ * No App key, user token, repositories, or installation IDs are returned.
+ */
+export async function githubInstallationUrl():Promise<{url:string;provider:'github'}>{
+  const {appId}=githubAppConfig();
+  const app=await requestGitHub('/app','GET',appJwt()) as {id?:unknown;slug?:unknown};
+  if(app.id!==appId ||
+     typeof app.slug!=='string' ||
+     !/^[a-z0-9][a-z0-9-]{0,99}$/.test(app.slug)){
+    throw new Error('GITHUB_APP_INSTALLATION_URL_UNAVAILABLE');
+  }
+  return {provider:'github',
+    url:'https://github.com/apps/'+app.slug+'/installations/new'};
+}
+
 function verifiedGrants(permissions:Record<string,string>):ConnectorCapability[] {
   const values=new Set<ConnectorCapability>(['repository:metadata']);
   if(['read','write'].includes(permissions.actions)) values.add('ci:read');
