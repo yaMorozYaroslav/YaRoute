@@ -74,6 +74,10 @@ export class StorageService {
           aliases: areas.filter((item) => item.remote === name)
             .map((item) => item.alias).sort(),
           state: 'configured' as const,
+          // Only server-allowlisted metadata; no raw config or credentials.
+          ...(typeof this.rclone.safeRemoteConfiguration==='function' ? {
+            configuration:this.rclone.safeRemoteConfiguration(name,provider==='google-drive'?'drive':'mega'),
+          } : {}),
         };
       });
     };
