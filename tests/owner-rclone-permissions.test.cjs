@@ -105,3 +105,28 @@ test('MCP permission tool and panel enforce owner identity, read-only and safe r
  assert.match(ui,/rcloneConfigEditable!==false/);
  assert.doesNotMatch(ui,/innerHTML=cfg|JSON\.stringify\(cfg\)/);
 });
+
+test('MEGA details are owner-bound and never imply permission grants',async()=>{
+ const id='123e4567-e89b-42d3-a456-426614174004';
+ const c={id,provider:'mega',ownerId:'oauth:owner-one',
+  externalAccountId:'mega_main',status:'active',credentialMode:'isolated-credential-vault'};
+ const calls=[];
+ const svc=new ConnectorsService({},{
+  isEnabled:()=>true,
+  load:async(owner,uid,provider,remote)=>{
+   calls.push([owner,uid,provider,remote]);
+   return '[mega_main]\ntype = mega\nuser = hidden-account\npass = hidden-password\n';
+  },
+ });
+ svc.repository={get:async()=>c};
+ await assert.rejects(()=>svc.rcloneConfiguration('oauth:other',id),/CONNECTOR_NOT_FOUND/);
+ assert.equal(calls.length,0);
+ const result=await svc.rcloneConfiguration('oauth:owner-one',id);
+ assert.equal(result.configuration.declaredScope,'unknown');
+ assert.equal(result.configuration.requestedAccess,'unknown');
+ assert.equal(result.configuration.providerGrantVerified,false);
+ assert.equal(result.configuration.rcloneConfigEditable,false);
+ assert.deepEqual(calls,[['oauth:owner-one',id,'mega','mega_main']]);
+ assert.equal(JSON.stringify(result).includes('hidden-password'),false);
+ assert.equal(JSON.stringify(result).includes('hidden-account'),false);
+});
