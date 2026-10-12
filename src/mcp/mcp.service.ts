@@ -16,6 +16,7 @@ import { assessPotentialFinancialLoss } from '../connectors/financial-risk-prefl
 import { ConnectorsService } from '../connectors/connectors.service';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
+import { githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 
@@ -216,6 +217,19 @@ export class McpService {
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
     },async({id})=>this.safeTool(()=>
       this.connections.disconnect(this.connectorOwner(),id)));
+
+    server.registerTool('nyx_connection_github_install_url',{
+      title:'Get official NestNyx GitHub App install page',
+      description:'Resolve the installed App registration from GitHub with a server-side App JWT. Returns only an official GitHub install URL; no credentials or grants.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id})=>this.safeTool(async()=>{
+      const connection=await this.connections.getOwned(this.connectorOwner(),id);
+      if(connection.provider!=='github'||connection.status!=='pending')
+        throw new Error('GITHUB_CONNECTION_NOT_PENDING');
+      return githubInstallationUrl();
+    }));
 
     server.registerTool('nyx_connection_begin_github',{
       title:'Authorize my GitHub App installation',

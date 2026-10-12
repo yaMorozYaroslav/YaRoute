@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v4.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v5.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -199,6 +199,16 @@ function render(connections){
          oauth.pathname!=='/login/oauth/authorize')throw Error('Invalid GitHub sign-in URL');
       await request('ui/open-link',{url:v.url});
       show('Complete GitHub authorization, return here, then refresh.');
+    }),button('Install NestNyx App',async()=>{
+      const result=await call('nyx_connection_github_install_url',{id:c.id});
+      if(typeof result?.url!=='string' || result.provider!=='github')
+        throw Error('GitHub installation link unavailable');
+      const install=new URL(result.url);
+      if(install.protocol!=='https:' || install.hostname!=='github.com' ||
+         !/^\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new$/.test(install.pathname) ||
+         install.search || install.hash)throw Error('Invalid GitHub App installation URL');
+      await request('ui/open-link',{url:result.url});
+      show('Install NestNyx on selected repositories, then return here and choose Authorize GitHub.');
     }),button('Installed GitHub Apps',async()=>{
       await request('ui/open-link',{url:'https://github.com/settings/installations'});
     }));
