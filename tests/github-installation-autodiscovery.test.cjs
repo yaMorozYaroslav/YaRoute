@@ -64,7 +64,7 @@ async function tryDiscovery(installations,accountName){
 test('GitHub setup starts OAuth without manual installation ID',async()=>{
  const restore=setup();
  try{
-   const row={id:'conn1',ownerId:'oauth:test',provider:'github',status:'pending'};
+   const row={id:'123e4567-e89b-42d3-a456-426614174000',ownerId:'oauth:test',provider:'github',status:'pending'};
    const repo={get:async()=>row,list:async()=>[row],save:async()=>{}};
    const svc=new ConnectorsService({});
    svc.repository=repo;
@@ -72,7 +72,7 @@ test('GitHub setup starts OAuth without manual installation ID',async()=>{
    svc.consumeQuota=async()=>{};
    const queries=[];
    svc.pool={query:async(s,args)=>{queries.push({s,args});return{rows:[],rowCount:1};}};
-   const consent=await svc.beginGithub('oauth:test','conn1');
+   const consent=await svc.beginGithub('oauth:test',row.id);
    assert.match(consent.url,/^https:\/\/github.com\/login\/oauth\/authorize\?/);
    assert.equal(queries.find(x=>x.s.includes('INSERT INTO nyx_connector_link_states')).args.at(-1),'auto');
    assert.ok(!consent.url.includes('installation_id'));
