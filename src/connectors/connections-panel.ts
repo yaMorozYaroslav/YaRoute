@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v6.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v7.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -46,6 +46,13 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .nyx-provider-list{padding:0 14px 14px}
 .nyx-provider-list .card{margin:5px 0}
 .provider-note{font-size:12px;opacity:.75}
+.nyx-remote{border-top:1px solid #92929255;padding:8px 0}
+.nyx-remote>summary{cursor:pointer;display:flex;align-items:center;gap:9px;padding:6px 0}
+.nyx-remote>summary strong{overflow-wrap:anywhere}
+.nyx-remote>summary .badge{margin-left:auto}
+.nyx-remote .nyx-remote-permissions{padding:7px 4px 11px}
+.nyx-remote .nyx-remote-permissions p{margin:5px 0}
+.nyx-remote>summary:focus-visible{outline:3px solid #18a56c;outline-offset:2px}
 </style></head>
 <body>
 <div id="nyx-quick">
@@ -91,6 +98,7 @@ const root=document.getElementById('connection-list');
 const rcloneRoot=document.getElementById('rclone-list');
 const rcloneStatus=document.getElementById('rclone-status');
 const status=document.getElementById('message');
+const remoteReadChecks=new Map();
 const pending=new Map();let rpcId=0,connecting;
 function request(method,params){
  return new Promise((resolve,reject)=>{
@@ -150,22 +158,54 @@ function renderRclone(data){
   document.getElementById(countId).textContent=remotes.length+' configured';
   if(!remotes.length){list.append(el('p','None configured.'));continue;}
   for(const remote of remotes){
-   const line=el('div');line.className='row card';
-   line.append(el('strong',remote.name),el('span','Configured · not connectivity-tested'));
-   line.lastChild.className='badge';
-   if(remote.aliases.length)line.append(el('small','Areas: '+remote.aliases.join(', ')));
-   const info=el('details');info.className='nyx-remote-permissions';
-   info.append(el('summary','Permissions & Rclone configuration'));
+   const line=el('details');line.className='nyx-remote card';
+   const head=el('summary');
+   const name=el('strong',remote.name);
+   const key=provider+':'+remote.name;
+   const previous=remoteReadChecks.get(key);
+   const badge=el('span',previous?.connectivity==='verified'?'Read verified':
+     previous?.connectivity==='failed'?'Read failed':
+     previous?.connectivity==='timeout'?'Timed out':'Not tested');
+   badge.className='badge';
+   head.append(name,badge);
+   line.append(head);
+   const info=el('div');info.className='nyx-remote-permissions';
+   if(remote.aliases.length)info.append(el('small','Areas: '+remote.aliases.join(', ')));
    const cfg=remote.configuration;
+   const scopes=['drive','drive.readonly','drive.file','drive.metadata.readonly'];
+   const scope=provider==='google-drive'&&scopes.includes(cfg?.declaredScope)
+     ?cfg.declaredScope:'unknown';
+   info.append(el('p','Configured scope: '+
+     (scope==='drive'?'Read/write requested (drive)':
+      scope==='drive.file'?'File-specific write requested (drive.file)':
+      scope==='drive.readonly'||scope==='drive.metadata.readonly'?'Read-only requested ('+scope+')':
+      'Unknown / provider-dependent')));
+   const statusLabel=el('p','Connectivity: '+(previous?.connectivity==='verified'?'Read access verified':
+     previous?.connectivity==='failed'?'Read check failed':
+     previous?.connectivity==='timeout'?'Read check timed out':'Not tested'));
+   statusLabel.setAttribute('aria-live','polite');
+   info.append(statusLabel);
+   info.append(el('p','Write access: Not tested'));
+   const test=button('Test connection',async()=>{
+     statusLabel.textContent='Connectivity: Testing read access…';
+     const result=await call('nyx_rclone_connection_test_read',{provider,name:remote.name});
+     if(result?.schema!=='nyx.storage.rclone.read-probe.v1' ||
+        result.provider!==provider||result.name!==remote.name ||
+        result.writeAccess!=='not-tested' ||
+        !['verified','failed','timeout'].includes(result.connectivity) ||
+        typeof result.checkedAt!=='string')throw Error('Invalid Rclone read probe result');
+     remoteReadChecks.set(key,result);
+     const label=result.connectivity==='verified'?'Read access verified':
+       result.connectivity==='timeout'?'Read check timed out':'Read check failed';
+     statusLabel.textContent='Connectivity: '+label;
+     badge.textContent=result.connectivity==='verified'?'Read verified':
+       result.connectivity==='timeout'?'Timed out':'Read failed';
+   });
+   info.append(test);
    if(cfg?.inspection==='available'){
-     info.append(el('p','Source: server Rclone configuration (metadata only; editing disabled).'));
+     info.append(el('p','Configuration source: server Rclone settings (read-only display).'));
      if(provider==='google-drive'){
-       const scopes=['drive.readonly','drive.metadata.readonly','drive.file','drive'];
-       const scope=scopes.includes(cfg.declaredScope)?cfg.declaredScope:'unknown';
-       info.append(el('p','Declared Google OAuth scope: '+scope));
-       info.append(el('p','Requested access: '+
-         (scope==='drive.readonly'||scope==='drive.metadata.readonly'?'Read-only':
-          scope==='drive'||scope==='drive.file'?'Write-capable scope requested (not verified)':'Unknown; Rclone may use its default scope')));
+       info.append(el('p','Declared OAuth scope: '+scope));
        info.append(el('p','Shared Drive configured: '+(cfg.sharedDriveConfigured===true?'Yes':'No')));
        info.append(el('p','Root folder restriction configured: '+(cfg.rootFolderConfigured===true?'Yes':'No')));
        info.append(el('p','Service account configured: '+(cfg.serviceAccountConfigured===true?'Yes':'No')));
@@ -175,7 +215,7 @@ function renderRclone(data){
    }else{
      info.append(el('p','Configuration options unavailable; only the remote name is known.'));
    }
-   info.append(el('small','Configured does not mean connected, provider-authorized, or write-capable. Change settings only in Rclone.'));
+   info.append(el('small','Read checks list the remote root. They do not test writing, deleting, or actual item-level grants. Change settings only in Rclone.'));
    line.append(info);
    list.append(line);
   }
