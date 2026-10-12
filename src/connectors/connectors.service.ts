@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { googleCallbackUrl, googleOAuthConfiguration, revokeGoogleDriveProfile } from './google-drive-oauth-config';
 import { Pool } from 'pg';
 import { StorageService } from '../storage/storage.service';
-import { RcloneCredentialVaultService } from '../storage/rclone-credential-vault.service';
+import { RcloneCredentialVaultService, summarizeOwnedRcloneProfile } from '../storage/rclone-credential-vault.service';
 import { ConnectorRegistry } from './connector-registry';
 import { PostgresConnectorRepository } from './postgres-connector-repository';
 
@@ -350,6 +350,38 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     // Reauthorizing an active connection is allowed; its owner remains unchanged.
     if(!q.rowCount && c.status!=='active')throw new Error('GOOGLE_CONNECTION_NOT_ACTIVATED');
     return {id,status:'active',provider:'google-drive'};
+  }
+
+  /**
+   * Read-only configuration details for one authenticated owner's credential.
+   * Public tenants can never inspect a process-global/private Rclone profile.
+   */
+  async rcloneConfiguration(ownerId:string,id:string) {
+    const owner=this.owner(ownerId);
+    const c=await this.owned(owner,id);
+    if((c.provider!=='google-drive'&&c.provider!=='mega')||c.status==='revoked'){
+      throw new Error('RCLONE_CONNECTION_NOT_AVAILABLE');
+    }
+    if(c.credentialMode!=='isolated-credential-vault'){
+      throw new Error('PRIVATE_RCLONE_DETAILS_NOT_OWNER_ISOLATED');
+    }
+    if(!this.vault?.isEnabled())throw new Error('RCLONE_VAULT_NOT_CONFIGURED');
+    if(process.env.NYX_DEPLOYMENT_MODE==='public'&&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED!=='true')
+      throw new Error('PUBLIC_RCLONE_VAULT_REQUIRED');
+    const profile=await this.vault.load(owner,c.id,c.provider,c.externalAccountId);
+    return {
+      schema:'nyx.storage.rclone.configuration.v1',
+      connectionId:c.id,
+      provider:c.provider,
+      connectionType:'isolated-credential-vault',
+      configuration:profile
+        ? summarizeOwnedRcloneProfile(c.provider,c.externalAccountId,profile)
+        : {source:'owner-scoped-encrypted-vault',inspection:'not-provisioned',
+           declaredScope:'unknown',requestedAccess:'unknown',
+           sharedDriveConfigured:false,rootFolderConfigured:false,
+           serviceAccountConfigured:false,providerGrantVerified:false,rcloneConfigEditable:false},
+    };
   }
 
   async testRclone(ownerId: string, id: string) {
