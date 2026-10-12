@@ -16,6 +16,51 @@ export class NyxCommandExecutor {
     const profile = await this.profiles.apply(locator, cli, hash);
     const plan = this.resolver.resolve(profile.cli, request);
 
+    if (plan.contract.adapter === 'context.help.v1') {
+      // Head/YaRoCLI is authoritative; this is only a read-only presentation.
+      const commands = Object.entries(profile.cli.commands).map(([name, definition]) => ({
+        name,
+        syntax: 'nyx ' + name,
+        aliases: name === 'hel' ? ['help', ...(definition.aliases ?? [])] : (definition.aliases ?? []),
+        purpose: typeof definition.purpose === 'string'
+          ? definition.purpose.slice(0, 900) : 'Purpose not defined',
+        executable: Boolean(definition.execution),
+        status: definition.execution ? 'runtime-contract-available' : 'canonical-only',
+      }));
+      const rules = profile.cli.scope_rules;
+      const rule = (field: string) => {
+        if (!rules || typeof rules !== 'object') return undefined;
+        const value = (rules as Record<string, unknown>)[field];
+        return typeof value === 'string' ? value.slice(0, 1200) : undefined;
+      };
+      return {
+        schema: plan.contract.response,
+        status: 'COMPLETE',
+        canonical_command: 'hel',
+        syntax: {canonical:'Nyxhel',spaced:'nyx hel',compatibility:'nyx help'},
+        command_count: commands.length,
+        commands,
+        scope_rules: {
+          default: rule('default'),
+          chain: rule('chain_scope_rule'),
+          local_option: 'o<modifiers> (command-local, when supported)',
+          inherited_option: '<modifiers>o (chain-inherited, when supported)',
+        },
+        notes: [
+          'Command presence in Head does not imply backend execution support.',
+          'Global scope does not grant access to otherwise unauthorized sources.',
+          'Help is read-only and does not create or change handoffs, seeds, or core bundles.',
+        ],
+        metadata: {
+          command: plan.name,
+          cli: { version: cli.version, sha256: hash, profile_sha256: profile.hash },
+          canonical: locator.canonical,
+          source: 'verified-current-head-cli',
+          mutation: 'none',
+        },
+      };
+    }
+
     if (plan.contract.adapter === 'context.summarize.v1') {
       const handoffRef = await this.resources.resolveHandoffs(locator, plan);
       const fib = await this.handoffs.summarize(owner, plan.conversationId!, handoffRef, plan.payload!);
