@@ -130,7 +130,8 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       (process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' && this.vault?.isEnabled());
     return (await this.policy().list(ownerId))
       .filter(c => c.provider === 'github' ||
-        (showRclone && (c.provider === 'google-drive' || c.provider === 'mega')))
+        (showRclone && (c.provider === 'google-drive' || c.provider === 'mega') &&
+          (process.env.NYX_DEPLOYMENT_MODE !== 'public' || c.credentialMode === 'isolated-credential-vault')))
       .map(connection => this.view(connection));
   }
   view(c: ConnectorConnection) {
@@ -141,9 +142,9 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       resources: resources ?? [], status,
       availableCapabilities: this.enabledCapabilities(provider),
       ...(provider === 'google-drive' || provider === 'mega'
-        ? { connectionType: this.vault?.isEnabled() ? 'isolated-credential-vault' : 'private-rclone-reference',
+        ? { connectionType: c.credentialMode === 'isolated-credential-vault' ? 'isolated-credential-vault' : 'private-rclone-reference',
             configurationChanged: false,
-            verification: this.vault?.isEnabled() ? 'credentials_unverified' : 'configured_not_live_verified' } : {}),
+            verification: c.credentialMode === 'isolated-credential-vault' ? 'credentials_unverified' : 'configured_not_live_verified' } : {}),
     };
   }
   private enabledCapabilities(provider: ConnectorProvider): ConnectorCapability[] {
@@ -178,7 +179,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
    * no credentials, config bytes or provider tokens are persisted here.
    */
   async createRclone(ownerId: string, provider: 'google-drive' | 'mega',
-    remoteName: string, displayName: string) {
+    remoteName: string, displayName: string, existingPrivate = false) {
     const owner = this.owner(ownerId);
     if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true' || !this.vault?.isEnabled())) {
@@ -188,7 +189,10 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
         typeof remoteName !== 'string' || !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remoteName)) {
       throw new Error('RCLONE_REMOTE_INVALID');
     }
-    if (!this.vault?.isEnabled()) {
+    if(existingPrivate && process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    }
+    if (existingPrivate || !this.vault?.isEnabled()) {
       const inventory = await this.storage.rcloneConnections();
       if (!inventory.remotes.some(remote => remote.provider === provider && remote.name === remoteName)) {
         throw new Error('RCLONE_REMOTE_NOT_CONFIGURED');
@@ -206,6 +210,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       id: randomUUID(), ownerId: owner, provider, displayName: validateConnectionName(displayName),
       externalAccountId: remoteName, capabilities: [], providerCapabilities: [],
       resources: [], status: 'pending',
+      credentialMode: existingPrivate || !this.vault?.isEnabled() ? 'private-rclone-reference' : 'isolated-credential-vault',
     };
     await this.repository!.save(connection);
     return this.view(connection);
@@ -215,7 +220,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   async recordMegaAccessRequest(ownerId:string,id:string,mode:'read'|'manage') {
     if(mode!=='read' && mode!=='manage')throw new Error('MEGA_PERMISSION_INVALID');
     const c=await this.owned(this.owner(ownerId),id);
-    if(c.provider!=='mega'||c.status==='revoked')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    if(c.provider!=='mega'||c.status==='revoked'||c.credentialMode!=='isolated-credential-vault')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
     // Store intent separately from executable permissions: selecting "manage"
     // does not unlock writes. Current public Rclone supports probes only.
     await this.db().query(`INSERT INTO nyx_mega_access_prefs
@@ -233,7 +238,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       throw new Error('MEGA_SELF_SERVICE_DISABLED');
     }
     const c=await this.owned(this.owner(ownerId),id);
-    if(c.provider!=='mega' || c.status==='revoked') throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    if(c.provider!=='mega' || c.status==='revoked'||c.credentialMode!=='isolated-credential-vault') throw new Error('MEGA_CONNECTION_UNAVAILABLE');
     const base=new URL(process.env.NYX_PUBLIC_URL || '');
     if(base.protocol!=='https:' || base.username || base.password || base.pathname!=='/' ||
        base.search || base.hash) throw new Error('MEGA_PUBLIC_URL_INVALID');
@@ -270,7 +275,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     const q=await this.db().query('SELECT owner_id,connection_id FROM nyx_mega_setup_states WHERE state_digest=$1 AND expires_at>now()', [digest]);
     if(q.rowCount!==1)throw new Error('MEGA_SETUP_STATE_EXPIRED');
     const c=await this.owned(q.rows[0].owner_id,q.rows[0].connection_id);
-    if(c.provider!=='mega' || c.status==='revoked')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    if(c.provider!=='mega' || c.status==='revoked'||c.credentialMode!=='isolated-credential-vault')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
     return {remote:c.externalAccountId};
   }
 
@@ -285,7 +290,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     const q=await this.db().query('DELETE FROM nyx_mega_setup_states WHERE state_digest=$1 AND expires_at>now() RETURNING owner_id,connection_id',[digest]);
     if(q.rowCount!==1)throw new Error('MEGA_SETUP_STATE_EXPIRED');
     const c=await this.owned(q.rows[0].owner_id,q.rows[0].connection_id);
-    if(c.provider!=='mega'||c.status==='revoked')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
+    if(c.provider!=='mega'||c.status==='revoked'||c.credentialMode!=='isolated-credential-vault')throw new Error('MEGA_CONNECTION_UNAVAILABLE');
     return {ownerId:c.ownerId,connectionId:c.id,remote:c.externalAccountId};
   }
 
@@ -298,7 +303,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     const owner=this.owner(ownerId);
     if (!this.vault?.isEnabled()) throw new Error('RCLONE_VAULT_NOT_CONFIGURED');
     const c=await this.owned(owner,id);
-    if(c.provider!=='google-drive' || c.status==='revoked') throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
+    if(c.provider!=='google-drive' || c.status==='revoked'||c.credentialMode!=='isolated-credential-vault') throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
     const {clientId}=googleOAuthConfiguration();
     await this.db().query('DELETE FROM nyx_google_drive_oauth_states WHERE expires_at<=now()');
     const state=randomBytes(32).toString('base64url');
@@ -332,13 +337,13 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     if(q.rowCount!==1)throw new Error('GOOGLE_OAUTH_STATE_EXPIRED');
     const row=q.rows[0];
     const c=await this.owned(row.owner_id,row.connection_id);
-    if(c.provider!=='google-drive'||c.status==='revoked')throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
+    if(c.provider!=='google-drive'||c.status==='revoked'||c.credentialMode!=='isolated-credential-vault')throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
     return {ownerId:c.ownerId,connectionId:c.id,remote:c.externalAccountId,
       verifier:String(row.code_verifier)};
   }
   async activateGoogleDrive(ownerId:string,id:string) {
     const c=await this.owned(ownerId,id);
-    if(c.provider!=='google-drive'||c.status==='revoked')throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
+    if(c.provider!=='google-drive'||c.status==='revoked'||c.credentialMode!=='isolated-credential-vault')throw new Error('GOOGLE_CONNECTION_UNAVAILABLE');
     const q=await this.db().query(
       "UPDATE nyx_connector_connections SET status='active',updated_at=now() WHERE id=$1 AND owner_id=$2 AND provider='google-drive' AND status='pending' RETURNING id",
       [id,ownerId]);
@@ -357,7 +362,8 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
         (connection.provider !== 'google-drive' && connection.provider !== 'mega')) {
       throw new Error('RCLONE_CONNECTION_NOT_AVAILABLE');
     }
-    if (this.vault?.isEnabled()) {
+    if(connection.credentialMode==='isolated-credential-vault') {
+      if(!this.vault?.isEnabled())throw new Error('RCLONE_VAULT_NOT_CONFIGURED');
       const profile=await this.vault.load(ownerId,connection.id,connection.provider,
         connection.externalAccountId);
       if (!profile) return {connectionId:connection.id,
@@ -386,6 +392,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       }
       return {connectionId:connection.id,...probe};
     }
+    if(process.env.NYX_DEPLOYMENT_MODE==='public')throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
     return { connectionId: connection.id,
       ...await this.storage.testRcloneConnection(connection.provider, connection.externalAccountId) };
   }
@@ -394,7 +401,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   async listRclone(ownerId:string,id:string,folder:string=''){
     const owner=this.owner(ownerId);
     const connection=await this.owned(owner,id);
-    if(connection.status!=='active' ||
+    if(connection.status!=='active' || connection.credentialMode!=='isolated-credential-vault' ||
        (connection.provider!=='mega' && connection.provider!=='google-drive')){
       throw new Error('STORAGE_CONNECTION_NOT_ACTIVE');
     }
@@ -463,13 +470,13 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     let providerRevoked=false;
     // Best effort provider-side Google token revocation happens *before*
     // local ciphertext destruction. Errors never expose tokens to callers.
-    if(previous.provider==='google-drive' && this.vault?.isEnabled()){
+    if(previous.provider==='google-drive' && previous.credentialMode==='isolated-credential-vault' && this.vault?.isEnabled()){
       const profile=await this.vault.load(ownerId,id,'google-drive',previous.externalAccountId);
       if(profile)providerRevoked=await revokeGoogleDriveProfile(profile);
     }
     if(previous.provider==='google-drive'||previous.provider==='mega'){
       // If vault deletion fails, do not claim unlink completed.
-      await this.vault?.revoke(ownerId,id);
+      if(previous.credentialMode==='isolated-credential-vault')await this.vault?.revoke(ownerId,id);
     }
     await this.db().query(
       `UPDATE nyx_connector_connections SET status='revoked',
