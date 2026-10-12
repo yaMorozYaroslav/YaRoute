@@ -44,20 +44,19 @@ test('help profile declares a nonmutating adapter bound only to existing canonic
  assert.equal(loadedProfile.commands.hel.pathsVisible,false);
  assert.deepEqual(loadedProfile.commands.hel.sources,{basic:[],normal:[],deep:[]});
  const {bound,resolver}=make();
- for(const command of ['hel','help','HeLp']){
+ for(const command of ['hel','HEL','HeL']){
   const plan=resolver.resolve(bound,{command});
   assert.equal(plan.name,'hel');
   assert.equal(plan.contract.adapter,'context.help.v1');
  }
- assert.throws(()=>resolver.resolve(bound,{command:'help',args:['key']}),/ARGUMENTS_NOT_ALLOWED/);
- assert.throws(()=>resolver.resolve(bound,{command:'help',args:['oGN']}),/ARGUMENTS_NOT_ALLOWED/);
- assert.throws(()=>resolver.resolve(bound,{command:'help',payload:{title:'x',summary:'y'}}),/PAYLOAD_NOT_SUPPORTED/);
+ assert.throws(()=>resolver.resolve(bound,{command:'help',args:['key']}),/UNKNOWN_COMMAND/);
+ assert.throws(()=>resolver.resolve(bound,{command:'help',args:['oGN']}),/UNKNOWN_COMMAND/);
+ assert.throws(()=>resolver.resolve(bound,{command:'help',payload:{title:'x',summary:'y'}}),/UNKNOWN_COMMAND/);
 });
-test('real hel and help return consistent, canonical executable inventory without writing',async()=>{
+test('only canonical short key hel returns full executable inventory without writing',async()=>{
  const {executor}=make();
  const canonical=await executor.execute({command:'hel'});
- const compat=await executor.execute({command:'help'});
- assert.deepEqual(compat,canonical);
+ await assert.rejects(()=>executor.execute({command:'help'}),/UNKNOWN_COMMAND/);
  assert.equal(canonical.status,'COMPLETE');
  assert.match(canonical.markdown,/# Nyx CLI — canonical command reference/);
  assert.match(canonical.markdown,/nyx hel/);
@@ -74,7 +73,8 @@ test('real hel and help return consistent, canonical executable inventory withou
  assert.equal(canonical.scope_rules.default,'local and omitted');
  assert.equal(canonical.scope_rules.chain,'command local modifiers stop at x');
  assert.equal(canonical.commands.find(x=>x.name==='hel').executable,true);
- assert.deepEqual(canonical.commands.find(x=>x.name==='hel').aliases,['help']);
+ assert.deepEqual(canonical.commands.find(x=>x.name==='hel').aliases,[]);
+ assert.equal(canonical.syntax.label,'Help');
  assert.equal(canonical.commands.find(x=>x.name==='ini').executable,true);
  assert.equal(canonical.commands.find(x=>x.name==='sum').executable,true);
  assert.equal(canonical.commands.find(x=>x.name==='key').executable,false);
@@ -91,16 +91,17 @@ test('help cannot invent a canonical command or bypass unsafe bindings',()=>{
  assert.throws(()=>resolver.resolve(unsafe,{command:'hel'}),/READ_CONTRACT_UNSAFE/);
  const fake={...bound,commands:{...bound.commands,
   hel:{purpose:'unsafe',execution:{...bound.commands.hel.execution,pathsVisible:true}}}};
- assert.throws(()=>resolver.resolve(fake,{command:'help'}),/HELP_CONTRACT_UNSAFE/);
+ assert.throws(()=>resolver.resolve(fake,{command:'hel'}),/HELP_CONTRACT_UNSAFE/);
 });
-test('MCP offers a read-only explicit nyx_help tool without altering Head definitions',()=>{
+test('MCP exposes the short key nyx_hel only; full Help is descriptive',()=>{
  const src=repo('src/mcp/mcp.service.ts');
- const start=src.indexOf("server.registerTool(\n      'nyx_help'");
+ const start=src.indexOf("server.registerTool(\n      'nyx_hel'");
  const end=src.indexOf("server.registerTool(\n      'nyx_execute'",start);
  assert.ok(start>=0&&end>start);
  assert.match(src.slice(start,end),/readOnlyHint: true/);
  assert.match(src.slice(start,end),/this\.commands\.execute\(\{ command: 'hel' \}/);
- assert.match(src,/help: \{ tool: 'nyx_help', command: 'hel'/);
+ assert.match(src,/hel: \{ tool: 'nyx_hel', command: 'hel'/);
+ assert.doesNotMatch(src,/'nyx_help'/);
 });
 
 test('help covers every canonical command in Head order, including missing-order additions',async()=>{
@@ -130,7 +131,7 @@ test('help covers every canonical command in Head order, including missing-order
    sum:{...cli.commands.sum,execution:loadedProfile.commands.sum},
   },
  },hash:'test-profile'});
- const result=await executor.execute({command:'help'});
+ const result=await executor.execute({command:'hel'});
  assert.equal(result.command_count,21);
  assert.deepEqual(result.commands.map(x=>x.name),all);
  assert.ok(result.commands.every(x=>result.markdown.includes('nyx '+x.name)));
