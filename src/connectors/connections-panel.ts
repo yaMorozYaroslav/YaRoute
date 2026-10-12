@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v5.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v6.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -154,6 +154,29 @@ function renderRclone(data){
    line.append(el('strong',remote.name),el('span','Configured · not connectivity-tested'));
    line.lastChild.className='badge';
    if(remote.aliases.length)line.append(el('small','Areas: '+remote.aliases.join(', ')));
+   const info=el('details');info.className='nyx-remote-permissions';
+   info.append(el('summary','Permissions & Rclone configuration'));
+   const cfg=remote.configuration;
+   if(cfg?.inspection==='available'){
+     info.append(el('p','Source: server Rclone configuration (metadata only; editing disabled).'));
+     if(provider==='google-drive'){
+       const scopes=['drive.readonly','drive.metadata.readonly','drive.file','drive'];
+       const scope=scopes.includes(cfg.declaredScope)?cfg.declaredScope:'unknown';
+       info.append(el('p','Declared Google OAuth scope: '+scope));
+       info.append(el('p','Requested access: '+
+         (scope==='drive.readonly'||scope==='drive.metadata.readonly'?'Read-only':
+          scope==='drive'||scope==='drive.file'?'Write-capable scope requested (not verified)':'Unknown; Rclone may use its default scope')));
+       info.append(el('p','Shared Drive configured: '+(cfg.sharedDriveConfigured===true?'Yes':'No')));
+       info.append(el('p','Root folder restriction configured: '+(cfg.rootFolderConfigured===true?'Yes':'No')));
+       info.append(el('p','Service account configured: '+(cfg.serviceAccountConfigured===true?'Yes':'No')));
+     }else{
+       info.append(el('p','MEGA remote: account permissions cannot be inferred from Rclone config.'));
+     }
+   }else{
+     info.append(el('p','Configuration options unavailable; only the remote name is known.'));
+   }
+   info.append(el('small','Configured does not mean connected, provider-authorized, or write-capable. Change settings only in Rclone.'));
+   line.append(info);
    list.append(line);
   }
  }
