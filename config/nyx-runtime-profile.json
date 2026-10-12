@@ -100,6 +100,42 @@
             "visible": true,
             "when": "targeted",
             "perTarget": false
+          },
+          {
+            "key": "todo_30",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false,
+            "forTarget": "NoteFlow",
+            "ref": {
+              "area": "MAIN",
+              "path": "Documents/Notepad/0_active/todo_30.md"
+            }
+          },
+          {
+            "key": "todo_90",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false,
+            "forTarget": "NoteFlow",
+            "ref": {
+              "area": "MAIN",
+              "path": "Documents/Notepad/1_always/todo_90.md"
+            }
+          },
+          {
+            "key": "togive",
+            "required": true,
+            "visible": true,
+            "when": "targeted",
+            "perTarget": false,
+            "forTarget": "NoteFlow",
+            "ref": {
+              "area": "MAIN",
+              "path": "Documents/Notepad/0_active/togive.md"
+            }
           }
         ],
         "deep": [
@@ -175,5 +211,31 @@
       },
       "response": "nyx.context.v1"
     }
-  }
+  },
+  "keySources": [
+    {
+      "key": "temp_paths",
+      "ref": {
+        "area": "MAIN",
+        "path": "🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_paths.json"
+      },
+      "sha256": "e2a39572d91c30d1bc5cb0736ad4ed9eda07696453339750c2daa7f63ff49d89"
+    },
+    {
+      "key": "temp_nyxcli",
+      "ref": {
+        "area": "MAIN",
+        "path": "🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_nyxcli.json"
+      },
+      "sha256": "766bbe091201ad466ecd35d103268ff5ceb9bef90e771d47c317e6a7431cc7ef"
+    },
+    {
+      "key": "active_key",
+      "ref": {
+        "area": "MAIN",
+        "path": "🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_files/temp_key_20260929_0605.json"
+      },
+      "sha256": "206c2c19e000ea5dc4969279e1d55e8afeb76d50c080dfc433f99f40dffe4c18"
+    }
+  ]
 }
