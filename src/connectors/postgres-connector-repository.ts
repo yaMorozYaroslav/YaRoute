@@ -22,6 +22,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       provider_capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
       resources jsonb NOT NULL DEFAULT '[]'::jsonb,
       status text NOT NULL,
+      credential_mode text NOT NULL DEFAULT 'private-rclone-reference',
       updated_at timestamptz NOT NULL DEFAULT now(),
       CONSTRAINT nyx_connector_owner CHECK (length(owner_id) > 0),
       CONSTRAINT nyx_connector_status CHECK (status IN ('pending','active','revoked'))
@@ -29,6 +30,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     // Non-destructive evolution of the early connector metadata table. Legacy names use
     // immutable IDs temporarily, so the user can rename them later without changing IDs.
     await this.pool.query('ALTER TABLE nyx_connector_connections ADD COLUMN IF NOT EXISTS display_name text');
+    await this.pool.query("ALTER TABLE nyx_connector_connections ADD COLUMN IF NOT EXISTS credential_mode text NOT NULL DEFAULT 'private-rclone-reference'");
     await this.pool.query("ALTER TABLE nyx_connector_connections ADD COLUMN IF NOT EXISTS provider_capabilities jsonb NOT NULL DEFAULT '[]'::jsonb");
     await this.pool.query("ALTER TABLE nyx_connector_connections ADD COLUMN IF NOT EXISTS resources jsonb NOT NULL DEFAULT '[]'::jsonb");
     await this.pool.query('UPDATE nyx_connector_connections SET display_name = id WHERE display_name IS NULL');
@@ -52,6 +54,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       providerCapabilities: (row.provider_capabilities ?? []) as ConnectorCapability[],
       resources: (row.resources ?? []) as ConnectorConnection['resources'],
       status: row.status as ConnectorConnection['status'],
+      credentialMode: row.credential_mode === 'isolated-credential-vault' ? 'isolated-credential-vault' : 'private-rclone-reference',
     };
   }
 
@@ -70,6 +73,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     if (!connection.id || !connection.ownerId || !connection.externalAccountId ||
       !['github','google-drive','gitlab','mega','heroku'].includes(connection.provider) ||
       !['pending','active','revoked'].includes(connection.status) ||
+      !['private-rclone-reference','isolated-credential-vault'].includes(connection.credentialMode ?? 'private-rclone-reference') ||
       !Array.isArray(connection.capabilities) ||
       !connection.capabilities.every(value => known.includes(value)) ||
       !Array.isArray(connection.providerCapabilities) ||
@@ -79,20 +83,21 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     const displayName = validateConnectionName(connection.displayName);
     const resources = validateResourceRules(connection.provider,connection.resources ?? []);
     const result = await this.pool.query(`INSERT INTO nyx_connector_connections
-      (id,owner_id,display_name,provider,external_account_id,installation_id,capabilities,provider_capabilities,resources,status)
-      VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10)
+      (id,owner_id,display_name,provider,external_account_id,installation_id,capabilities,provider_capabilities,resources,status,credential_mode)
+      VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)
       ON CONFLICT (id) DO UPDATE SET
         display_name=EXCLUDED.display_name,
         provider=EXCLUDED.provider,external_account_id=EXCLUDED.external_account_id,
         installation_id=EXCLUDED.installation_id,capabilities=EXCLUDED.capabilities,
         provider_capabilities=EXCLUDED.provider_capabilities,
         resources=EXCLUDED.resources,
-        status=EXCLUDED.status,updated_at=now()
+        status=EXCLUDED.status,credential_mode=EXCLUDED.credential_mode,updated_at=now()
       WHERE nyx_connector_connections.owner_id=EXCLUDED.owner_id
       RETURNING id`,
       [connection.id,connection.ownerId,displayName,connection.provider,connection.externalAccountId,
         connection.installationId ?? null,JSON.stringify(connection.capabilities),
-        JSON.stringify(connection.providerCapabilities),JSON.stringify(resources),connection.status]);
+        JSON.stringify(connection.providerCapabilities),JSON.stringify(resources),connection.status,
+        connection.credentialMode ?? 'private-rclone-reference']);
     if (!result.rowCount) throw new Error('CONNECTOR_OWNER_CONFLICT');
   }
 }
