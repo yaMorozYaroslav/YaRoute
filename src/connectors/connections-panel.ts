@@ -303,7 +303,7 @@ async function showLegacyRemotes(){
         const name=label.value.trim();
         if(!name)throw Error('Enter a display name');
         await call('nyx_rclone_connection_link',{
-          provider:remote.provider,remoteName:remote.name,name,
+          provider:remote.provider,remoteName:remote.name,name,existingPrivate:true,
         });
         await refresh();
         await showLegacyRemotes();
