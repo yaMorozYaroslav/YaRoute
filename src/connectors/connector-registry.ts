@@ -39,6 +39,8 @@ export interface ConnectorConnection {
   resources?: ConnectorResourceRule[]; // No selected resources means deny resource operations.
   status: 'pending' | 'active' | 'revoked';
   installationId?: string;
+  /** Durable source of Rclone credentials. Missing historical values are private references. */
+  credentialMode?: 'private-rclone-reference' | 'isolated-credential-vault';
 }
 export interface ConnectorRepository {
   get(id: string): Promise<ConnectorConnection | null>;
