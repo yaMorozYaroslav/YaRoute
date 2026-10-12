@@ -16,7 +16,7 @@ function config(t){
 }
 function fixture(){
  const row={id,ownerId:'oauth:alice',provider:'google-drive',
-   displayName:'Alice Drive',externalAccountId:'alice_drive',status:'pending',
+   displayName:'Alice Drive',externalAccountId:'alice_drive',status:'pending',credentialMode:'isolated-credential-vault',
    capabilities:[],providerCapabilities:[],resources:[]};
  const states=new Map();const writes=[];let scopes=0;
  const vault={isEnabled:()=>true,
