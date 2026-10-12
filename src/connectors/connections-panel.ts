@@ -3,7 +3,7 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v8.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v9.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -359,6 +359,32 @@ function render(connections){
      access.append(el('p','Provider scope: see private Rclone declared configuration; grant unverified.'));
    }
    access.append(el('p','Connection record: '+(c.status==='active'?'Active; test access to verify reachability':'Pending setup')));
+   if(vault){
+     const settings=el('div');settings.className='nyx-rclone-owner-permissions';
+     access.append(button('Show configured Drive/MEGA permissions',async()=>{
+       const info=await call('nyx_rclone_connection_config',{id:c.id});
+       if(info?.schema!=='nyx.storage.rclone.configuration.v1' ||
+          info.connectionId!==c.id || info.provider!==c.provider ||
+          info.connectionType!=='isolated-credential-vault')throw Error('Invalid permission summary');
+       const cfg=info.configuration;
+       if(!cfg || cfg.source!=='owner-scoped-encrypted-vault' ||
+          cfg.rcloneConfigEditable!==false || cfg.providerGrantVerified!==false)
+         throw Error('Unsafe permission summary');
+       settings.replaceChildren();
+       const scopes=['drive','drive.file','drive.readonly','drive.metadata.readonly'];
+       const scope=scopes.includes(cfg.declaredScope)?cfg.declaredScope:'unknown';
+       settings.append(el('p','Declared Rclone scope: '+scope));
+       settings.append(el('p','Requested access: '+
+         (scope==='drive.readonly'||scope==='drive.metadata.readonly'?'Read-only':
+          scope==='drive'||scope==='drive.file'?'Write-capable scope requested (not a verified grant)':'Unknown')));
+       if(c.provider==='google-drive'){
+         settings.append(el('p','Shared Drive configured: '+(cfg.sharedDriveConfigured===true?'Yes':'No')));
+         settings.append(el('p','Root folder binding configured: '+(cfg.rootFolderConfigured===true?'Yes':'No')));
+         settings.append(el('p','Service account configured: '+(cfg.serviceAccountConfigured===true?'Yes':'No')));
+       }else settings.append(el('p','MEGA permissions cannot be inferred from Rclone configuration.'));
+       settings.append(el('small','Read-only; edits require reconfiguring and reauthorizing the owner account. Provider grant and actual file permissions remain unverified.'));
+     }),settings);
+   }
    box.append(access);
    const edit=el('div');edit.className='row';
    const name=input(c.displayName);
