@@ -6,7 +6,7 @@ import { NyxResourceStore, sha256 } from './resource-store.service';
 @Injectable()
 export class NyxExecutionProfileService {
   constructor(private readonly store: NyxResourceStore) {}
-  async apply(locator: Locator, cli: Cli, cliHash: string): Promise<{ cli: Cli; hash?: string }> {
+  async apply(locator: Locator, cli: Cli, cliHash: string): Promise<{ cli: Cli; hash?: string; keyReceipts?: Array<{ key: string; sha256: string }> }> {
     const deployedPath = process.env.NYX_RUNTIME_PROFILE_PATH ?? (process.env.DYNO ? 'config/nyx-runtime-profile.json' : undefined);
     if (deployedPath) {
       try { return await this.applyText(await readFile(deployedPath, 'utf8'), cli, cliHash); }
