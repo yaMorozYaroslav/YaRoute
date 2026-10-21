@@ -318,21 +318,21 @@ export class McpService {
       this.limitedConnectionApi(id,()=>this.github.jobs(this.connectorOwner(),id,repo,runId))));
 
     // GitHub API writes are restricted to owner-selected repositories and
-    // review-only nyx/* branches. No workflow dispatch, merges or hosting API.
+    // working branches other than main/master/default. No workflow dispatch, merges or hosting API.
     server.registerTool('nyx_connection_github_branch_create',{
-      title:'Create a NYX GitHub review branch',
-      description:'Create a nyx/* branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
+      title:'Create a GitHub working branch',
+      description:'Create a valid working branch other than main/master/default HEAD in one authorized repository; never alters the default branch.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100)}),
+        branch:z.string().min(1).max(100)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.githubWrites.createBranch(this.connectorOwner(),id,repo,branch))));
 
     server.registerTool('nyx_connection_github_commit_file',{
-      title:'Commit one file on a NYX review branch',
-      description:'Create or update one UTF-8 file on an existing nyx/* branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
+      title:'Commit one file on a GitHub working branch',
+      description:'Create or update one UTF-8 file on an existing working branch other than main/master/default. Workflow, hosting, CI script, credential and deployment files are blocked.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100),path:z.string().min(1).max(400),
+        branch:z.string().min(1).max(100),path:z.string().min(1).max(400),
         content:z.string().max(65536),message:z.string().min(1).max(160),
         sha:z.string().regex(/^[a-f0-9]{40}$/).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
@@ -340,10 +340,10 @@ export class McpService {
       this.limitedConnectionApi(id,()=>this.githubWrites.commitFile(this.connectorOwner(),id,repo,branch,path,content,message,sha))));
 
     server.registerTool('nyx_connection_github_draft_pr',{
-      title:'Open a draft PR for a NYX branch',
-      description:'Open a draft pull request from a nyx/* branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
+      title:'Open a draft PR from a working branch',
+      description:'Open a draft pull request from a working branch other than main/master/default. No merging, deployments or workflow runs are authorized.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100),title:z.string().min(1).max(200),
+        branch:z.string().min(1).max(100),title:z.string().min(1).max(200),
         body:z.string().max(10000).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch,title,body})=>this.safeTool(()=>
