@@ -116,3 +116,16 @@ test('Issue tool honors GitHub App issues:write and exact repository',async()=>{
  await assert.rejects(()=>api.createIssue('oauth:bob','conn','org/repo','Investigate'),
   /CONNECTOR_NOT_FOUND/);
 });
+
+test('GitHub MCP tool contracts accept short working branches and describe protection',()=>{
+ const {readFileSync}=require('node:fs');
+ const {join}=require('node:path');
+ const src=readFileSync(join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
+ const start=src.indexOf("server.registerTool('nyx_connection_github_branch_create'");
+ const end=src.indexOf("server.registerTool('nyx_connection_github_issue_create'",start);
+ assert.ok(start>=0 && end>start);
+ const commands=src.slice(start,end);
+ assert.equal((commands.match(/branch:z\.string\(\)\.min\(1\)\.max\(100\)/g)||[]).length,3);
+ assert.doesNotMatch(commands,/nyx\/\*/);
+ assert.match(commands,/main\/master\/default/);
+});
