@@ -34,22 +34,29 @@ test('GitHub branch creation uses exact repo and nyx branch, never default-branc
   if(init.method==='GET'&&url.endsWith('/git/ref/heads/master'))
     return {object:{sha:SHA}};
   if(init.method==='POST'&&url.endsWith('/git/refs')){
-   assert.deepEqual(JSON.parse(init.body),{ref:'refs/heads/nyx/test-change',sha:SHA});
-   return {ref:'refs/heads/nyx/test-change'};
+   const payload=JSON.parse(init.body);
+   assert.ok(['refs/heads/nyx/test-change','refs/heads/tester'].includes(payload.ref));
+   assert.equal(payload.sha,SHA);
+   return {ref:payload.ref};
   }
   throw Error('Unexpected request '+url);
  });
  const result=await api.createBranch('oauth:alice','conn','org/repo','nyx/test-change');
  assert.equal(result.branch,'nyx/test-change');
- assert.deepEqual(requests.map(r=>r.options.method),['GET','GET','POST']);
+ const simple=await api.createBranch('oauth:alice','conn','org/repo','tester');
+ assert.equal(simple.branch,'tester');
+ assert.deepEqual(requests.map(r=>r.options.method),['GET','GET','POST','GET','GET','POST']);
  assert.equal(requests.every(r=>r.url.startsWith('https://api.github.com/repos/org/repo')),true);
- await assert.rejects(()=>api.createBranch('oauth:alice','conn','org/repo','master'),
-  /GITHUB_STAGING_BRANCH_REQUIRED/);
- assert.equal(requests.length,3);
+ for(const forbidden of ['master','main','refs/heads/main','.hidden','other/.bad']){
+  await assert.rejects(()=>api.createBranch('oauth:alice','conn','org/repo',forbidden),
+   /GITHUB_PROTECTED_OR_INVALID_BRANCH/);
+ }
+ assert.equal(requests.length,6);
 });
 
 test('GitHub file commits require nyx review branch and block workflow/hosting edits',async()=>{
  const {api,requests}=fixture((url,init)=>{
+  if(init.method==='GET' && url.endsWith('/org/repo'))return {default_branch:'trunk'};
   assert.ok(url.endsWith('/contents/src/example.ts'));
   assert.equal(init.method,'PUT');
   const payload=JSON.parse(init.body);
@@ -61,16 +68,20 @@ test('GitHub file commits require nyx review branch and block workflow/hosting e
  const result=await api.commitFile('oauth:alice','conn','org/repo',
   'nyx/testing','src/example.ts','export const x=1;','Update example',SHA);
  assert.equal(result.commitSha,SHA);
- assert.equal(requests.length,1);
+ assert.equal(requests.length,2);
  for(const path of ['.github/workflows/deploy-heroku.yml','scripts/build-info.mjs',
   'broker/heroku-readonly.mjs','config/heroku-public.json',
   'Procfile','package.json','.env','src/connectors/heroku-broker.client.ts']){
   await assert.rejects(()=>api.commitFile('oauth:alice','conn','org/repo',
    'nyx/testing',path,'text','test'),/GITHUB_INFRASTRUCTURE_WRITE_FORBIDDEN/);
  }
+ for(const blocked of ['main','master']){
+  await assert.rejects(()=>api.commitFile('oauth:alice','conn','org/repo',
+   blocked,'src/example.ts','oops','test'),/GITHUB_PROTECTED_OR_INVALID_BRANCH/);
+ }
  await assert.rejects(()=>api.commitFile('oauth:alice','conn','org/repo',
-  'main','src/example.ts','oops','test'),/GITHUB_STAGING_BRANCH_REQUIRED/);
- assert.equal(requests.length,1);
+  'trunk','src/example.ts','oops','test'),/GITHUB_DEFAULT_BRANCH_WRITE_FORBIDDEN/);
+ assert.equal(requests.length,3);
 });
 
 test('GitHub PR tool only opens draft review to default branch',async()=>{
@@ -89,7 +100,7 @@ test('GitHub PR tool only opens draft review to default branch',async()=>{
  assert.equal(result.number,12);
  assert.equal(requests.length,2);
  await assert.rejects(()=>api.draftPull('oauth:alice','conn','org/repo','master','No'),
-  /GITHUB_STAGING_BRANCH_REQUIRED/);
+  /GITHUB_PROTECTED_OR_INVALID_BRANCH/);
 });
 
 test('Issue tool honors GitHub App issues:write and exact repository',async()=>{

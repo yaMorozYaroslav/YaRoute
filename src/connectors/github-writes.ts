@@ -2,7 +2,7 @@ import { ConnectorRegistry, type ConnectorCapability } from './connector-registr
 import type { GithubInstallationCredentials, GithubHttp } from './github-readonly';
 
 /**
- * Deliberately bounded GitHub API writes: only nyx/* staging branches, no
+ * Deliberately bounded GitHub API writes: non-protected working branches, no
  * default-branch changes, no workflow/deployment/config edits and no merges.
  * Provider and per-owner grants are enforced BEFORE a scoped token is minted.
  */
@@ -17,12 +17,14 @@ export class GithubWriteConnector {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..'))
       throw new Error('GITHUB_REPOSITORY_INVALID');
   }
-  private stagingBranch(branch:string):void {
+  private workingBranch(branch:string):void {
     if (typeof branch !== 'string' || branch.length > 100 ||
-        !/^nyx\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) ||
+        !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) ||
         branch.includes('..') || branch.includes('//') ||
-        branch.endsWith('/') || branch.endsWith('.') || branch.endsWith('.lock'))
-      throw new Error('GITHUB_STAGING_BRANCH_REQUIRED');
+        branch.endsWith('/') || branch.endsWith('.') || branch.startsWith('refs/') ||
+        branch.split('/').some(p=>p.startsWith('.') || p.endsWith('.lock')) ||
+        ['main','master'].includes(branch.toLowerCase()))
+      throw new Error('GITHUB_PROTECTED_OR_INVALID_BRANCH');
   }
   private writablePath(path:string):void {
     if (typeof path !== 'string' || !path || path.length > 400 ||
@@ -74,11 +76,12 @@ export class GithubWriteConnector {
       throw new Error('GITHUB_DEFAULT_BRANCH_UNVERIFIED');
     return ref;
   }
-  /** Create only a dedicated nyx/* review branch, using current default HEAD. */
+  /** Create a working branch from the current default HEAD; never update that ref. */
   async createBranch(owner:string,id:string,repo:string,branch:string) {
-    this.stagingBranch(branch);
+    this.workingBranch(branch);
     const boundary={branch};
     const base=await this.defaultBranch(owner,id,repo,'contents:write',boundary);
+    if(branch===base)throw new Error('GITHUB_DEFAULT_BRANCH_WRITE_FORBIDDEN');
     const source=await this.call(owner,id,repo,'contents:write','GET',
       '/git/ref/heads/'+encodeURIComponent(base),undefined,boundary);
     const sha=source?.object?.sha;
@@ -92,13 +95,16 @@ export class GithubWriteConnector {
   /** Create/update exactly one text file with GitHub's optimistic SHA check. */
   async commitFile(owner:string,id:string,repo:string,branch:string,
     path:string,content:string,message:string,sha?:string) {
-    this.stagingBranch(branch);this.writablePath(path);
+    this.workingBranch(branch);this.writablePath(path);
     if(typeof content!=='string' || Buffer.byteLength(content,'utf8')>65536 ||
        content.includes('\x00'))throw new Error('GITHUB_FILE_SIZE_OR_ENCODING_INVALID');
     if(typeof message!=='string'||!message.trim()||message.length>160)
       throw new Error('GITHUB_COMMIT_MESSAGE_INVALID');
     if(sha!==undefined && !/^[a-f0-9]{40}$/.test(sha))
       throw new Error('GITHUB_FILE_SHA_INVALID');
+    // All default branches remain protected, even if not named main/master.
+    const base=await this.defaultBranch(owner,id,repo,'contents:write',{branch});
+    if(branch===base)throw new Error('GITHUB_DEFAULT_BRANCH_WRITE_FORBIDDEN');
     const suffix='/contents/'+path.split('/').map(encodeURIComponent).join('/');
     const result=await this.call(owner,id,repo,'contents:write','PUT',suffix,{
       message:message.trim(),content:Buffer.from(content,'utf8').toString('base64'),
@@ -112,7 +118,7 @@ export class GithubWriteConnector {
   /** Open a DRAFT pull request only, targeting the repository's default branch. */
   async draftPull(owner:string,id:string,repo:string,branch:string,
     title:string,body='') {
-    this.stagingBranch(branch);
+    this.workingBranch(branch);
     if(typeof title!=='string'||!title.trim()||title.length>200 ||
        typeof body!=='string'||body.length>10000)
       throw new Error('GITHUB_PULL_INPUT_INVALID');
