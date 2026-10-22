@@ -82,6 +82,11 @@ test('scoped ini defaults to oLN and treats modifiers as configuration, not targ
   assert.deepEqual({ targets: a.targets, scope: a.scope, depth: a.depth, modifier: a.modifier }, { targets: ['Voice'], scope: 'local', depth: 'normal', modifier: 'oLN' });
   const b = resolver.resolve(cli, { command: 'ini', args: ['Voice', 'OGN'] });
   assert.deepEqual({ targets: b.targets, scope: b.scope, depth: b.depth, modifier: b.modifier }, { targets: ['Voice'], scope: 'global', depth: 'normal', modifier: 'oGN' });
+  // Canonical inherited scope/depth suffix: GNo must be parsed as a modifier, not a target.
+  const inherited = resolver.resolve(cli, { command: 'ini', args: ['Voice', 'GNo'] });
+  assert.deepEqual({ targets: inherited.targets, scope: inherited.scope, depth: inherited.depth, modifier: inherited.modifier },
+    { targets: ['Voice'], scope: 'global', depth: 'normal', modifier: 'oGN' });
+  assert.throws(() => resolver.resolve(cli, { command: 'ini', args: ['GNo'] }), /MODIFIER_REQUIRES_TARGET/);
   assert.throws(() => resolver.resolve(cli, { command: 'ini', args: ['oGN'] }), /MODIFIER_REQUIRES_TARGET/);
 });
 
