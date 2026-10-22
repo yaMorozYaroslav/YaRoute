@@ -3,11 +3,11 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v8.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/pro/connections/v9.html';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NestNyx Connections</title>
+<title>NestNyx Pro Connections</title>
 <style>
 :root{color-scheme:light dark;font:14px/1.5 system-ui,sans-serif}
 body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
@@ -56,8 +56,8 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 </style></head>
 <body>
 <div id="nyx-quick">
-<strong class="brand">☁️ NestNyx</strong><span class="muted">Connections</span><span class="spacer"></span>
-<button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">＋</button>
+<strong class="brand">☁️ NestNyx Pro</strong><span class="muted">Connections</span><span class="spacer"></span>
+<button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">+</button>
 </div>
 <section id="nyx-add-menu" hidden aria-label="Add a connection">
 <h2>Add a connection</h2>
@@ -117,7 +117,7 @@ window.addEventListener('message',function(event){
  if(m.method==='ui/notifications/tool-result')consume(m.params);
 });
 async function initialize(){
- await request('ui/initialize',{appInfo:{name:'NestNyx connections',version:'1.0.0'},
+ await request('ui/initialize',{appInfo:{name:'NestNyx Pro connections',version:'1.1.0'},
   appCapabilities:{},protocolVersion:'2026-01-26'});
  window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}},'*');
 }
