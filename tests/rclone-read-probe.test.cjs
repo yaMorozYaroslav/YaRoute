@@ -79,7 +79,7 @@ test('subprocess probe uses read-only lsf, discards stdout/stderr, bounds runtim
 test('UI presents per-remote expandable scope, connectivity, write status and test button',()=>{
  const ui=CONNECTIONS_PANEL_HTML;
  const mcp=fs.readFileSync(path.join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
- assert.match(CONNECTIONS_PANEL_URI,/v8\.html$/);
+ assert.match(CONNECTIONS_PANEL_URI,/v9\.html$/);
  for(const expression of [/el\('details'\)/,/className='nyx-remote card'/,
   /Configured scope:/,/Connectivity:/,/Write access: Not tested/,
   /Test connection/,/remoteReadChecks=new Map\(\)/,/result\.writeAccess!=='not-tested'/]){
