@@ -1,7 +1,7 @@
 import * as z from 'zod/v4';
 
 const name = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
-const argumentToken = z.string().min(1).max(64).refine(value => /^(?:[A-Za-z][A-Za-z0-9_-]{0,63}|\+\+|--)$/.test(value), 'invalid command argument');
+const argumentToken = z.string().min(1).max(64).refine(value => /^(?:[A-Za-z][A-Za-z0-9_-]{0,63}|(?:core_skill|domain|area):[A-Za-z][A-Za-z0-9_-]{0,63}|\+\+|--)$/i.test(value), 'invalid command argument');
 export const depthSchema = z.enum(['basic', 'normal', 'deep']);
 export const scopeSchema = z.enum(['local', 'global']);
 export const refSchema = z.object({
