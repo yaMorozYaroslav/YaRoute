@@ -115,7 +115,7 @@ export class McpService {
     // MCP Apps connection manager. It is an authenticated UI resource, NOT an
     // alternate backend API or a way to bypass per-user MCP authorization.
     server.registerResource(
-      'NestNyx GitHub Connections', CONNECTIONS_PANEL_URI,
+      'NestNyx Pro GitHub Connections', CONNECTIONS_PANEL_URI,
       {mimeType:'text/html;profile=mcp-app'},
       async () => ({contents:[{
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
@@ -141,7 +141,7 @@ export class McpService {
     });
 
     server.registerTool('nyx_connections_panel',{
-      title:'☁️ NestNyx Connections',
+      title:'☁️ NestNyx Pro Connections · Chat',
       description:'Open the NestNyx connections conversation tab. Production supports authenticated GitHub connections only; Google Drive and MEGA migration remains under separate review.',
       inputSchema:z.object({}),
       _meta:{
@@ -153,7 +153,7 @@ export class McpService {
     },connectionsPanelResult);
 
     server.registerTool('nyx_connections_home',{
-      title:'☁️ NestNyx',
+      title:'☁️ NestNyx Pro Connections · Home',
       description:'Open NestNyx Connections from the global ChatGPT sidebar. Same owner-scoped GitHub panel; no provider authorization or storage mutation.',
       inputSchema:z.object({}),
       _meta:{
@@ -165,7 +165,7 @@ export class McpService {
     },connectionsPanelResult);
 
     server.registerTool('nyx_connections_list',{
-      title:'List my NestNyx connections',
+      title:'List my NestNyx Pro connections',
       description:'Read owner-scoped connections and resource permissions without exposing secrets.',
       inputSchema:z.object({}),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
