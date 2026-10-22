@@ -52,6 +52,24 @@ export class NyxCommandResolver {
 
     if ((!contract.arguments.targets && targetArgs.length) || targetArgs.length > contract.arguments.maxTargets) throw new Error('ARGUMENTS_NOT_ALLOWED');
     const targets = Array.from(new Map(targetArgs.map(a => [a.toLowerCase(), a])).values());
+    if (contract.adapter === 'context.initialize.v1') {
+      // A syntactically typed selector must never degrade to a legacy bare target.
+      // The typed manifest/config/status resolver and its receipts are not yet implemented here.
+      // Fail closed instead of returning a misleading COMPLETE/FIF for a missing resource.
+      for (const target of targets) {
+        if (/^(?:core_skill|domain|area):[A-Za-z][A-Za-z0-9_-]{0,63}$/i.test(target))
+          throw new Error('TYPED_RESOURCE_ADAPTER_NOT_READY');
+      }
+      // Head H31 declares these collisions. When a CLI advertises its typed-resource
+      // contract, an untyped ambiguous target is invalid, regardless of runtime profile.
+      const typed = (definition as { typed_resource_resolution?: { collisions?: unknown } }).typed_resource_resolution;
+      if (typed && Array.isArray(typed.collisions)) {
+        const ambiguous = new Set(typed.collisions.filter((x): x is string => typeof x === 'string')
+          .map(x => x.trim().split(/\s+/)[0].toLowerCase()));
+        for (const target of targets)
+          if (ambiguous.has(target.toLowerCase())) throw new Error('AMBIGUOUS_TYPED_RESOURCE');
+      }
+    }
 
     if (operations.length) {
       if (contract.adapter !== 'context.initialize.v1' || !contract.scope) throw new Error('CONFIG_OPERATION_NOT_SUPPORTED');
