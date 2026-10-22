@@ -9,7 +9,7 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v8\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\/pro\/connections\/v9\.html/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
@@ -43,8 +43,8 @@ test('ChatGPT gets separate authenticated conversation-tab and global-sidebar la
  assert.ok(global.startsWith("server.registerTool('nyx_connections_home'"));
  assert.ok(thread.includes("'openai/ui':{entrypoints:[{type:'thread'}]}"));
  assert.ok(global.includes("'openai/ui':{entrypoints:[{type:'global'}]}"));
- assert.ok(thread.includes("title:'☁️ NestNyx Connections'"));
- assert.ok(global.includes("title:'☁️ NestNyx'"));
+ assert.ok(thread.includes("title:'☁️ NestNyx Pro Connections · Chat'"));
+ assert.ok(global.includes("title:'☁️ NestNyx Pro Connections · Home'"));
  for(const tool of [thread,global]){
    assert.ok(tool.includes("inputSchema:z.object({})"));
    assert.ok(tool.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
