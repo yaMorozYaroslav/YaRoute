@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Cli, CommandRequest, requestSchema } from './runtime.schema';
 
 const modifierPattern = /^o([lg])([bnd])$/i;
+// Canonical inherited suffix notation, e.g. `Nyx ini Voice GNo`.
+const inheritedModifierPattern = /^([lg])([bnd])o$/i;
 const depthByCode = { b: 'basic', n: 'normal', d: 'deep' } as const;
 const codeByDepth = { basic: 'B', normal: 'N', deep: 'D' } as const;
 
@@ -30,7 +32,7 @@ export class NyxCommandResolver {
         targetArgs.push(token);
         continue;
       }
-      const modifier = modifierPattern.exec(token);
+      const modifier = modifierPattern.exec(token) ?? inheritedModifierPattern.exec(token);
       if (modifier) {
         modifiers.push({ scope: modifier[1].toLowerCase() === 'l' ? 'local' : 'global', depth: depthByCode[modifier[2].toLowerCase() as keyof typeof depthByCode] });
       } else if (token === '++' || token === '--') operations.push(token);
