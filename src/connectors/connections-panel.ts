@@ -3,7 +3,13 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v8.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v9.html';
+const iconOrigin = process.env.NYX_PUBLIC_URL?.startsWith('https://')
+  ? new URL(process.env.NYX_PUBLIC_URL).origin : '';
+export const CONNECTIONS_PANEL_BRAND_ORIGIN = iconOrigin;
+const iconMarkup = iconOrigin
+  ? '<img src="'+iconOrigin+'/branding/icon.png" width="28" height="28" alt="" style="width:28px;height:28px;object-fit:contain" />'
+  : '';
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -56,26 +62,26 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 </style></head>
 <body>
 <div id="nyx-quick">
-<strong class="brand">☁️ NestNyx</strong><span class="muted">Connections</span><span class="spacer"></span>
+<strong class="brand">${iconMarkup} NestNyx</strong><span class="muted">Connections</span><span class="spacer"></span>
 <button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">＋</button>
 </div>
 <section id="nyx-add-menu" hidden aria-label="Add a connection">
 <h2>Add a connection</h2>
 <div id="nyx-provider-choices" role="group" aria-label="Choose a provider">
-<button type="button" data-open="nyx-google-group">🌈 Google Drive<small>Show configured remotes; new OAuth pending</small></button>
-<button type="button" data-open="nyx-mega-group">🗄️ MEGA<small>Show configured remotes; new login pending</small></button>
+<button type="button" data-open="nyx-google-group">🌈 Google Drive<small>Independent OAuth connection in DEV</small></button>
+<button type="button" data-open="nyx-mega-group">🗄️ MEGA<small>Independent secure sign-in in DEV</small></button>
 <button type="button" data-open="nyx-rclone-group">🧰 Existing Rclone<small>View private configuration metadata</small></button>
 <button type="button" data-open="nyx-other-group" data-github="true">🐙 GitHub<small>Create a named GitHub connection</small></button>
 </div>
-<p class="muted">Only GitHub creation is enabled. Google Drive and MEGA authentication is not released; never enter provider credentials in chat.</p>
+<p class="muted">Multi-user storage onboarding works only in isolated DEV when enabled. Never enter credentials in ChatGPT.</p>
 </section>
 <header><p class="muted">Existing connections grouped by provider. Rclone configuration is not proof of connectivity.</p>
 <div class="warn">GitHub permissions and repository writes require explicit grants. No default-branch writes, workflow dispatch, credential editing, billing or infrastructure actions.</div></header>
 <h2>Existing connections</h2>
 <details class="nyx-provider-group" id="nyx-google-group"><summary>🌈 Google Drive <span class="nyx-provider-count" id="nyx-google-count">Loading</span></summary>
-<div class="nyx-provider-list" id="nyx-google-list" aria-live="polite">Checking configured remotes…</div></details>
+<div class="nyx-provider-list"><div class="row" id="tenant-google-create" hidden><label>Name <input id="tenant-google-name" type="text" maxlength="80" placeholder="My Google Drive"></label><button type="button" id="tenant-google-add">Create Google connection</button></div><div id="tenant-google-list" aria-live="polite"></div><div id="nyx-google-list" aria-live="polite">Checking configured remotes…</div></div></details>
 <details class="nyx-provider-group" id="nyx-mega-group"><summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">Loading</span></summary>
-<div class="nyx-provider-list" id="nyx-mega-list" aria-live="polite">Checking configured remotes…</div></details>
+<div class="nyx-provider-list"><div class="row" id="tenant-mega-create" hidden><label>Name <input id="tenant-mega-name" type="text" maxlength="80" placeholder="My MEGA"></label><button type="button" id="tenant-mega-add">Create MEGA connection</button></div><div id="tenant-mega-list" aria-live="polite"></div><div id="nyx-mega-list" aria-live="polite">Checking configured remotes…</div></div></details>
 <details class="nyx-provider-group" id="nyx-rclone-group"><summary>🧰 Rclone <span class="nyx-provider-count" id="nyx-rclone-count">Private inventory</span></summary>
 <div class="nyx-provider-list"><p class="provider-note">Existing private Rclone metadata; remotes are listed under their providers above. This does not import, connect or modify credentials.</p>
 <button id="rclone-refresh" type="button">Refresh configured remotes</button>
@@ -250,6 +256,102 @@ async function refreshRclone(){
   rcloneStatus.className='error';
  }
 }
+
+let tenantToolsAvailable=false;
+function renderTenant(connections){
+ for(const [provider,label] of [['google-drive','google'],['mega','mega']]){
+  const host=document.getElementById('tenant-'+label+'-list');
+  host.replaceChildren();
+  const kind=provider==='mega'?'mega-root':'drive';
+  const items=connections.filter(x=>x.provider===provider && x.status!=='revoked');
+  host.append(el('p',items.length+' separate NestNyx connection(s).'));
+  for(const item of items){
+   const box=el('div');box.className='card';
+   box.append(el('strong',item.displayName),el('p','Connection status: '+item.status));
+   const root=input((item.resources||[]).find(x=>x.kind===kind)?.id || (provider==='mega'?'MEGA_ROOT':''));
+   root.maxLength=256;
+   root.placeholder=provider==='mega'?'MEGA_ROOT or subfolder':'Google folder ID';
+   const line=el('div');line.className='row';
+   line.append(el('span','Allowed root'),root);box.append(line);
+   box.append(el('p','Read-only access. Old Rclone connections stay unchanged.'));
+   const configure=async()=>{
+    const value=root.value.trim();
+    if(!value || value.length>256)throw Error('Enter an allowed root first');
+    await call('nyx_storage_connection_permissions',{id:item.id,capabilities:['storage:list']});
+    await call('nyx_storage_connection_roots',{id:item.id,
+      resources:[{kind,id:value,capabilities:['storage:list']}]});
+    return value;
+   };
+   box.append(button('Save read-only root',async()=>{
+    await configure();show('Root selected. Sign in separately to authorize access.');
+   }));
+   box.append(button(provider==='mega'?'Secure MEGA sign-in':'Google OAuth sign-in',async()=>{
+    const value=await configure();
+    const args=provider==='mega'?{id:item.id,rootPath:value}:{id:item.id,folderId:value};
+    const cmd=provider==='mega'?'nyx_storage_connection_begin_mega':'nyx_storage_connection_begin_google';
+    const result=await call(cmd,args);
+    if(typeof result?.url!=='string')throw Error('Authorization link missing');
+    const url=new URL(result.url);
+    const base=${JSON.stringify(iconOrigin)};
+    if(url.protocol!=='https:' ||
+      (provider==='google-drive' ? 
+       (url.hostname!=='accounts.google.com'||url.pathname!=='/o/oauth2/v2/auth') :
+       (!base || url.origin!==base || url.pathname!=='/connect/mega/setup'))) {
+      throw Error('Unexpected provider sign-in URL');
+    }
+    await request('ui/open-link',{url:result.url});
+    show('Complete provider authorization in your browser, then return for a read-only test.');
+   }));
+   box.append(button('Test new connection',async()=>{
+    const result=await call('nyx_storage_connection_test_pending',{id:item.id});
+    show('Read-only test: '+String(result));
+   }));
+   box.append(button('Activate after test',async()=>{
+    const result=await call('nyx_storage_connection_activate',{id:item.id});
+    show('Storage connection: '+String(result.status));
+    await refreshTenantStorage();
+   }));
+   if(item.status==='active'){
+    const filePanel=el('div');filePanel.setAttribute('aria-live','polite');
+    box.append(button('Browse selected folder (read only)',async()=>{
+     const rootId=root.value.trim();
+     if(!rootId || !(item.resources||[]).some(r=>r.kind===kind&&r.id===rootId))
+      throw Error('Select and save the granted root first');
+     const data=await call('nyx_storage_connection_list_files',{
+      id:item.id,provider,rootId,path:''
+     });
+     if(!data||!Array.isArray(data.items)||typeof data.truncated!=='boolean')
+      throw Error('Storage listing not available');
+     filePanel.replaceChildren(el('p',data.items.length+' items'+(data.truncated?' (additional items hidden)':'')));
+     const ul=el('ul');
+     for(const entry of data.items.slice(0,100)){
+      if(!entry||typeof entry.path!=='string')continue;
+      ul.append(el('li',(entry.isDir?'📁 ':'📄 ')+entry.path));
+     }
+     filePanel.append(ul);
+    }));
+    box.append(filePanel);
+   }
+   host.append(box);
+  }
+ }
+}
+async function refreshTenantStorage(){
+ try{
+  const data=await call('nyx_storage_connections_list',{});
+  if(!Array.isArray(data))throw Error('Storage tools unavailable');
+  tenantToolsAvailable=true;
+  for(const name of ['google','mega'])document.getElementById('tenant-'+name+'-create').hidden=false;
+  renderTenant(data);
+ }catch{
+  tenantToolsAvailable=false;
+  for(const name of ['google','mega']){
+   document.getElementById('tenant-'+name+'-create').hidden=true;
+   document.getElementById('tenant-'+name+'-list').replaceChildren(
+     el('p','Independent multi-user onboarding is not enabled on this deployment.'));
+  }
+ }
+}
 function render(connections){
  root.replaceChildren();
  const github=connections.filter(c=>c && c.provider==='github' && c.status!=='revoked');
@@ -383,7 +485,14 @@ for(const choice of document.querySelectorAll('#nyx-provider-choices button[data
   }else if(choice.dataset.open==='nyx-rclone-group'){
    show('Rclone credentials must be managed privately on the server. Inventory is read-only.');
   }else{
-   show('Existing configured remotes are listed here. New Google Drive/MEGA authorization is not enabled in production.');
+   const label=choice.dataset.open==='nyx-google-group'?'google':'mega';
+   if(tenantToolsAvailable){
+    document.getElementById('tenant-'+label+'-create').hidden=false;
+    document.getElementById('tenant-'+label+'-name').focus();
+    show('Create a separate '+label+' connection. Never enter credentials into ChatGPT.');
+   }else{
+    show('New Google Drive/MEGA authorization is not enabled in production.');
+   }
   }
   addMenu.hidden=true;
   quickAdd.setAttribute('aria-expanded','false');
@@ -391,6 +500,18 @@ for(const choice of document.querySelectorAll('#nyx-provider-choices button[data
 }
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
+for(const [provider,label] of [['google-drive','google'],['mega','mega']]){
+ document.getElementById('tenant-'+label+'-add').addEventListener('click',async()=>{
+  const field=document.getElementById('tenant-'+label+'-name');
+  const name=field.value.trim();
+  if(!name)return show('Choose a connection name.',true);
+  try{
+   await call('nyx_storage_connection_create',{provider,name});
+   field.value='';await refreshTenantStorage();
+   show('Connection created. Select a root and authorize this account.');
+  }catch(e){show(e.message,true);}
+ });
+}
 document.getElementById('new-form').addEventListener('submit',async e=>{
  e.preventDefault();const name=document.getElementById('new-name').value.trim();
  const provider='github';
