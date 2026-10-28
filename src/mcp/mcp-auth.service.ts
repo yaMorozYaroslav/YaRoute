@@ -16,7 +16,7 @@ export class McpAuthService {
       authorization_servers: [issuer],
       scopes_supported: this.scopes(),
       bearer_methods_supported: ['header'],
-      resource_name: 'NestNyx MCP',
+      resource_name: `${process.env.NYX_SERVICE_NAME?.trim() || 'NestNyx'} MCP`,
     };
   }
 
