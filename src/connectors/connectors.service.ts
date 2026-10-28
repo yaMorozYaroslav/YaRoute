@@ -177,6 +177,98 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+
+  /** DEV opt-in storage metadata only: no raw credentials or provider grants. */
+  private assertTenantStorageMode() {
+    if (process.env.NYX_MULTIUSER_RCLONE_ENABLED !== 'true' ||
+        process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') {
+      throw new Error('TENANT_RCLONE_NOT_ENABLED');
+    }
+  }
+
+  async listStorage(ownerId: string) {
+    this.assertTenantStorageMode();
+    return (await this.policy().list(this.owner(ownerId)))
+      .filter(c => c.provider === 'google-drive' || c.provider === 'mega')
+      .map(c => this.view(c));
+  }
+
+  async createStorage(ownerId: string, provider: 'google-drive' | 'mega', name: string) {
+    this.assertTenantStorageMode();
+    this.owner(ownerId);
+    const existing = await this.policy().list(ownerId);
+    if (existing.filter(c => c.status !== 'revoked').length >= 12) {
+      throw new Error('CONNECTOR_ACCOUNT_LIMIT');
+    }
+    const connection: ConnectorConnection = {
+      id: randomUUID(), ownerId, provider, displayName: validateConnectionName(name),
+      externalAccountId: 'pending', capabilities: [], providerCapabilities: [],
+      resources: [], status: 'pending',
+    };
+    await this.repository!.save(connection);
+    return this.view(connection);
+  }
+
+  async storagePermissions(ownerId: string, id: string, capabilities: ConnectorCapability[]) {
+    this.assertTenantStorageMode();
+    const connection = await this.owned(this.owner(ownerId), id);
+    if (!['google-drive','mega'].includes(connection.provider)) {
+      throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    }
+    if (!Array.isArray(capabilities) ||
+        capabilities.some(c => c !== 'storage:list')) {
+      throw new Error('TENANT_RCLONE_READ_ONLY');
+    }
+    const updated = await this.policy().setPermissions(ownerId, id, capabilities);
+    return {...this.view(updated.connection), authorizationRequired: updated.authorizationRequired};
+  }
+
+  async storageResources(ownerId: string, id: string, resources: ConnectorResourceRule[]) {
+    this.assertTenantStorageMode();
+    const connection = await this.owned(this.owner(ownerId), id);
+    if (!['google-drive','mega'].includes(connection.provider)) {
+      throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    }
+    // Initial MEGA pilot verifies one exact user-owned root per connection.
+    // Empty selection is permitted to revoke access, but not to enroll.
+    if (connection.provider === 'mega' && Array.isArray(resources) && resources.length > 1)
+      throw new Error('TENANT_MEGA_SINGLE_ROOT_REQUIRED');
+    if (!Array.isArray(resources) || resources.length > 10 ||
+        resources.some(r => !r || r.kind !== (connection.provider === 'mega' ? 'mega-root' : 'drive') ||
+          !Array.isArray(r.capabilities) || r.capabilities.some(c => c !== 'storage:list') ||
+          r.branches !== undefined || r.pathPrefix !== undefined ||
+          typeof r.id !== 'string' || r.id.length > 256 ||
+          !/^[A-Za-z0-9_.\\/-]+$/.test(r.id) || r.id.split('/').some(p => p === '..' || p === '.'))) {
+      throw new Error('TENANT_RCLONE_RESOURCE_INVALID');
+    }
+    const updated = await this.policy().setResources(ownerId, id, resources);
+    return this.view(updated);
+  }
+
+  /** Trusted server-side provider verification only; never an MCP input. */
+  async confirmStorageProvider(ownerId: string, id: string,
+                               provider: 'google-drive' | 'mega', verifiedAccountId: string) {
+    this.assertTenantStorageMode();
+    const connection = await this.owned(this.owner(ownerId), id);
+    if (connection.provider !== provider || connection.status === 'revoked' ||
+        !/^[A-Za-z0-9_.:@-]{1,256}$/.test(verifiedAccountId)) {
+      throw new Error('TENANT_RCLONE_PROVIDER_IDENTITY_INVALID');
+    }
+    if (connection.status === 'active' &&
+        connection.externalAccountId !== verifiedAccountId) {
+      throw new Error('TENANT_RCLONE_ACCOUNT_CHANGE_FORBIDDEN');
+    }
+    const verified: ConnectorConnection = {
+      ...connection, externalAccountId: verifiedAccountId,
+      // Provider consent grants only metadata for read-only operations.
+      // User-enabled capabilities and chosen resources remain separate.
+      providerCapabilities: ['storage:list'], status: 'active',
+    };
+    await this.repository!.save(verified);
+    return this.view(verified);
+  }
+
   async beginGithub(ownerId:string, id:string, installationId?:string) {
     await this.consumeQuota(ownerId,id);
     const c = await this.owned(ownerId,id);
