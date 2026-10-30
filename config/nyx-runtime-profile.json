@@ -244,7 +244,8 @@
         "area": "MAIN",
         "path": "🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_paths.json"
       },
-      "sha256": "e2a39572d91c30d1bc5cb0736ad4ed9eda07696453339750c2daa7f63ff49d89"
+      "sha256": "e2a39572d91c30d1bc5cb0736ad4ed9eda07696453339750c2daa7f63ff49d89",
+      "mode": "observe"
     },
     {
       "key": "temp_nyxcli",
@@ -252,7 +253,8 @@
         "area": "MAIN",
         "path": "🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_nyxcli.json"
       },
-      "sha256": "766bbe091201ad466ecd35d103268ff5ceb9bef90e771d47c317e6a7431cc7ef"
+      "sha256": "766bbe091201ad466ecd35d103268ff5ceb9bef90e771d47c317e6a7431cc7ef",
+      "mode": "observe"
     },
     {
       "key": "active_key",
