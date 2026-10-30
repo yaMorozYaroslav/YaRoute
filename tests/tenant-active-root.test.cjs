@@ -21,7 +21,7 @@ function fixture(){
    }}),
  };
  const svc=new TenantRcloneService(connectors);
- svc.profile=async()=>({provider:'mega',profile});
+ svc.profile=async()=>({provider:'mega',profile:{...profile,verifiedRoot:'MyDocuments'}});
  svc.probe=async(_p,relative)=>{calls.push(relative);return 'verified';};
  return {svc,calls};
 }

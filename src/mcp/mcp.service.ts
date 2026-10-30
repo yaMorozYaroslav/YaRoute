@@ -3,6 +3,7 @@ import { NyxCommandExecutor } from '../nyx/command-executor.service';
 import { NyxBootstrapService } from '../nyx/bootstrap.service';
 import { NyxCliRegistryService } from '../nyx/cli-registry.service';
 import { NyxHeadLibraryService } from '../nyx/head-library.service';
+import { RuntimeMaintenanceService } from './runtime-maintenance.service';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { toNodeHandler } from '@modelcontextprotocol/node';
@@ -43,6 +44,7 @@ export class McpService {
     private readonly tenantMega: TenantMegaEnrollmentService,
     private readonly github: GithubReadonlyConnector,
     private readonly githubWrites: GithubWriteConnector,
+    private readonly maintenance: RuntimeMaintenanceService,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -98,7 +100,7 @@ export class McpService {
              'nyx_storage_connection_permissions','nyx_storage_connection_roots',
              'nyx_storage_connection_begin_google','nyx_storage_connection_begin_mega',
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
-             'nyx_storage_connection_test_active','nyx_storage_connection_list_files'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status'],
+             'nyx_storage_connection_test_active','nyx_storage_connection_list_files'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -594,6 +596,29 @@ export class McpService {
     }));
     // Private-only operational tools. These are MCP auxiliaries and must not
     // silently introduce new canonical Yaro CLI commands or execution contracts.
+    server.registerTool('nyx_maintenance_runtime_inspect',{
+      title:'Inspect runtime key pins for a verified Tester revision',
+      description:'Private operator maintenance: compare the fixed Tester runtime profile with live source hashes and the bootstrap CLI. No pin changes, shell, deployment or canonical-readiness claim.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        expectedTesterSha:z.string().regex(/^[a-f0-9]{40}$/)}).strict(),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,expectedTesterSha})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.maintenance.inspect(
+        this.connectorOwner(),id,repo,expectedTesterSha))));
+    server.registerTool('nyx_maintenance_runtime_prepare',{
+      title:'Prepare a reviewed runtime-pin repair on a new Tester review branch',
+      description:'Private operator maintenance: re-read live sources and require exact reviewed hashes, profile hash, CLI hash and Tester SHA. Only updates existing key SHA pins in config/nyx-runtime-profile.json on a new nyx/* review branch, verifies readback and opens a draft PR. No shell, merge, deployment, secret editing or core-bundle mutation.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        expectedTesterSha:z.string().regex(/^[a-f0-9]{40}$/),
+        reviewBranch:z.string().min(5).max(100),
+        expectedProfileSha256:z.string().regex(/^[a-f0-9]{64}$/),
+        expectedCliSha256:z.string().regex(/^[a-f0-9]{64}$/),
+        reviewedKeys:z.array(z.object({key:z.string().min(1).max(64),
+          sha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).min(1).max(32),
+      }).strict(),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    },async(input)=>this.safeTool(()=>this.limitedConnectionApi(input.id,()=>
+      this.maintenance.prepare(this.connectorOwner(),input))));
     server.registerTool('nyx_head_status',{
       title:'Verify the current canonical NYX Head and CLI',
       description:'Read canonical Head/CLI version, hash and verified cache metadata from the current NYX bootstrap. Does not modify any bundle.',
@@ -603,8 +628,12 @@ export class McpService {
       this.connectorOwner();
       const locator=await this.bootstrap.locate();
       const {cli,hash}=await this.cliRegistry.current(locator);
+      const preflight=await this.commands.inspectRuntimeProfile(locator,hash);
       return {
-        status:'READY',role:'constitution-library',canonical:locator.canonical,
+        status:preflight.ready?(('driftDetected' in preflight && preflight.driftDetected)?'BOOTSTRAP_VERIFIED_WITH_WARNINGS':'BOOTSTRAP_VERIFIED'):'NOT_READY',
+        role:'constitution-library',canonical:locator.canonical,
+        canonical_freshness:'bootstrap-pointer-only; newest Footer not independently checked',
+        preflight,
         cli:{version:cli.version,sha256:hash},
         library:this.headLibrary.snapshot(),
         source_of_truth:'canonical Head bundle',

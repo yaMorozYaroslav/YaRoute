@@ -13,6 +13,8 @@ export type TenantRcloneProfile =
       clientSecret?: string; rootFolderId?: string; scope?: 'drive.readonly' | 'drive.file' | 'drive' }
   | { provider: 'mega'; user: string; obscuredPassword: string;
       sessionId?: string; masterKey?: string;
+      /** Assigned only after successfully probing this exact root. */
+      verifiedRoot?: string;
       /** Only used for one login probe; forbidden in encrypted vault rows. */
       transientTwoFactorCode?: string };
 
@@ -190,6 +192,8 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     // One-time MEGA codes must NEVER enter durable database records.
     if (profile.provider === 'mega' && profile.transientTwoFactorCode !== undefined)
       throw new Error('TENANT_MEGA_2FA_PERSISTENCE_FORBIDDEN');
+    if (profile.provider === 'mega' && profile.verifiedRoot !== undefined)
+      throw new Error('TENANT_MEGA_VERIFICATION_SERVER_ONLY');
     tenantRcloneConfig(profile);
     const packed = this.seal(ownerId, connectionId, profile);
     await this.db().query(`INSERT INTO nyx_rclone_tenant_credentials_v2
@@ -275,8 +279,10 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       // Replace a one-time 2FA code with reusable, encrypted session keys.
       // Never retain the OTP in a pending or active credential row.
       const durableProfile = refreshedProfile || candidate.profile;
-      const packed = refreshedProfile
-        ? this.seal(ownerId, connectionId, durableProfile) : candidate.packed;
+      const verifiedProfile: TenantRcloneProfile = durableProfile.provider === 'mega'
+        ? {...durableProfile, verifiedRoot: relativePath || 'MEGA_ROOT'} : durableProfile;
+      const packed = verifiedProfile.provider === 'mega'
+        ? this.seal(ownerId, connectionId, verifiedProfile) : candidate.packed;
       const updated = await this.db().query(`UPDATE nyx_rclone_tenant_credentials_v2 SET
           encrypted_profile=$4, read_verified_at=now()
           WHERE owner_id=$1 AND connection_id=$2
@@ -294,6 +300,15 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     const rootId = pendingCandidate.profile.provider === 'google-drive'
       ? pendingCandidate.profile.rootFolderId : undefined;
     const kind = pendingCandidate.provider === 'mega' ? 'mega-root' : 'drive';
+    if (pendingCandidate.profile.provider === 'mega') {
+      const roots = (owner.resources || []).filter(r => r.kind === 'mega-root' &&
+        r.capabilities.includes('storage:list'));
+      if (roots.length !== 1 || !pendingCandidate.profile.verifiedRoot ||
+          pendingCandidate.profile.verifiedRoot !==
+            (roots[0].id === 'MEGA_ROOT' ? 'MEGA_ROOT' : tenantRclonePath(roots[0].id))) {
+        throw new Error('TENANT_MEGA_VERIFIED_ROOT_CHANGED');
+      }
+    }
     if (pendingCandidate.provider !== owner.provider ||
         !(owner.resources || []).some(r => r.kind === kind &&
           (kind === 'mega-root' || r.id === rootId) &&
@@ -310,7 +325,8 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       const pending = await client.query(`SELECT connection_id FROM nyx_rclone_tenant_credentials_v2
         WHERE owner_id=$1 AND connection_id=$2 AND provider=$3
           AND state='pending' AND read_verified_at > now() - interval '15 minutes'
-        FOR UPDATE`, [ownerId, connectionId, grant.provider]);
+          AND encrypted_profile=$4
+        FOR UPDATE`, [ownerId, connectionId, grant.provider, pendingCandidate.packed]);
       if (!pending.rowCount) throw new Error('TENANT_RCLONE_VERIFICATION_REQUIRED');
       // Preserve the active V2 credentials until the staged candidate is verified;
       // switch both rows in one transaction, rolling back if promotion fails.
@@ -347,6 +363,10 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       return {profile:active.profile, path:clean};
     }
     const root = resourceId === 'MEGA_ROOT' ? '' : tenantRclonePath(resourceId);
+    if (active.profile.provider !== 'mega' ||
+        active.profile.verifiedRoot !== (root || 'MEGA_ROOT')) {
+      throw new Error('TENANT_MEGA_VERIFIED_ROOT_CHANGED');
+    }
     return {profile:active.profile, path:tenantRclonePath([root,clean].filter(Boolean).join('/'))};
   }
 

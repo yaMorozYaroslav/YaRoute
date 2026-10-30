@@ -1,9 +1,11 @@
 import { ConnectorRegistry, type ConnectorCapability } from './connector-registry';
 import type { GithubInstallationCredentials, GithubHttp } from './github-readonly';
+import { RUNTIME_PROFILE_PATH, assertPinOnlyRepair, gitBlobHash, textHash } from '../nyx/runtime-pin-repair';
 
 /**
  * Deliberately bounded GitHub API writes: non-protected working branches, no
- * default-branch changes, no workflow/deployment/config edits and no merges.
+ * default-branch changes. Runtime profile pins have one reviewed, fixed-path
+ * exception; generic workflow/deployment/config edits remain blocked.
  * Provider and per-owner grants are enforced BEFORE a scoped token is minted.
  */
 export class GithubWriteConnector {
@@ -60,7 +62,8 @@ export class GithubWriteConnector {
          /^\/compare\/(?:main|master)\.\.\.tester$/.test(suffix))) ||
        (/[?#]/.test(suffix) && !(method==='GET' &&
          (/^\/git\/trees\/[a-f0-9]{40}\?recursive=1$/.test(suffix) ||
-          /^\/actions\/runs\?head_sha=[a-f0-9]{40}&per_page=10$/.test(suffix)))))
+          /^\/actions\/runs\?head_sha=[a-f0-9]{40}&per_page=10$/.test(suffix) ||
+          /^\/contents\/config\/nyx-runtime-profile\.json\?ref=[a-f0-9]{40}$/.test(suffix)))))
       throw new Error('GITHUB_API_PATH_INVALID');
     const response=await this.http('https://api.github.com/repos/'+repo+suffix,{
       method,headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
@@ -82,6 +85,77 @@ export class GithubWriteConnector {
     return ref;
   }
   /** Create a working branch from the current default HEAD; never update that ref. */
+  async readTesterRuntimeProfile(owner:string,id:string,repo:string,expectedTesterSha:string) {
+    if (!/^[a-f0-9]{40}$/.test(expectedTesterSha)) throw new Error('GITHUB_BASE_SHA_INVALID');
+    const boundary={branch:'tester',path:RUNTIME_PROFILE_PATH};
+    if (await this.defaultBranch(owner,id,repo,'resources:read',boundary)==='tester')
+      throw new Error('GITHUB_DEFAULT_BRANCH_WRITE_FORBIDDEN');
+    const branch=await this.call(owner,id,repo,'resources:read','GET','/branches/tester',undefined,boundary);
+    if (branch?.name!=='tester' || branch?.protected!==false || branch?.commit?.sha!==expectedTesterSha)
+      throw new Error('GITHUB_TESTER_BRANCH_UNVERIFIED');
+    const file=await this.call(owner,id,repo,'resources:read','GET',
+      '/contents/'+RUNTIME_PROFILE_PATH+'?ref='+expectedTesterSha,undefined,boundary);
+    const text=this.runtimeProfileText(file);
+    return {text,blobSha:file.sha as string,testerSha:expectedTesterSha};
+  }
+  private runtimeProfileText(file:any):string {
+    if (file?.type!=='file' || file.path!==RUNTIME_PROFILE_PATH ||
+        !Number.isSafeInteger(file.size) || file.size<1 || file.size>65536 ||
+        file.encoding!=='base64' || typeof file.content!=='string')
+      throw new Error('MAINTENANCE_PROFILE_UNVERIFIED');
+    const bytes=Buffer.from(file.content.replace(/\s/g,''),'base64');
+    if (bytes.length!==file.size || bytes.includes(0)) throw new Error('MAINTENANCE_PROFILE_UNVERIFIED');
+    const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);
+    if (gitBlobHash(text)!==file.sha) throw new Error('MAINTENANCE_PROFILE_UNVERIFIED');
+    return text;
+  }
+  /** Narrow reviewed exception for key hashes ONLY in the fixed runtime profile.
+   * Never mutates tester/default refs or grants general config/CLI access. */
+  async stageRuntimePinRepair(owner:string,id:string,repo:string,reviewBranch:string,
+    expectedTesterSha:string,before:string,after:string) {
+    this.workingBranch(reviewBranch);
+    if (!reviewBranch.startsWith('nyx/') || reviewBranch==='tester' ||
+        Buffer.byteLength(before)>65536 || Buffer.byteLength(after)>65536)
+      throw new Error('MAINTENANCE_REVIEW_BRANCH_REQUIRED');
+    const changes=assertPinOnlyRepair(before,after);
+    const boundary={branch:reviewBranch,path:RUNTIME_PROFILE_PATH};
+    const defaultRef=await this.defaultBranch(owner,id,repo,'contents:write',boundary);
+    if (defaultRef==='tester' || defaultRef===reviewBranch)
+      throw new Error('GITHUB_DEFAULT_BRANCH_WRITE_FORBIDDEN');
+    await this.registry.requireResource(owner,id,'contents:write',
+      {kind:'repository',id:repo,branch:'tester',path:RUNTIME_PROFILE_PATH});
+    const source=await this.readTesterRuntimeProfile(owner,id,repo,expectedTesterSha);
+    if (source.text!==before) throw new Error('MAINTENANCE_PROFILE_CHANGED');
+    const parent=await this.call(owner,id,repo,'contents:write','GET',
+      '/git/commits/'+expectedTesterSha,undefined,boundary);
+    if (!/^[a-f0-9]{40}$/.test(parent?.tree?.sha)) throw new Error('GITHUB_TESTER_BASE_TREE_UNVERIFIED');
+    const built=await this.call(owner,id,repo,'contents:write','POST','/git/trees',{
+      base_tree:parent.tree.sha,tree:[{path:RUNTIME_PROFILE_PATH,mode:'100644',type:'blob',content:after}],
+    },boundary);
+    if (!/^[a-f0-9]{40}$/.test(built?.sha)) throw new Error('GITHUB_TESTER_TREE_RESPONSE_INVALID');
+    const commit=await this.call(owner,id,repo,'contents:write','POST','/git/commits',{
+      message:'fix(nyx): reconcile reviewed runtime key fingerprints',tree:built.sha,parents:[expectedTesterSha],
+    },boundary);
+    if (!/^[a-f0-9]{40}$/.test(commit?.sha)) throw new Error('GITHUB_TESTER_COMMIT_RESPONSE_INVALID');
+    const checked=await this.call(owner,id,repo,'resources:read','GET',
+      '/contents/'+RUNTIME_PROFILE_PATH+'?ref='+commit.sha,undefined,boundary);
+    if (this.runtimeProfileText(checked)!==after) throw new Error('MAINTENANCE_REPAIR_READBACK_FAILED');
+    // Source may move while immutable Git objects are prepared; publish no branch on drift.
+    const latest=await this.call(owner,id,repo,'contents:write','GET','/branches/tester',undefined,
+      {branch:'tester',path:RUNTIME_PROFILE_PATH});
+    if (latest?.name!=='tester' || latest?.protected!==false || latest?.commit?.sha!==expectedTesterSha)
+      throw new Error('GITHUB_TESTER_BRANCH_UNVERIFIED');
+    const ref=await this.call(owner,id,repo,'contents:write','POST','/git/refs',
+      {ref:'refs/heads/'+reviewBranch,sha:commit.sha},boundary);
+    if (ref?.ref!=='refs/heads/'+reviewBranch || ref?.object?.sha!==commit.sha)
+      throw new Error('GITHUB_BRANCH_RESPONSE_INVALID');
+    const readback=await this.call(owner,id,repo,'resources:read','GET',
+      '/git/ref/heads/'+encodeURIComponent(reviewBranch),undefined,boundary);
+    if (readback?.object?.sha!==commit.sha) throw new Error('MAINTENANCE_REPAIR_READBACK_FAILED');
+    return {repo,branch:reviewBranch,base:'tester',testerSha:expectedTesterSha,
+      reviewSha:commit.sha,beforeProfileSha256:textHash(before),afterProfileSha256:textHash(after),
+      changes,readbackVerified:true,merged:false,deployed:false};
+  }
   async createBranch(owner:string,id:string,repo:string,branch:string) {
     this.workingBranch(branch);
     const boundary={branch};

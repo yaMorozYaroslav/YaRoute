@@ -24,7 +24,7 @@ function fixture(provider='mega') {
    return {provider};
   }}),
  });
- svc.profile=async()=>({provider,profile});
+ svc.profile=async()=>({provider,profile:provider==='mega'?{...profile,verifiedRoot:resourceId}:profile});
  svc.listIsolated=async(_profile,target)=>({items:[{path:target,isDir:true,size:null}],truncated:false,readOnly:true});
  return {svc,resourceId,traces};
 }

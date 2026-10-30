@@ -43,12 +43,21 @@ export const cliSchema = z.object({
   schema: z.string().min(1), version: z.string().min(1),
   commands: z.record(name, z.object({ aliases: z.array(name).optional(), execution: executionSchema.optional() }).passthrough()),
 }).passthrough();
+export const runtimeKeyPinSchema = z.object({
+  key: name, ref: refSchema, sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  mode: z.enum(['enforce', 'observe']).default('enforce'),
+}).strict().refine(pin => pin.mode === 'enforce' ||
+  (pin.ref.area === 'MAIN' && (
+    (pin.key === 'temp_paths' && pin.ref.path === '🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_paths.json') ||
+    (pin.key === 'temp_nyxcli' && pin.ref.path === '🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_nyxcli.json')
+  )), 'only fixed mutable staging overlays may use observe mode');
+
 export const profileSchema = z.object({
   schema: z.literal('nyx.runtime-profile.v1'),
   authority: z.literal('user-authorized-runtime-configuration'),
   cliSha256: z.string().regex(/^[a-f0-9]{64}$/),
   commands: z.record(name, executionSchema),
-  keySources: z.array(z.object({ key: name, ref: refSchema, sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).default([]),
+  keySources: z.array(runtimeKeyPinSchema).default([]),
 }).strict();
 export const sumPayloadSchema = z.object({
   title: z.string().min(1).max(200),

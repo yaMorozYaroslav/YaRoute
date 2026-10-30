@@ -126,7 +126,7 @@ test('authorized probes honor Google folder ID and MEGA relative root',async()=>
   await assert.rejects(()=>a.probeAuthorizedRoot('oauth:alice',id,'google-drive','root-1'),/ROOT_FORBIDDEN/);
 
   const b=service('oauth:alice','mega');
-  b.pool={query:async()=>({rowCount:1,rows:[{provider:'mega',encrypted_profile:b.seal('oauth:alice',id,mega)}]})};
+  b.pool={query:async()=>({rowCount:1,rows:[{provider:'mega',encrypted_profile:b.seal('oauth:alice',id,{...mega,verifiedRoot:'root-1'})}]})};
   b.probe=async (_profile,relative)=>relative==='root-1/docs'?'verified':'failed';
   assert.equal(await b.probeAuthorizedRoot('oauth:alice',id,'mega','root-1','docs'),'verified');
 });
