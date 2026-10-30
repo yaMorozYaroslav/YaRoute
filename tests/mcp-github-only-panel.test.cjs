@@ -9,7 +9,7 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v8\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\/connections\/v9\.html/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
@@ -57,7 +57,11 @@ test('ChatGPT gets separate authenticated conversation-tab and global-sidebar la
  assert.ok(mcp.includes("providers:[{id:'github'"));
  assert.ok(!mcp.includes("entrypoints:[{type:'global'},{type:'thread'}]"));
  // This production change intentionally does not expose unfinished public storage.
- assert.ok(mcp.includes("Google Drive and MEGA migration remains under separate review"));
+ // Private plugin remains legacy-only; isolated public mode advertises storage
+ // providers only after explicit feature-gate checks, never by default.
+ assert.ok(mcp.includes("NYX_MULTIUSER_RCLONE_ENABLED === 'true'"));
+ assert.ok(mcp.includes("isolated_read_only_pilot"));
+ assert.ok(mcp.includes("private NestNyx GitHub connection manager"));
 });
 
 test('green add menu is accessible and provider lists stay visible when closed',()=>{
