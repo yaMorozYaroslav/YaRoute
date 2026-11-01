@@ -23,7 +23,14 @@ test('only GitHub connection and repository resource schemas are exposed',()=>{
  assert.doesNotMatch(panel,/<option value="heroku"/);
  assert.doesNotMatch(panel,/call\('nyx_connection_verify_heroku'/);
  assert.match(service,/provider !== 'github'/);
- assert.doesNotMatch(src('src/connectors/connectors.module.ts'),/HerokuReadonlyConnector|HerokuBrokerClient/);
+ // Account creation/authorization remains GitHub-only; the Heroku bridge has
+ // no provider connection, no Heroku token in Nest, and defaults OFF.
+ const module=src('src/connectors/connectors.module.ts');
+ assert.doesNotMatch(module,/HerokuReadonlyConnector/);
+ assert.match(module,/HerokuBrokerClient/);
+ assert.match(mcp,/if \(process\.env\.NYX_HEROKU_READ_ENABLED === 'true'\)/);
+ assert.match(mcp,/herokuReadAuthorization\(this\.connectorOwner\(\),app\)/);
+ assert.doesNotMatch(mcp,/server\.registerTool\('nyx_heroku_(?:config|deploy|logs|billing)/);
 });
 
 test('MCP panel is auxiliary and does not modify Head CLI definitions',()=>{

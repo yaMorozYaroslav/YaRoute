@@ -124,8 +124,8 @@ test('active key sources are read before command dispatch and pinned changes fai
 test('private profile is bound to current canonical CLI and cannot introduce commands', async () => {
  const r = resources(); const cli = makeCli(); const hash = sha256(JSON.stringify(cli)); const profile = { schema: 'nyx.runtime-profile.v1', authority: 'user-authorized-runtime-configuration', cliSha256: hash, commands: { begin: contract() } }; r.files.set('profile.json', JSON.stringify(profile)); const loc = { ...locator, executionProfile: ref('profile.json') }; const service = new NyxExecutionProfileService(r);
  assert.equal((await service.apply(loc, cli, hash)).cli.commands.begin.execution.depth.default, 'basic');
- await assert.rejects(() => service.apply(loc, cli, '0'.repeat(64)), /EXECUTION_PROFILE_INVALID/);
- profile.commands.unlisted = contract(); r.files.set('profile.json', JSON.stringify(profile)); await assert.rejects(() => service.apply(loc, cli, hash), /EXECUTION_PROFILE_INVALID/);
+ await assert.rejects(() => service.apply(loc, cli, '0'.repeat(64)), /PROFILE_AUTHORITY_CHANGED/);
+ profile.commands.unlisted = contract(); r.files.set('profile.json', JSON.stringify(profile)); await assert.rejects(() => service.apply(loc, cli, hash), /PROFILE_COMMAND_NOT_CANONICAL/);
 });
 test('single-dyno remote ledger survives restart and serializes retries without a database', async () => {
  const oldMode = process.env.NYX_HANDOFF_COORDINATION, oldDyno = process.env.DYNO; process.env.NYX_HANDOFF_COORDINATION = 'single-dyno'; process.env.DYNO = 'web.1';
