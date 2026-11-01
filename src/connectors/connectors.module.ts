@@ -8,12 +8,13 @@ import { GoogleOAuthController } from './google-oauth.controller';
 import { GithubAppService } from './github-app.service';
 import { GithubReadonlyConnector } from './github-readonly';
 import { GithubWriteConnector } from './github-writes';
+import { HerokuBrokerClient } from './heroku-broker.client';
 import { GithubOAuthController } from './github-oauth.controller';
 
 @Module({
   controllers:[GithubOAuthController,GoogleOAuthController,MegaEnrollmentController],
   providers:[
-    ConnectorsService, GithubAppService, TenantRcloneService, TenantGoogleOAuthService, TenantMegaEnrollmentService,
+    ConnectorsService, GithubAppService, HerokuBrokerClient, TenantRcloneService, TenantGoogleOAuthService, TenantMegaEnrollmentService,
     {provide: GithubReadonlyConnector,
       useFactory:(connections:ConnectorsService,credentials:GithubAppService)=>
         new GithubReadonlyConnector(connections.registryPolicy(),credentials),
@@ -24,6 +25,6 @@ import { GithubOAuthController } from './github-oauth.controller';
         new GithubWriteConnector(connections.registryPolicy(),credentials),
       inject:[ConnectorsService,GithubAppService]},
   ],
-  exports:[ConnectorsService,GithubAppService,GithubReadonlyConnector,GithubWriteConnector,TenantRcloneService,TenantGoogleOAuthService,TenantMegaEnrollmentService],
+  exports:[HerokuBrokerClient,ConnectorsService,GithubAppService,GithubReadonlyConnector,GithubWriteConnector,TenantRcloneService,TenantGoogleOAuthService,TenantMegaEnrollmentService],
 })
 export class ConnectorsModule {}

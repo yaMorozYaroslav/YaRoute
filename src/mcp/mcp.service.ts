@@ -20,6 +20,8 @@ import { TenantGoogleOAuthService } from '../connectors/tenant-google-oauth.serv
 import { TenantMegaEnrollmentService } from '../connectors/tenant-mega-enrollment.service';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
+import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
+import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
 import { githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
@@ -44,6 +46,7 @@ export class McpService {
     private readonly tenantMega: TenantMegaEnrollmentService,
     private readonly github: GithubReadonlyConnector,
     private readonly githubWrites: GithubWriteConnector,
+    private readonly herokuBroker: HerokuBrokerClient,
     private readonly maintenance: RuntimeMaintenanceService,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
@@ -101,7 +104,9 @@ export class McpService {
              'nyx_storage_connection_begin_google','nyx_storage_connection_begin_mega',
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
              'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
-              'nyx_storage_connection_revoke'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare'],
+              'nyx_storage_connection_revoke'] : []),
+           ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare',
+           ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -574,6 +579,31 @@ export class McpService {
       }, async ({id,provider,rootId,path}) => this.safeTool(() =>
         this.tenantRclone.probeAuthorizedRoot(
           this.connectorOwner(),id,provider,rootId,path || '')));
+    }
+
+    // Isolated, owner-bound HEROKU read-only metadata bridge (OFF by default).
+    // No Heroku bearer token may be present in this NestNyx runtime; only a
+    // separate read-scoped broker owns that token. The broker separately checks
+    // the exact owner + connection + app, and hard-codes GET endpoints.
+    if (process.env.NYX_HEROKU_READ_ENABLED === 'true') {
+      server.registerTool('nyx_heroku_app_info', {
+        title:'Read approved Heroku app metadata',
+        description:'Read only name, region and app URL from an independent read-scoped broker. No config values, log drains, billing, writes or deploys.',
+        inputSchema:z.object({app:z.string().regex(/^[a-z][a-z0-9-]{1,28}[a-z0-9]$/)}),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+      },async({app})=>this.safeTool(async()=>{
+        const scope=herokuReadAuthorization(this.connectorOwner(),app);
+        return this.herokuBroker.appInfo(scope.ownerId,scope.connectionId,scope.app);
+      }));
+      server.registerTool('nyx_heroku_releases', {
+        title:'Read approved Heroku release versions',
+        description:'Read at most 50 sanitized release IDs/versions/timestamps. No release output, config values, logs, billing or deployment actions.',
+        inputSchema:z.object({app:z.string().regex(/^[a-z][a-z0-9-]{1,28}[a-z0-9]$/)}),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+      },async({app})=>this.safeTool(async()=>{
+        const scope=herokuReadAuthorization(this.connectorOwner(),app);
+        return this.herokuBroker.releases(scope.ownerId,scope.connectionId,scope.app);
+      }));
     }
 
     // Public multi-user connector mode deliberately omits all legacy global
