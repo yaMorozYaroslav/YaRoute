@@ -38,6 +38,7 @@ test('matching pins permit preflight but a stale CLI fingerprint still blocks it
  assert.equal((await service.inspect(locator,cliHash)).ready,true);
  const stale=await service.inspect(locator,'0'.repeat(64));
  assert.equal(stale.ready,false);assert.equal(stale.authorityMatches,false);
+ await assert.rejects(()=>service.apply(locator,cli,'0'.repeat(64)),/PROFILE_AUTHORITY_CHANGED/);
 });
 test('invalid profile returns bounded diagnostics and execution remains fail-closed',async()=>{
  const {service,files,locator}=fixture();
