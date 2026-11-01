@@ -8,9 +8,9 @@ const source = readFileSync(
   'utf8',
 );
 
-test('HeartBit/CoreGen policy keeps canonical key quantity trigger', () => {
-  assert.match(source, /adaptiveKeySeedThreshold:\s*11/);
-  assert.match(source, /more than 10 decent unresolved keys/);
+test('HeartBit/CoreGen policy creates a seed at five decent unresolved keys', () => {
+  assert.match(source, /adaptiveKeySeedThreshold:\s*5/);
+  assert.match(source, /five decent unresolved keys/);
   assert.match(source, /explicitGlobalSeedCommand:\s*'NyxkeyoSG'/);
 });
 
