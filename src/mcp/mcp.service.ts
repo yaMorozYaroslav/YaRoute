@@ -100,7 +100,8 @@ export class McpService {
              'nyx_storage_connection_permissions','nyx_storage_connection_roots',
              'nyx_storage_connection_begin_google','nyx_storage_connection_begin_mega',
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
-             'nyx_storage_connection_test_active','nyx_storage_connection_list_files'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare'],
+             'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
+              'nyx_storage_connection_revoke'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare'],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
@@ -552,6 +553,14 @@ export class McpService {
       },async({id,provider,rootId,path})=>this.safeTool(()=>
         this.tenantRclone.listAuthorizedRoot(
           this.connectorOwner(),id,provider,rootId,path||'')));
+
+      server.registerTool('nyx_storage_connection_revoke', {
+        title:'Revoke my MEGA or Google Drive connection',
+        description:'Owner-scoped: revoke this tenant storage grant and erase its pending/active encrypted credentials and unconsumed sign-in links. Does not revoke provider-side sessions or touch private/operator Rclone config.',
+        inputSchema:z.object({id:z.string().uuid()}),
+        annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+      },async({id})=>this.safeTool(() =>
+        this.tenantRclone.revokeStorage(this.connectorOwner(),id)));
 
       server.registerTool('nyx_storage_connection_test_active', {
         title: 'Verify read access to my active isolated storage root',
