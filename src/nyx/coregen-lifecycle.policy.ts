@@ -4,9 +4,9 @@ export type NyxDiagnosticSeverity =
   | 'INFORMATIONAL';
 
 export const HEARTBIT_COREGEN_POLICY = Object.freeze({
-  adaptiveKeySeedThreshold: 11,
+  adaptiveKeySeedThreshold: 5,
   adaptiveKeySeedRule:
-    'more than 10 decent unresolved keys after dedupe and quality filtering',
+    'five decent unresolved keys after dedupe and quality filtering',
   explicitGlobalSeedCommand: 'NyxkeyoSG',
   minimumCompatibleSeedsForCoreGeneration: 1,
   deferredWarningsBlockGeneration: false,
