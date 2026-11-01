@@ -57,7 +57,13 @@ export class NyxExecutionProfileService {
     catch (error) { this.rethrowProfileError(error); }
   }
   private rethrowProfileError(error: unknown): never {
-    if (error instanceof Error && error.message.startsWith('KEY_PREFLIGHT_')) throw error;
+    // Preserve bounded actionable failures; no private provider response or
+    // profile contents ever flow into the public error surface.
+    if (error instanceof Error && (
+      error.message.startsWith('KEY_PREFLIGHT_') ||
+      error.message === 'PROFILE_AUTHORITY_CHANGED' ||
+      error.message === 'PROFILE_COMMAND_NOT_CANONICAL'
+    )) throw error;
     throw new Error('EXECUTION_PROFILE_INVALID_OR_UNAVAILABLE');
   }
   private async applyText(text: string, cli: Cli, cliHash: string) {
