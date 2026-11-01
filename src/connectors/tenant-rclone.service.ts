@@ -345,6 +345,45 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     return { status: 'active' as const, connectionId };
   }
 
+  /**
+   * Revoke only this OAuth owner's tenant storage connection. In one transaction,
+   * disable future authorization and erase pending/active encrypted credentials
+   * plus outstanding one-use enrollment states. No Rclone subprocess is invoked.
+   * Provider-side token/session revocation remains the user's separate action.
+   */
+  async revokeStorage(ownerId: string, connectionId: string) {
+    await this.owned(ownerId, connectionId);
+    const client = await this.db().connect();
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(
+        "UPDATE nyx_connector_connections SET status='revoked', " +
+        "capabilities='[]'::jsonb, provider_capabilities='[]'::jsonb, " +
+        "resources='[]'::jsonb, updated_at=now() " +
+        "WHERE owner_id=$1 AND id=$2 AND provider IN ('mega','google-drive') " +
+        "AND status <> 'revoked' RETURNING id",
+        [ownerId, connectionId]);
+      if (updated.rowCount !== 1) throw new Error('TENANT_RCLONE_REVOKE_STALE');
+      await client.query(
+        'DELETE FROM nyx_rclone_tenant_credentials_v2 WHERE owner_id=$1 AND connection_id=$2',
+        [ownerId, connectionId]);
+      await client.query(
+        'DELETE FROM nyx_rclone_mega_enroll_states_v2 WHERE owner_id=$1 AND connection_id=$2',
+        [ownerId, connectionId]);
+      await client.query(
+        'DELETE FROM nyx_rclone_google_oauth_states_v2 WHERE owner_id=$1 AND connection_id=$2',
+        [ownerId, connectionId]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return {id:connectionId,status:'revoked' as const,
+      localCredentialsDeleted:true, externalRevocationRequired:true};
+  }
+
   /** Resolve a single authenticated connection + exact grant before any subprocess. */
   private async authorizedTarget(ownerId: string, connectionId: string,
                                  provider: TenantRcloneProvider, resourceId: string,
