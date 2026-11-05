@@ -10,6 +10,7 @@ const publicTenantStorage = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
   process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
   process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true';
 const ownerLinkEnabled = publicTenantStorage && process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true';
+const privateBrokerEnabled = ownerLinkEnabled && process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true';
 const iconOrigin = process.env.NYX_PUBLIC_URL?.startsWith('https://')
   ? new URL(process.env.NYX_PUBLIC_URL).origin : '';
 export const CONNECTIONS_PANEL_BRAND_ORIGIN = iconOrigin;
@@ -44,7 +45,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 #nyx-quick .spacer{flex:1}#nyx-quick .brand{font-size:17px;font-weight:700}
 #nyx-add{background:#087e52;color:white;border:1px solid #087e52;border-radius:12px;width:42px;height:42px;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
 #nyx-add:hover{background:#066841}
-#nyx-add-menu[hidden],#new-github-container[hidden]{display:none}
+#nyx-add-menu[hidden],#new-github-container[hidden],#nyx-private-read-controls[hidden]{display:none}
 #nyx-provider-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
 #nyx-provider-choices button{text-align:left;padding:11px}
 #nyx-provider-choices small{display:block;font-weight:400;opacity:.7}
@@ -97,7 +98,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <details class="nyx-provider-group" id="nyx-private-owner-group" hidden><summary>🔐 Private owner identity <span class="nyx-provider-count">Owner only</span></summary>
 <div class="nyx-provider-list"><p id="nyx-owner-status">Verification unavailable</p>
 <button id="nyx-owner-link" type="button">Verify my Google identity</button>
-<p class="muted">Identity verification only. Legacy Rclone access requires the separately secured broker; no existing secrets are shared here.</p></div></details>
+<p class="muted">Private legacy credentials remain exclusively on the isolated private service. This panel never receives them.</p><div id="nyx-private-read-controls" hidden><div class="row"><button id="nyx-private-roots" type="button">Load my private roots</button><label>Root <select id="nyx-private-root"></select></label><label>Path <input id="nyx-private-path" type="text" maxlength="1024" placeholder="Optional subfolder"></label><button id="nyx-private-list" type="button">List files</button></div><div id="nyx-private-items" aria-live="polite"></div></div></div></details>
 <details class="nyx-provider-group" id="nyx-other-group"><summary>🧩 Other services · GitHub <span class="nyx-provider-count" id="nyx-other-count">Loading</span></summary>
 <div class="nyx-provider-list">
 <div id="new-github-container" hidden><h2>Add GitHub connection</h2>
@@ -112,6 +113,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 'use strict';
 const publicTenantStorage=${JSON.stringify(publicTenantStorage)};
 const ownerLinkEnabled=${JSON.stringify(ownerLinkEnabled)};
+const privateBrokerEnabled=${JSON.stringify(privateBrokerEnabled)};
 const root=document.getElementById('connection-list');
 const rcloneRoot=document.getElementById('rclone-list');
 const rcloneStatus=document.getElementById('rclone-status');
@@ -357,8 +359,9 @@ async function refreshOwnerLink(){
   if(!status || status.eligible!==true){section.hidden=true;return;}
   section.hidden=false;
   document.getElementById('nyx-owner-status').textContent=status.linked===true ?
-   'Google identity linked. Private legacy Rclone broker not available yet.' :
+   (privateBrokerEnabled ? 'Google identity linked. Load your approved private roots.' : 'Google identity linked. Private legacy Rclone broker not activated.') :
    'Approved account: verification required before any private broker access.';
+  document.getElementById('nyx-private-read-controls').hidden=!(status.linked===true && privateBrokerEnabled);
  }catch{section.hidden=true;}
 }
 document.getElementById('nyx-owner-link').addEventListener('click',async()=>{
@@ -370,6 +373,36 @@ document.getElementById('nyx-owner-link').addEventListener('click',async()=>{
      url.pathname!=='/o/oauth2/v2/auth')throw Error('Unexpected identity sign-in URL');
   await request('ui/open-link',{url:result.url});
   show('Verify your approved Google account, then return and reopen the panel.');
+ }catch(e){show(e.message,true);}
+});
+document.getElementById('nyx-private-roots').addEventListener('click',async()=>{
+ try{
+  if(!privateBrokerEnabled)throw Error('Private broker is unavailable');
+  const data=await call('nyx_private_legacy_roots',{});
+  if(!Array.isArray(data?.roots))throw Error('Private roots unavailable');
+  const menu=document.getElementById('nyx-private-root');menu.replaceChildren();
+  for(const name of data.roots){
+   if(typeof name!=='string'||!/^[A-Z][A-Z0-9_]{0,39}$/.test(name))continue;
+   const opt=document.createElement('option');opt.value=name;opt.textContent=name;
+   menu.append(opt);
+  }
+  show('Private root choices refreshed.');
+ }catch(e){show(e.message,true);}
+});
+document.getElementById('nyx-private-list').addEventListener('click',async()=>{
+ try{
+  if(!privateBrokerEnabled)throw Error('Private broker is unavailable');
+  const root=document.getElementById('nyx-private-root').value;
+  const path=document.getElementById('nyx-private-path').value.trim();
+  const data=await call('nyx_private_legacy_list',{root,path});
+  if(!Array.isArray(data?.entries))throw Error('Private listing unavailable');
+  const target=document.getElementById('nyx-private-items');target.replaceChildren();
+  for(const entry of data.entries){
+   if(typeof entry?.name!=='string')continue;
+   const row=document.createElement('p');row.textContent=(entry.isDir?'📁 ':'📄 ')+entry.name;
+   target.append(row);
+  }
+  show('Private read completed (maximum 100 entries).');
  }catch(e){show(e.message,true);}
 });
 async function refreshTenantStorage(){

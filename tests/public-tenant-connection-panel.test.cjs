@@ -3,15 +3,16 @@ const assert = require('node:assert/strict');
 
 const modulePath = require.resolve('../dist/connectors/connections-panel');
 const vars = ['NYX_DEPLOYMENT_MODE', 'NYX_PUBLIC_CONNECTORS_ENABLED',
-  'NYX_MULTIUSER_RCLONE_ENABLED','NYX_PRIVATE_OWNER_LINK_ENABLED'];
+  'NYX_MULTIUSER_RCLONE_ENABLED','NYX_PRIVATE_OWNER_LINK_ENABLED','NYX_PRIVATE_BROKER_CLIENT_ENABLED'];
 
-function renderPanel(mode, connectors, multiuser, ownerLink = 'false') {
+function renderPanel(mode, connectors, multiuser, ownerLink = 'false', brokerClient = 'false') {
   const saved = Object.fromEntries(vars.map(name => [name, process.env[name]]));
   try {
     process.env.NYX_DEPLOYMENT_MODE = mode;
     process.env.NYX_PUBLIC_CONNECTORS_ENABLED = connectors;
     process.env.NYX_MULTIUSER_RCLONE_ENABLED = multiuser;
     process.env.NYX_PRIVATE_OWNER_LINK_ENABLED = ownerLink;
+    process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED = brokerClient;
     delete require.cache[modulePath];
     return require(modulePath).CONNECTIONS_PANEL_HTML;
   } finally {
@@ -65,9 +66,25 @@ test('owner verification is opt-in and displayed only after authenticated eligib
   assert.match(html,/call\('nyx_private_owner_link_status',\{\}\)/);
   assert.match(html,/status\.eligible!==true\)\{section\.hidden=true;return;/);
   assert.match(html,/call\('nyx_private_owner_link_begin',\{\}\)/);
-  assert.match(html,/Identity verification only\. Legacy Rclone access requires/);
+  assert.match(html,/Private legacy credentials remain exclusively on the isolated private service/);
+  assert.match(html,/const privateBrokerEnabled=false;/);
+  assert.match(html,/id="nyx-private-read-controls" hidden/);
   const privatePanel=renderPanel('private','false','false','true');
   assert.match(privatePanel,/const ownerLinkEnabled=false;/);
   const publicWithoutOptIn=renderPanel('public','true','true','false');
   assert.match(publicWithoutOptIn,/const ownerLinkEnabled=false;/);
+});
+
+test('private legacy browse controls need both verified owner linkage and broker opt-in', () => {
+  const enabled=renderPanel('public','true','true','true','true');
+  assert.match(enabled,/const privateBrokerEnabled=true;/);
+  assert.match(enabled,/id="nyx-private-read-controls" hidden/);
+  assert.match(enabled,/status\.linked===true && privateBrokerEnabled/);
+  assert.match(enabled,/nyx_private_legacy_roots/);
+  assert.match(enabled,/nyx_private_legacy_list/);
+  assert.match(enabled,/textContent=/);
+  const missingLink=renderPanel('public','true','true','false','true');
+  assert.match(missingLink,/const privateBrokerEnabled=false;/);
+  const privateMode=renderPanel('private','false','false','true','true');
+  assert.match(privateMode,/const privateBrokerEnabled=false;/);
 });

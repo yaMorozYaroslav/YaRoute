@@ -19,6 +19,7 @@ import { TenantRcloneService } from '../connectors/tenant-rclone.service';
 import { TenantGoogleOAuthService } from '../connectors/tenant-google-oauth.service';
 import { TenantMegaEnrollmentService } from '../connectors/tenant-mega-enrollment.service';
 import { PrivateLegacyOwnerLinkService } from '../connectors/private-legacy-owner-link.service';
+import { PrivateLegacyBrokerClient } from '../connectors/private-legacy-broker.client';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
@@ -50,6 +51,7 @@ export class McpService {
     private readonly herokuBroker: HerokuBrokerClient,
     private readonly maintenance: RuntimeMaintenanceService,
     private readonly ownerLink: PrivateLegacyOwnerLinkService,
+    private readonly privateBroker: PrivateLegacyBrokerClient,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -108,6 +110,7 @@ export class McpService {
              'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
               'nyx_storage_connection_revoke'] : []),
            ...(process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true' ? ['nyx_private_owner_link_status','nyx_private_owner_link_begin'] : []),
+            ...(process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true' ? ['nyx_private_legacy_roots','nyx_private_legacy_list'] : []),
            ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare',
            ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
@@ -626,6 +629,30 @@ export class McpService {
         inputSchema:z.object({}),
         annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
       },async()=>this.safeTool(()=>this.ownerLink.begin(this.connectorOwner())));
+    }
+
+    // Narrow broker tools are public-pilot-only and independently owner-linked.
+    // No provider credential, global remote name or general Rclone command crosses
+    // the public/private boundary. Both deployments must opt in separately.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
+        process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' &&
+        process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true' &&
+        process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true') {
+      server.registerTool('nyx_private_legacy_roots', {
+        title:'List my approved private storage roots',
+        description:'Owner-only signed read of explicitly approved private root aliases; never reveals Rclone configuration or credentials.',
+        inputSchema:z.object({}),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async()=>this.safeTool(()=>this.privateBroker.roots(this.connectorOwner())));
+      server.registerTool('nyx_private_legacy_list', {
+        title:'List files inside my approved private storage root',
+        description:'Owner-only read of at most 100 entries under one server-allowlisted root. No writes, arbitrary remote names or raw credentials.',
+        inputSchema:z.object({root:z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/),
+          path:z.string().max(1024).optional()}).strict(),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+      },async({root,path})=>this.safeTool(()=>
+        this.privateBroker.list(this.connectorOwner(),root,path||'')));
     }
 
     // Public multi-user connector mode deliberately omits all legacy global

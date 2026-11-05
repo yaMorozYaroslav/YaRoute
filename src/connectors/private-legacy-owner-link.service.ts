@@ -104,6 +104,27 @@ export class PrivateLegacyOwnerLinkService implements OnModuleInit, OnModuleDest
     return {eligible: true, linked, privateRcloneAvailable: false};
   }
 
+  /** Internal, server-only proof for signing a narrow broker delegation.
+   * Never return this record through an MCP tool or the public connections UI.
+   */
+  async trustedBrokerIdentity(ownerId: string) {
+    this.db();
+    if (!this.approved(ownerId)) throw new Error('PRIVATE_OWNER_LINK_NOT_AUTHORIZED');
+    const cfg = this.settings();
+    const result = await this.db().query(
+      'SELECT mcp_issuer,mcp_subject,google_subject,google_email ' +
+      'FROM nyx_private_owner_links_v1 WHERE id=1');
+    const row = result.rows[0];
+    if (result.rowCount !== 1 || row.mcp_issuer !== cfg.issuer ||
+        row.mcp_subject !== cfg.subject || row.google_email !== cfg.email ||
+        typeof row.google_subject !== 'string' ||
+        !/^[A-Za-z0-9_-]{5,255}$/.test(row.google_subject)) {
+      throw new Error('PRIVATE_OWNER_LINK_NOT_VERIFIED');
+    }
+    return {mcpIssuer:cfg.issuer,mcpSubject:cfg.subject,
+      googleSubject:row.google_subject};
+  }
+
   async begin(ownerId: string) {
     const cfg = this.settings();
     this.db();
