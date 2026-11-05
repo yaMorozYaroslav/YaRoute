@@ -178,3 +178,59 @@ test('public tenant mode accepts each valid signed-in OAuth subject, never the p
   assert.equal(privateAttempt.allowed, false);
   assert.equal(privateAttempt.res.statusCode, 403);
 });
+
+
+test('MCP connection requests cannot dispatch before valid OAuth login and required scopes', async t => {
+  const { McpController } = require('../dist/mcp/mcp.controller');
+  const oldMode = process.env.NYX_DEPLOYMENT_MODE;
+  const oldFlag = process.env.NYX_PUBLIC_CONNECTORS_ENABLED;
+  t.after(() => {
+    if (oldMode === undefined) delete process.env.NYX_DEPLOYMENT_MODE;
+    else process.env.NYX_DEPLOYMENT_MODE = oldMode;
+    if (oldFlag === undefined) delete process.env.NYX_PUBLIC_CONNECTORS_ENABLED;
+    else process.env.NYX_PUBLIC_CONNECTORS_ENABLED = oldFlag;
+  });
+  process.env.NYX_DEPLOYMENT_MODE = 'public';
+  process.env.NYX_PUBLIC_CONNECTORS_ENABLED = 'true';
+
+  const auth = authWithKeyProvider((_kid, callback) =>
+    callback(null, { getPublicKey: () => publicKey }));
+  const dispatched = [];
+  const controller = new McpController({
+    handle: async (_req, res, body) => {
+      dispatched.push({ subject: res.locals.nyxSubject, method: body.method });
+      return { ok: true };
+    },
+  }, auth);
+  const body = { method: 'tools/call', params: {
+    name: 'nyx_storage_connection_create', arguments: { provider: 'mega', name: 'Mine' },
+  } };
+
+  const absent = response();
+  await controller.handle({ headers: {} }, absent, body);
+  assert.equal(absent.statusCode, 401);
+  assert.equal(absent.body.error, 'invalid_token');
+  assert.equal(dispatched.length, 0);
+
+  const malformed = response();
+  await controller.handle({ headers: { authorization: 'Bearer invalid' } }, malformed, body);
+  assert.equal(malformed.statusCode, 401);
+  assert.equal(dispatched.length, 0);
+
+  const readOnlyToken = jwt.sign({ sub: 'visitor-a', scope: 'nyx.read' }, privateKey, {
+    algorithm: 'RS256', issuer, audience, expiresIn: 3600, keyid: 'signing-key-1',
+  });
+  const missingScope = response();
+  await controller.handle({ headers: { authorization: 'Bearer ' + readOnlyToken } },
+    missingScope, body);
+  assert.equal(missingScope.statusCode, 401);
+  assert.equal(missingScope.body.error, 'insufficient_scope');
+  assert.equal(dispatched.length, 0);
+
+  const permitted = response();
+  const result = await controller.handle({
+    headers: { authorization: 'Bearer ' + token(3600, 'visitor-a') },
+  }, permitted, body);
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(dispatched, [{ subject: 'visitor-a', method: 'tools/call' }]);
+});
