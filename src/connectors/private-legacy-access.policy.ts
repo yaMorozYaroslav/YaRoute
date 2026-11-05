@@ -7,6 +7,8 @@
  * identity token, then resolving the server-side account link. Never populate
  * these fields from MCP tool arguments, HTTP headers or a caller's email claim.
  *
+ * Only one operator-approved Google identity may qualify, even when old
+ * configuration still contains two links. Fail closed rather than guessing.
  * Do not use this policy to load legacy credentials in a public tenant runtime.
  */
 export interface AuthenticatedMcpIdentity {
@@ -34,9 +36,13 @@ export function mayUsePrivateLegacyRclone(
   mcp: AuthenticatedMcpIdentity | null | undefined,
   google: VerifiedGoogleIdentity | null | undefined,
   configuredLinks: readonly PrivateLegacyOwnerLink[] | null | undefined,
+  approvedGoogleEmail: string | null | undefined,
 ): boolean {
+  // The approved email comes only from protected operator configuration, never
+  // from a request. The Google subject and linked MCP subject must still match.
   if (!mcp || !google || !Array.isArray(configuredLinks) ||
-      configuredLinks.length < 1 || configuredLinks.length > 2) return false;
+      configuredLinks.length !== 1 || typeof approvedGoogleEmail !== 'string' ||
+      !emailPattern.test(normalizeEmail(approvedGoogleEmail))) return false;
   if (typeof mcp.issuer !== 'string' || !mcp.issuer.startsWith('https://') ||
       typeof mcp.subject !== 'string' || !mcp.subject.trim()) return false;
   if (!GOOGLE_ISSUERS.has(google.issuer) ||
@@ -64,5 +70,6 @@ export function mayUsePrivateLegacyRclone(
     link.mcpIssuer === mcp.issuer &&
     link.mcpSubject === mcp.subject &&
     link.googleSubject === google.subject &&
-    normalizeEmail(link.googleEmail) === normalizeEmail(google.email));
+    normalizeEmail(link.googleEmail) === normalizeEmail(google.email) &&
+    normalizeEmail(link.googleEmail) === normalizeEmail(approvedGoogleEmail));
 }
