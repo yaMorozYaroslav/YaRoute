@@ -12,18 +12,38 @@ class SigningKeysTemporarilyUnavailable extends Error {
 }
 
 function isTemporaryJwksFailure(error: Error): boolean {
-  const candidate = error as Error & { code?: unknown; statusCode?: unknown; status?: unknown };
-  const status = typeof candidate.statusCode === 'number'
-    ? candidate.statusCode : candidate.status;
-  if (typeof status === 'number' && (status === 429 || status >= 500 && status <= 599)) {
-    return true;
-  }
-  if (candidate.name === 'JwksRateLimitError' || candidate.name === 'TimeoutError' ||
-      candidate.name === 'AbortError') return true;
-  return typeof candidate.code === 'string' && new Set([
+  // jwks-rsa and Node HTTP clients can wrap the original network error in
+  // cause/response objects. Inspect only structured error metadata: matching
+  // arbitrary message text could misclassify an unknown signing key as an outage.
+  const temporaryCodes = new Set([
     'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ECONNRESET', 'ECONNREFUSED',
     'EAI_AGAIN', 'ENOTFOUND', 'ECONNABORTED',
-  ]).has(candidate.code);
+    'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET',
+  ]);
+  const seen = new Set<object>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth++) {
+    if (!current || typeof current !== 'object' || seen.has(current)) return false;
+    seen.add(current);
+    const candidate = current as {
+      name?: unknown; code?: unknown; statusCode?: unknown; status?: unknown;
+      response?: { status?: unknown }; cause?: unknown;
+    };
+    const status = typeof candidate.statusCode === 'number' ? candidate.statusCode
+      : typeof candidate.status === 'number' ? candidate.status
+      : candidate.response?.status;
+    if (typeof status === 'number' && (status === 429 ||
+        (status >= 500 && status <= 599))) return true;
+    if (candidate.name === 'JwksRateLimitError' ||
+        candidate.name === 'TimeoutError' || candidate.name === 'AbortError') {
+      return true;
+    }
+    if (typeof candidate.code === 'string' && temporaryCodes.has(candidate.code)) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
 }
 
 @Injectable()

@@ -68,6 +68,12 @@ test('transient JWKS failure is a closed 503 without a forced login challenge', 
     Object.assign(new Error('rate limited'), { name: 'JwksRateLimitError' }),
     Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }),
     Object.assign(new Error('issuer unavailable'), { statusCode: 503 }),
+    Object.assign(new Error('wrapped transport error'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }),
+    Object.assign(new Error('wrapped upstream error'), {
+      cause: { response: { status: 502 } },
+    }),
   ];
   for (const failure of failures) {
     await t.test(failure.name || failure.code || String(failure.statusCode), async () => {
@@ -96,6 +102,27 @@ test('missing signing key and expired token retain a proper 401 challenge', asyn
   assert.equal(expired.allowed, false);
   assert.equal(expired.res.statusCode, 401);
   assert.match(expired.res.headers['www-authenticate'], /error="invalid_token"/);
+});
+
+test('unknown signing keys are never treated as transient based on messages alone', async () => {
+  const unknownKey = Object.assign(new Error('503 unavailable string in an unknown-kid error'), {
+    name: 'SigningKeyNotFoundError',
+  });
+  const auth = authWithKeyProvider((_kid, callback) => callback(unknownKey));
+  const { allowed, res } = await request(auth);
+  assert.equal(allowed, false);
+  assert.equal(res.statusCode, 401);
+  assert.match(res.headers['www-authenticate'], /error="invalid_token"/);
+  assert.equal(res.headers['retry-after'], undefined);
+});
+
+test('cyclic or malformed nested JWKS errors still fail closed', async () => {
+  const loop = new Error('not a network issue');
+  loop.cause = loop;
+  const auth = authWithKeyProvider((_kid, callback) => callback(loop));
+  const { allowed, res } = await request(auth);
+  assert.equal(allowed, false);
+  assert.equal(res.statusCode, 401);
 });
 
 test('a recovered key provider accepts the same valid login and owner restrictions', async () => {
