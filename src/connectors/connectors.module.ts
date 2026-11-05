@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+import { StorageModule } from '../storage/storage.module';
+import { PrivateLegacyBrokerService } from './private-legacy-broker.service';
+import { PrivateLegacyBrokerController } from './private-legacy-broker.controller';
+import { PrivateLegacyBrokerClient } from './private-legacy-broker.client';
 import { ConnectorsService } from './connectors.service';
 import { TenantRcloneService } from './tenant-rclone.service';
 import { TenantGoogleOAuthService } from './tenant-google-oauth.service';
@@ -14,9 +18,10 @@ import { HerokuBrokerClient } from './heroku-broker.client';
 import { GithubOAuthController } from './github-oauth.controller';
 
 @Module({
-  controllers:[GithubOAuthController,GoogleOAuthController,MegaEnrollmentController,PrivateLegacyOwnerLinkController],
+  imports:[StorageModule],
+  controllers:[GithubOAuthController,GoogleOAuthController,MegaEnrollmentController,PrivateLegacyOwnerLinkController,PrivateLegacyBrokerController],
   providers:[
-    ConnectorsService, GithubAppService, HerokuBrokerClient, TenantRcloneService, TenantGoogleOAuthService, TenantMegaEnrollmentService, PrivateLegacyOwnerLinkService,
+    ConnectorsService, GithubAppService, HerokuBrokerClient, PrivateLegacyBrokerService, PrivateLegacyBrokerClient, TenantRcloneService, TenantGoogleOAuthService, TenantMegaEnrollmentService, PrivateLegacyOwnerLinkService,
     {provide: GithubReadonlyConnector,
       useFactory:(connections:ConnectorsService,credentials:GithubAppService)=>
         new GithubReadonlyConnector(connections.registryPolicy(),credentials),
@@ -27,6 +32,6 @@ import { GithubOAuthController } from './github-oauth.controller';
         new GithubWriteConnector(connections.registryPolicy(),credentials),
       inject:[ConnectorsService,GithubAppService]},
   ],
-  exports:[HerokuBrokerClient,ConnectorsService,GithubAppService,GithubReadonlyConnector,GithubWriteConnector,TenantRcloneService,TenantGoogleOAuthService,TenantMegaEnrollmentService,PrivateLegacyOwnerLinkService],
+  exports:[HerokuBrokerClient,PrivateLegacyBrokerClient,ConnectorsService,GithubAppService,GithubReadonlyConnector,GithubWriteConnector,TenantRcloneService,TenantGoogleOAuthService,TenantMegaEnrollmentService,PrivateLegacyOwnerLinkService],
 })
 export class ConnectorsModule {}
