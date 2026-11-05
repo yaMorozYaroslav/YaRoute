@@ -4,6 +4,11 @@
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
 export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v9.html';
+// Public users connect only their own storage; never show the operator's
+// private Rclone inventory in the shared, authenticated tenant UI.
+const publicTenantStorage = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+  process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
+  process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true';
 const iconOrigin = process.env.NYX_PUBLIC_URL?.startsWith('https://')
   ? new URL(process.env.NYX_PUBLIC_URL).origin : '';
 export const CONNECTIONS_PANEL_BRAND_ORIGIN = iconOrigin;
@@ -68,12 +73,12 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <section id="nyx-add-menu" hidden aria-label="Add a connection">
 <h2>Add a connection</h2>
 <div id="nyx-provider-choices" role="group" aria-label="Choose a provider">
-<button type="button" data-open="nyx-google-group">🌈 Google Drive<small>Independent OAuth connection in DEV</small></button>
-<button type="button" data-open="nyx-mega-group">🗄️ MEGA<small>Independent secure sign-in in DEV</small></button>
-<button type="button" data-open="nyx-rclone-group">🧰 Existing Rclone<small>View private configuration metadata</small></button>
+<button type="button" data-open="nyx-google-group">🌈 Google Drive<small>Connect your own Google Drive</small></button>
+<button type="button" data-open="nyx-mega-group">🗄️ MEGA<small>Connect your own MEGA account</small></button>
+<button type="button" data-open="nyx-rclone-group" ${publicTenantStorage ? 'hidden' : ''}>🧰 Existing Rclone<small>View private configuration metadata</small></button>
 <button type="button" data-open="nyx-other-group" data-github="true">🐙 GitHub<small>Create a named GitHub connection</small></button>
 </div>
-<p class="muted">Multi-user storage onboarding works only in isolated DEV when enabled. Never enter credentials in ChatGPT.</p>
+<p class="muted">${publicTenantStorage ? 'Connect your own read-only Google Drive or MEGA storage. Other users and private legacy remotes remain inaccessible.' : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
 </section>
 <header><p class="muted">Existing connections grouped by provider. Rclone configuration is not proof of connectivity.</p>
 <div class="warn">GitHub permissions and repository writes require explicit grants. No default-branch writes, workflow dispatch, credential editing, billing or infrastructure actions.</div></header>
@@ -82,7 +87,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="nyx-provider-list"><div class="row" id="tenant-google-create" hidden><label>Name <input id="tenant-google-name" type="text" maxlength="80" placeholder="My Google Drive"></label><button type="button" id="tenant-google-add">Create Google connection</button></div><div id="tenant-google-list" aria-live="polite"></div><div id="nyx-google-list" aria-live="polite">Checking configured remotes…</div></div></details>
 <details class="nyx-provider-group" id="nyx-mega-group"><summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">Loading</span></summary>
 <div class="nyx-provider-list"><div class="row" id="tenant-mega-create" hidden><label>Name <input id="tenant-mega-name" type="text" maxlength="80" placeholder="My MEGA"></label><button type="button" id="tenant-mega-add">Create MEGA connection</button></div><div id="tenant-mega-list" aria-live="polite"></div><div id="nyx-mega-list" aria-live="polite">Checking configured remotes…</div></div></details>
-<details class="nyx-provider-group" id="nyx-rclone-group"><summary>🧰 Rclone <span class="nyx-provider-count" id="nyx-rclone-count">Private inventory</span></summary>
+<details class="nyx-provider-group" id="nyx-rclone-group" ${publicTenantStorage ? 'hidden' : ''}><summary>🧰 Rclone <span class="nyx-provider-count" id="nyx-rclone-count">Private inventory</span></summary>
 <div class="nyx-provider-list"><p class="provider-note">Existing private Rclone metadata; remotes are listed under their providers above. This does not import, connect or modify credentials.</p>
 <button id="rclone-refresh" type="button">Refresh configured remotes</button>
 <div id="rclone-list" role="status" aria-live="polite">Loading…</div>
@@ -100,6 +105,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <script>
 (function(){
 'use strict';
+const publicTenantStorage=${JSON.stringify(publicTenantStorage)};
 const root=document.getElementById('connection-list');
 const rcloneRoot=document.getElementById('rclone-list');
 const rcloneStatus=document.getElementById('rclone-status');
@@ -264,6 +270,7 @@ function renderTenant(connections){
   host.replaceChildren();
   const kind=provider==='mega'?'mega-root':'drive';
   const items=connections.filter(x=>x.provider===provider && x.status!=='revoked');
+  document.getElementById('nyx-'+label+'-count').textContent=items.length+' mine';
   host.append(el('p',items.length+' separate NestNyx connection(s).'));
   for(const item of items){
    const box=el('div');box.className='card';
@@ -346,6 +353,7 @@ async function refreshTenantStorage(){
  }catch{
   tenantToolsAvailable=false;
   for(const name of ['google','mega']){
+   document.getElementById('nyx-'+name+'-count').textContent='Unavailable';
    document.getElementById('tenant-'+name+'-create').hidden=true;
    document.getElementById('tenant-'+name+'-list').replaceChildren(
      el('p','Independent multi-user onboarding is not enabled on this deployment.'));
@@ -491,7 +499,7 @@ for(const choice of document.querySelectorAll('#nyx-provider-choices button[data
     document.getElementById('tenant-'+label+'-name').focus();
     show('Create a separate '+label+' connection. Never enter credentials into ChatGPT.');
    }else{
-    show('New Google Drive/MEGA authorization is not enabled in production.');
+    show('New Google Drive/MEGA authorization is not enabled on this deployment.');
    }
   }
   addMenu.hidden=true;
@@ -521,7 +529,8 @@ document.getElementById('new-form').addEventListener('submit',async e=>{
 });
 ready.then(()=>{
  refresh().catch(e=>show(e.message,true));
- refreshRclone();
+ if(publicTenantStorage)refreshTenantStorage();
+ else refreshRclone();
 }).catch(e=>show('MCP Apps unavailable: '+e.message,true));
 })();
 </script></body></html>`;
