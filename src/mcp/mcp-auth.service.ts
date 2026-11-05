@@ -3,6 +3,29 @@ import type { Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 
+/** A temporary issuer/JWKS failure is not evidence that the user's grant expired. */
+class SigningKeysTemporarilyUnavailable extends Error {
+  constructor() {
+    super('Signing keys temporarily unavailable');
+    this.name = 'SigningKeysTemporarilyUnavailable';
+  }
+}
+
+function isTemporaryJwksFailure(error: Error): boolean {
+  const candidate = error as Error & { code?: unknown; statusCode?: unknown; status?: unknown };
+  const status = typeof candidate.statusCode === 'number'
+    ? candidate.statusCode : candidate.status;
+  if (typeof status === 'number' && (status === 429 || status >= 500 && status <= 599)) {
+    return true;
+  }
+  if (candidate.name === 'JwksRateLimitError' || candidate.name === 'TimeoutError' ||
+      candidate.name === 'AbortError') return true;
+  return typeof candidate.code === 'string' && new Set([
+    'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ECONNRESET', 'ECONNREFUSED',
+    'EAI_AGAIN', 'ENOTFOUND', 'ECONNABORTED',
+  ]).has(candidate.code);
+}
+
 @Injectable()
 export class McpAuthService {
   private client?: ReturnType<typeof jwksClient>;
@@ -63,6 +86,18 @@ export class McpAuthService {
       res.locals.nyxSubject = payload.sub;
       return true;
     } catch (error) {
+      if (error instanceof SigningKeysTemporarilyUnavailable) {
+        // Do not issue WWW-Authenticate here: this is an issuer outage, not a
+        // revoked or invalid user grant. Fail closed and let the client retry.
+        console.warn('[MCP OAuth] temporary signing-key lookup failure');
+        res.setHeader('Retry-After', '15');
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(503).json({
+          error: 'temporarily_unavailable',
+          error_description: 'Authentication provider temporarily unavailable; retry later',
+        });
+        return false;
+      }
       console.error(
         '[MCP OAuth] verification failed:',
         error instanceof Error ? `${error.name}: ${error.message}` : String(error),
@@ -83,6 +118,7 @@ export class McpAuthService {
     const client = this.jwks(issuer);
 
     return new Promise((resolve, reject) => {
+      let temporaryKeyLookupFailure = false;
       jwt.verify(
         token,
         (header, callback) => {
@@ -92,6 +128,9 @@ export class McpAuthService {
           }
           client.getSigningKey(header.kid, (error, key) => {
             if (error || !key) {
+              // jsonwebtoken wraps key-provider errors as JsonWebTokenError.
+              // Record the original classification before that wrapping.
+              if (error && isTemporaryJwksFailure(error)) temporaryKeyLookupFailure = true;
               callback(error || new Error('Signing key not found'));
               return;
             }
@@ -100,6 +139,10 @@ export class McpAuthService {
         },
         { issuer, audience, algorithms },
         (error, decoded) => {
+          if (temporaryKeyLookupFailure) {
+            reject(new SigningKeysTemporarilyUnavailable());
+            return;
+          }
           if (error || !decoded || typeof decoded === 'string') {
             reject(error || new Error('Invalid JWT payload'));
             return;
