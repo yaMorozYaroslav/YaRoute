@@ -57,17 +57,19 @@ test('valid signed Google ID tokens permit only their linked MCP owner', async (
   const two = await verifier.verify(idToken({
     sub: 'google-two', email: 'owner-two@example.com',
   }), expected);
-  assert.equal(one.email, 'owner-one@example.com');
-  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-one'), one, links), true);
-  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-two'), two, links), true);
-  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-one'), two, links), false);
-  assert.equal(mayUsePrivateLegacyRclone(mcp('public-user'), one, links), false);
-  assert.equal(mayUsePrivateLegacyRclone(null, one, links), false);
+  const approvedEmail = 'owner-one@example.com';
+  assert.equal(one.email, approvedEmail);
+  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-one'), one, [links[0]], approvedEmail), true);
+  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-two'), two, [links[1]], approvedEmail), false);
+  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-one'), one, links, approvedEmail), false);
+  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-one'), two, [links[0]], approvedEmail), false);
+  assert.equal(mayUsePrivateLegacyRclone(mcp('public-user'), one, [links[0]], approvedEmail), false);
+  assert.equal(mayUsePrivateLegacyRclone(null, one, [links[0]], approvedEmail), false);
 });
 
 test('matching email with a different Google subject cannot claim operator Rclone', async () => {
   const imposter = await verifier.verify(idToken({ sub: 'other-google-sub' }), expected);
-  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-one'), imposter, links), false);
+  assert.equal(mayUsePrivateLegacyRclone(mcp('mcp-one'), imposter, [links[0]], 'owner-one@example.com'), false);
 });
 
 test('unsigned identity fields, wrong signature and non-RS256 signing are denied', async () => {
