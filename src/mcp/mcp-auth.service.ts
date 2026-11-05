@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
+import { privateDevSingleGoogleOwnerAllowed } from './private-dev-google-login.policy';
 
 /** A temporary issuer/JWKS failure is not evidence that the user's grant expired. */
 class SigningKeysTemporarilyUnavailable extends Error {
@@ -101,6 +102,20 @@ export class McpAuthService {
         process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true';
       if (!connectorMode && !allowedSubjects.has(payload.sub)) {
         res.status(403).json({ error: 'access_denied', error_description: 'Private NYX instance: user not authorized' });
+        return false;
+      }
+      // Opt-in Dev-only second gate: restrict the legacy private Rclone tools
+      // to ONE operator-approved Google-social OAuth subject. Identity claims
+      // are read only from the already signature-verified MCP JWT, never from
+      // request fields. The Dev operator must separately verify that this
+      // subject belongs to the intended Google account before enabling it.
+      if (!connectorMode &&
+          process.env.NYX_PRIVATE_DEV_SINGLE_GOOGLE_OWNER === 'true' &&
+          !privateDevSingleGoogleOwnerAllowed(payload, process.env)) {
+        res.status(403).json({
+          error: 'access_denied',
+          error_description: 'Private Dev Google owner verification required',
+        });
         return false;
       }
       res.locals.nyxSubject = payload.sub;
