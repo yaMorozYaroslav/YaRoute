@@ -35,8 +35,8 @@ test.after(() => {
   }
 });
 
-function token(expiresIn = 3600) {
-  return jwt.sign({ sub: 'owner-test', scope: 'nyx.read nyx.write' }, privateKey, {
+function token(expiresIn = 3600, subject = 'owner-test') {
+  return jwt.sign({ sub: subject, scope: 'nyx.read nyx.write' }, privateKey, {
     algorithm: 'RS256', issuer, audience, expiresIn, keyid: 'signing-key-1',
   });
 }
@@ -146,4 +146,35 @@ test('a recovered key provider accepts the same valid login and owner restrictio
   } finally {
     process.env.NYX_PRIVATE_OAUTH_SUBJECTS = 'owner-test';
   }
+});
+
+test('public tenant mode accepts each valid signed-in OAuth subject, never the private allowlist', async t => {
+  const savedMode = process.env.NYX_DEPLOYMENT_MODE;
+  const savedEnabled = process.env.NYX_PUBLIC_CONNECTORS_ENABLED;
+  t.after(() => {
+    process.env.NYX_DEPLOYMENT_MODE = savedMode;
+    process.env.NYX_PUBLIC_CONNECTORS_ENABLED = savedEnabled;
+  });
+  process.env.NYX_DEPLOYMENT_MODE = 'public';
+  process.env.NYX_PUBLIC_CONNECTORS_ENABLED = 'true';
+  const auth = authWithKeyProvider((_kid, callback) =>
+    callback(null, { getPublicKey: () => publicKey }));
+  const alice = await request(auth, token(3600, 'tenant-alice'));
+  const bob = await request(auth, token(3600, 'tenant-bob'));
+  assert.equal(alice.allowed, true);
+  assert.equal(bob.allowed, true);
+  assert.equal(alice.res.locals.nyxSubject, 'tenant-alice');
+  assert.equal(bob.res.locals.nyxSubject, 'tenant-bob');
+  assert.notEqual(alice.res.locals.nyxSubject, bob.res.locals.nyxSubject);
+
+  // Public login cannot bypass private-mode or disabled-connector gates.
+  process.env.NYX_PUBLIC_CONNECTORS_ENABLED = 'false';
+  const disabled = await request(auth, token(3600, 'tenant-alice'));
+  assert.equal(disabled.allowed, false);
+  assert.equal(disabled.res.statusCode, 403);
+  process.env.NYX_DEPLOYMENT_MODE = 'private';
+  process.env.NYX_PUBLIC_CONNECTORS_ENABLED = 'true';
+  const privateAttempt = await request(auth, token(3600, 'tenant-bob'));
+  assert.equal(privateAttempt.allowed, false);
+  assert.equal(privateAttempt.res.statusCode, 403);
 });
