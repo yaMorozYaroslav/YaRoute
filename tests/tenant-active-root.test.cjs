@@ -45,7 +45,7 @@ test('new MCP test-active route is owner-scoped, guarded and read only',()=>{
  const mcp=readFileSync('src/mcp/mcp.service.ts','utf8');
  const start=mcp.indexOf("server.registerTool('nyx_storage_connection_test_active'");
  assert.ok(start>0);
- const route=mcp.slice(start,mcp.indexOf('    // Public multi-user connector mode',start));
+ const route=mcp.slice(start,mcp.indexOf('    // Identity-only owner linking',start));
  assert.match(route,/this\.tenantRclone\.probeAuthorizedRoot/);
  assert.match(route,/this\.connectorOwner\(\)/);
  assert.match(route,/readOnlyHint:true/);

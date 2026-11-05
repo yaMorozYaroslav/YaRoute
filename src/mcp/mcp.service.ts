@@ -18,6 +18,7 @@ import { ConnectorsService } from '../connectors/connectors.service';
 import { TenantRcloneService } from '../connectors/tenant-rclone.service';
 import { TenantGoogleOAuthService } from '../connectors/tenant-google-oauth.service';
 import { TenantMegaEnrollmentService } from '../connectors/tenant-mega-enrollment.service';
+import { PrivateLegacyOwnerLinkService } from '../connectors/private-legacy-owner-link.service';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
@@ -48,6 +49,7 @@ export class McpService {
     private readonly githubWrites: GithubWriteConnector,
     private readonly herokuBroker: HerokuBrokerClient,
     private readonly maintenance: RuntimeMaintenanceService,
+    private readonly ownerLink: PrivateLegacyOwnerLinkService,
   ) {
     const handler = createMcpHandler(() => this.buildServer());
     this.nodeHandler = toNodeHandler(handler, {
@@ -105,6 +107,7 @@ export class McpService {
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
              'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
               'nyx_storage_connection_revoke'] : []),
+           ...(process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true' ? ['nyx_private_owner_link_status','nyx_private_owner_link_begin'] : []),
            ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare',
            ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
@@ -604,6 +607,25 @@ export class McpService {
         const scope=herokuReadAuthorization(this.connectorOwner(),app);
         return this.herokuBroker.releases(scope.ownerId,scope.connectionId,scope.app);
       }));
+    }
+
+    // Identity-only owner linking is gated behind a separate public pilot flag.
+    // It never exposes a legacy remote or hands off a private Rclone credential.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
+        process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true') {
+      server.registerTool('nyx_private_owner_link_status', {
+        title:'Check whether my private owner identity is linked',
+        description:'Eligibility for a separate Google owner-link only. Never returns identities, secrets or private Rclone remotes. A linked identity does not yet grant broker access.',
+        inputSchema:z.object({}),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async()=>this.safeTool(()=>this.ownerLink.status(this.connectorOwner())));
+      server.registerTool('nyx_private_owner_link_begin', {
+        title:'Verify my approved Google identity for private Rclone ownership',
+        description:'Start a one-time Google OIDC identity-only sign-in for the operator-approved MCP owner. Does not request Google Drive access or expose existing Rclone credentials.',
+        inputSchema:z.object({}),
+        annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+      },async()=>this.safeTool(()=>this.ownerLink.begin(this.connectorOwner())));
     }
 
     // Public multi-user connector mode deliberately omits all legacy global

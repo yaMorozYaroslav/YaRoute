@@ -9,6 +9,7 @@ export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v9.html';
 const publicTenantStorage = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
   process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
   process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true';
+const ownerLinkEnabled = publicTenantStorage && process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true';
 const iconOrigin = process.env.NYX_PUBLIC_URL?.startsWith('https://')
   ? new URL(process.env.NYX_PUBLIC_URL).origin : '';
 export const CONNECTIONS_PANEL_BRAND_ORIGIN = iconOrigin;
@@ -93,6 +94,10 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div id="rclone-list" role="status" aria-live="polite">Loading…</div>
 <div id="rclone-status" role="status" aria-live="polite"></div>
 </div></details>
+<details class="nyx-provider-group" id="nyx-private-owner-group" hidden><summary>🔐 Private owner identity <span class="nyx-provider-count">Owner only</span></summary>
+<div class="nyx-provider-list"><p id="nyx-owner-status">Verification unavailable</p>
+<button id="nyx-owner-link" type="button">Verify my Google identity</button>
+<p class="muted">Identity verification only. Legacy Rclone access requires the separately secured broker; no existing secrets are shared here.</p></div></details>
 <details class="nyx-provider-group" id="nyx-other-group"><summary>🧩 Other services · GitHub <span class="nyx-provider-count" id="nyx-other-count">Loading</span></summary>
 <div class="nyx-provider-list">
 <div id="new-github-container" hidden><h2>Add GitHub connection</h2>
@@ -106,6 +111,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 (function(){
 'use strict';
 const publicTenantStorage=${JSON.stringify(publicTenantStorage)};
+const ownerLinkEnabled=${JSON.stringify(ownerLinkEnabled)};
 const root=document.getElementById('connection-list');
 const rcloneRoot=document.getElementById('rclone-list');
 const rcloneStatus=document.getElementById('rclone-status');
@@ -343,6 +349,29 @@ function renderTenant(connections){
   }
  }
 }
+async function refreshOwnerLink(){
+ if(!ownerLinkEnabled)return;
+ const section=document.getElementById('nyx-private-owner-group');
+ try{
+  const status=await call('nyx_private_owner_link_status',{});
+  if(!status || status.eligible!==true){section.hidden=true;return;}
+  section.hidden=false;
+  document.getElementById('nyx-owner-status').textContent=status.linked===true ?
+   'Google identity linked. Private legacy Rclone broker not available yet.' :
+   'Approved account: verification required before any private broker access.';
+ }catch{section.hidden=true;}
+}
+document.getElementById('nyx-owner-link').addEventListener('click',async()=>{
+ try{
+  const result=await call('nyx_private_owner_link_begin',{});
+  if(typeof result?.url!=='string')throw Error('Owner verification link missing');
+  const url=new URL(result.url);
+  if(url.protocol!=='https:' || url.hostname!=='accounts.google.com' ||
+     url.pathname!=='/o/oauth2/v2/auth')throw Error('Unexpected identity sign-in URL');
+  await request('ui/open-link',{url:result.url});
+  show('Verify your approved Google account, then return and reopen the panel.');
+ }catch(e){show(e.message,true);}
+});
 async function refreshTenantStorage(){
  try{
   const data=await call('nyx_storage_connections_list',{});
@@ -529,8 +558,10 @@ document.getElementById('new-form').addEventListener('submit',async e=>{
 });
 ready.then(()=>{
  refresh().catch(e=>show(e.message,true));
- if(publicTenantStorage)refreshTenantStorage();
- else refreshRclone();
+ if(publicTenantStorage){
+  refreshTenantStorage();
+  if(ownerLinkEnabled)refreshOwnerLink();
+ }else refreshRclone();
 }).catch(e=>show('MCP Apps unavailable: '+e.message,true));
 })();
 </script></body></html>`;
