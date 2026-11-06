@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
+import { assertPublicTenantGoogleOwnerId, assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorRegistry } from './connector-registry';
 import { PostgresConnectorRepository } from './postgres-connector-repository';
 
@@ -66,6 +66,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   private owner(value: string): string {
     if (!value || !/^oauth:[^\x00-\x1f]{1,500}$/.test(value)) throw new Error('CONNECTOR_OWNER_INVALID');
+    assertPublicTenantGoogleOwnerId(value);
     return value;
   }
   private async owned(ownerId: string, id: string): Promise<ConnectorConnection> {

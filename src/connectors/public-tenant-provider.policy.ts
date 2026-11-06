@@ -25,3 +25,36 @@ export function assertPublicTenantStorageProvider(
     throw new Error('PUBLIC_TENANT_MEGA_ONLY');
   }
 }
+
+/**
+ * Public MEGA-only onboarding uses the existing OAuth login's signed JWT.
+ * The trusted issuer must be configured to mint google-oauth2|<Google sub>
+ * only following real Google OAuth authentication. This pattern is NOT a
+ * substitute for signature/issuer/audience/scope verification in McpAuthService
+ * or for separately verifying the operator's Google email before broker access.
+ *
+ * Enforce this at the MCP entrypoint and again at server-only enrollment /
+ * tenant credential boundaries, so a previously issued non-Google sign-in
+ * state cannot be redeemed after enabling MEGA-only Google-login mode.
+ */
+export function assertPublicTenantGoogleSubject(
+  subject: unknown,
+  env: Readonly<Record<string,string|undefined>> = process.env,
+): void {
+  if (!publicTenantMegaOnly(env)) return;
+  if (typeof subject !== 'string' ||
+      !/^google-oauth2\|[0-9]{6,128}$/.test(subject)) {
+    throw new Error('PUBLIC_GOOGLE_OAUTH_REQUIRED');
+  }
+}
+
+export function assertPublicTenantGoogleOwnerId(
+  ownerId: unknown,
+  env: Readonly<Record<string,string|undefined>> = process.env,
+): void {
+  if (!publicTenantMegaOnly(env)) return;
+  if (typeof ownerId !== 'string' || !ownerId.startsWith('oauth:')) {
+    throw new Error('PUBLIC_GOOGLE_OAUTH_REQUIRED');
+  }
+  assertPublicTenantGoogleSubject(ownerId.slice('oauth:'.length),env);
+}

@@ -18,7 +18,7 @@ function withMegaOnly(t) {
   Object.assign(process.env,enabled());
 }
 const id='12345678-1234-4234-8234-123456789abc';
-const owner='oauth:tenant-one';
+const owner='oauth:google-oauth2|111111111111111111111';
 
 test('MEGA-only public mode rejects independent Google Drive and allows only MEGA',()=>{
   assert.equal(publicTenantMegaOnly(enabled()),true);
@@ -71,7 +71,7 @@ test('foreign/old Google tenant cannot stage, probe or activate credentials',asy
     /PUBLIC_TENANT_MEGA_ONLY/);
   await assert.rejects(()=>svc.probeAuthorizedRoot(owner,id,'google-drive','folder-1'),
     /PUBLIC_TENANT_MEGA_ONLY/);
-  await assert.rejects(()=>svc.stageCredential('oauth:foreign',id,profile),
+  await assert.rejects(()=>svc.stageCredential('oauth:google-oauth2|222222222222222222222',id,profile),
     /TENANT_RCLONE_CONNECTION_FORBIDDEN/);
 });
 
