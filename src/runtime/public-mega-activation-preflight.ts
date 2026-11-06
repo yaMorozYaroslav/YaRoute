@@ -46,7 +46,11 @@ export function publicMegaActivationPreflight(
   check(env.NYX_DEPLOYMENT_MODE === 'public', 'PUBLIC_DEPLOYMENT_MODE_REQUIRED');
   check(env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true', 'PUBLIC_CONNECTORS_REQUIRED');
   check(env.NYX_MULTIUSER_RCLONE_ENABLED === 'true', 'TENANT_RCLONE_REQUIRED');
-  check(env.NYX_PUBLIC_TENANT_MEGA_ONLY === 'true', 'MEGA_ONLY_REQUIRED');
+  // Both supported public modes require Google login. Enforce an
+  // unambiguous provider choice, never a silently permissive fallback.
+  const megaOnly = env.NYX_PUBLIC_TENANT_MEGA_ONLY === 'true';
+  const googleMulti = env.NYX_PUBLIC_TENANT_GOOGLE_MULTI_ENABLED === 'true';
+  check(megaOnly !== googleMulti, 'EXACTLY_ONE_TENANT_PROVIDER_MODE_REQUIRED');
 
   check(Boolean(current), 'DEDICATED_HTTPS_PUBLIC_ORIGIN_REQUIRED');
   check(Boolean(existingPrivate), 'EXISTING_PRIVATE_ORIGIN_EVIDENCE_REQUIRED');
@@ -93,7 +97,8 @@ export function publicMegaActivationPreflight(
   check(filePaths.every(file => !exists(file)), 'PRIVATE_RCLONE_FILE_PRESENT');
 
   return {
-    schema: 'nyx.public-mega-activation-preflight.v1',
+    schema: 'nyx.public-storage-activation-preflight.v2',
+    providerMode: megaOnly === googleMulti ? 'invalid' : megaOnly ? 'mega-only' : 'mega-and-google-drive',
     status: blockers.length ? 'BLOCKED' : 'CONFIG_PREPARED_LIVE_TESTS_REQUIRED',
     blockers,
     noSecretValuesReturned: true,
@@ -106,7 +111,7 @@ export function publicMegaActivationPreflight(
       'AUTH0_GOOGLE_CONNECTION_AND_GOOGLE_LOGIN_ENABLED_FOR_PUBLIC_CLIENT',
       'HOSTING_BUDGET_AND_DISTINCT_APP_DATABASE_CONFIRMED',
       'DEPLOYED_TESTER_COMMIT_AND_TOOL_DISCOVERY_VERIFIED',
-      'TWO_REAL_GOOGLE_SIGNINS_AND_MEGA_PROVIDER_ENROLLMENTS',
+      'TWO_REAL_GOOGLE_SIGNINS_AND_INDEPENDENT_PROVIDER_ENROLLMENTS',
       'CROSS_TENANT_DENIAL_AND_RESTART_PERSISTENCE',
       'SEPARATE_OWNER_EMAIL_TO_GOOGLE_SUB_LINK_AND_READ_ONLY_BROKER',
     ],
