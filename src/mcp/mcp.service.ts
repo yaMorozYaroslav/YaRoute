@@ -18,6 +18,7 @@ import { ConnectorsService } from '../connectors/connectors.service';
 import { TenantRcloneService } from '../connectors/tenant-rclone.service';
 import { TenantGoogleOAuthService } from '../connectors/tenant-google-oauth.service';
 import { TenantMegaEnrollmentService } from '../connectors/tenant-mega-enrollment.service';
+import { publicTenantMegaOnly } from '../connectors/public-tenant-provider.policy';
 import { PrivateLegacyOwnerLinkService } from '../connectors/private-legacy-owner-link.service';
 import { PrivateLegacyBrokerClient } from '../connectors/private-legacy-broker.client';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
@@ -171,8 +172,10 @@ export class McpService {
           ...(process.env.NYX_DEPLOYMENT_MODE === 'public' &&
               process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
               process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true'
-            ? [{id:'mega',availability:'isolated_read_only_pilot'},
-               {id:'google-drive',availability:'isolated_read_only_pilot'}] : [])],
+            ? (publicTenantMegaOnly()
+              ? [{id:'mega',availability:'isolated_read_only_pilot'}]
+              : [{id:'mega',availability:'isolated_read_only_pilot'},
+                 {id:'google-drive',availability:'isolated_read_only_pilot'}]) : [])],
         note:'GitHub authorization is required. Refresh ChatGPT plugin discovery after deployment.',
       };
     });

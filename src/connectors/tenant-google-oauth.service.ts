@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { Pool } from 'pg';
+import { assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorsService } from './connectors.service';
 import { TenantRcloneService } from './tenant-rclone.service';
 
@@ -76,6 +77,7 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
   }
 
   async begin(ownerId: string, connectionId: string, folderId: string) {
+    assertPublicTenantStorageProvider('google-drive');
     const {id} = oauthClient();
     const origin = oauthBase();
     this.db();
@@ -122,6 +124,7 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
 
   /** Public HTTPS callback; only a one-time stored state identifies the owner. */
   async complete(state: string, code: string) {
+    assertPublicTenantStorageProvider('google-drive');
     if (!/^[A-Za-z0-9_-]{40,100}$/.test(state) ||
         typeof code !== 'string' || code.length < 3 || code.length > 4096 ||
         /[\x00-\x1f]/.test(code)) {

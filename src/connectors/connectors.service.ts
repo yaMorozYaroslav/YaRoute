@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorRegistry } from './connector-registry';
 import { PostgresConnectorRepository } from './postgres-connector-repository';
 
@@ -196,6 +197,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
 
   async createStorage(ownerId: string, provider: 'google-drive' | 'mega', name: string) {
     this.assertTenantStorageMode();
+    assertPublicTenantStorageProvider(provider);
     this.owner(ownerId);
     const existing = await this.policy().list(ownerId);
     if (existing.filter(c => c.status !== 'revoked').length >= 12) {
@@ -213,6 +215,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   async storagePermissions(ownerId: string, id: string, capabilities: ConnectorCapability[]) {
     this.assertTenantStorageMode();
     const connection = await this.owned(this.owner(ownerId), id);
+    assertPublicTenantStorageProvider(connection.provider);
     if (!['google-drive','mega'].includes(connection.provider)) {
       throw new Error('CONNECTOR_PROVIDER_DISABLED');
     }
@@ -227,6 +230,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   async storageResources(ownerId: string, id: string, resources: ConnectorResourceRule[]) {
     this.assertTenantStorageMode();
     const connection = await this.owned(this.owner(ownerId), id);
+    assertPublicTenantStorageProvider(connection.provider);
     if (!['google-drive','mega'].includes(connection.provider)) {
       throw new Error('CONNECTOR_PROVIDER_DISABLED');
     }
@@ -251,6 +255,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
                                provider: 'google-drive' | 'mega', verifiedAccountId: string) {
     this.assertTenantStorageMode();
     const connection = await this.owned(this.owner(ownerId), id);
+    assertPublicTenantStorageProvider(connection.provider);
     if (connection.provider !== provider || connection.status === 'revoked' ||
         !/^[A-Za-z0-9_.:@-]{1,256}$/.test(verifiedAccountId)) {
       throw new Error('TENANT_RCLONE_PROVIDER_IDENTITY_INVALID');
