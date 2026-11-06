@@ -74,7 +74,7 @@ test('missing security prerequisites never pass initial public pilot preflight',
     ['NYX_DEPLOYMENT_MODE','private','PUBLIC_DEPLOYMENT_MODE_REQUIRED'],
     ['NYX_PUBLIC_CONNECTORS_ENABLED','false','PUBLIC_CONNECTORS_REQUIRED'],
     ['NYX_MULTIUSER_RCLONE_ENABLED','false','TENANT_RCLONE_REQUIRED'],
-    ['NYX_PUBLIC_TENANT_MEGA_ONLY','false','MEGA_ONLY_REQUIRED'],
+    ['NYX_PUBLIC_TENANT_MEGA_ONLY','false','EXACTLY_ONE_TENANT_PROVIDER_MODE_REQUIRED'],
     ['NYX_OAUTH_ISSUER','http://issuer.example.com','TRUSTED_HTTPS_OAUTH_ISSUER_REQUIRED'],
     ['NYX_OAUTH_AUDIENCE','https://other.example.com/mcp','SEPARATE_MCP_AUDIENCE_REQUIRED'],
     ['NYX_OAUTH_SCOPES','nyx.read','EXACT_MCP_SCOPES_REQUIRED'],
@@ -87,5 +87,31 @@ test('missing security prerequisites never pass initial public pilot preflight',
     const result=await check({...prepared(),[key]:value});
     assert.equal(result.status,'BLOCKED',key);
     assert.ok(result.blockers.includes(blocker),key);
+  }
+});
+
+test('public Google login Drive+MEGA mode passes static checks but not live acceptance',async()=>{
+  const old=prepared();
+  const mode={...old,NYX_PUBLIC_TENANT_MEGA_ONLY:'false',
+    NYX_PUBLIC_TENANT_GOOGLE_MULTI_ENABLED:'true'};
+  const result=await check(mode);
+  assert.equal(result.status,'CONFIG_PREPARED_LIVE_TESTS_REQUIRED');
+  assert.equal(result.providerMode,'mega-and-google-drive');
+  assert.equal(result.liveDeploymentVerified,false);
+  assert.equal(result.externalIdentityProviderVerified,false);
+  assert.equal(result.ownerPrivateBrokerVerified,false);
+});
+test('simultaneous or missing provider switches fail closed',async()=>{
+  const old=prepared();
+  for(const mode of [
+    {...old,NYX_PUBLIC_TENANT_MEGA_ONLY:'false',
+      NYX_PUBLIC_TENANT_GOOGLE_MULTI_ENABLED:'false'},
+    {...old,NYX_PUBLIC_TENANT_MEGA_ONLY:'true',
+      NYX_PUBLIC_TENANT_GOOGLE_MULTI_ENABLED:'true'},
+  ]) {
+    const result=await check(mode);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.providerMode,'invalid');
+    assert.ok(result.blockers.includes('EXACTLY_ONE_TENANT_PROVIDER_MODE_REQUIRED'));
   }
 });
