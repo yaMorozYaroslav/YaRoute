@@ -81,7 +81,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <button type="button" data-open="nyx-rclone-group" ${publicTenantStorage ? 'hidden' : ''}>🧰 Existing Rclone<small>View private configuration metadata</small></button>
 <button type="button" data-open="nyx-other-group" data-github="true">🐙 GitHub<small>Create a named GitHub connection</small></button>
 </div>
-<p class="muted">${publicTenantStorage ? (publicMegaOnly ? 'Connect your own read-only MEGA account. The operator\'s private Rclone is inaccessible to public tenants.' : 'Connect your own read-only Google Drive or MEGA storage. Other users and private legacy remotes remain inaccessible.') : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
+<p class="muted">${publicTenantStorage ? (publicMegaOnly ? 'Sign in with Google to NestNyx first, then connect your own read-only MEGA account. The operator\'s private Rclone is inaccessible to public tenants.' : 'Connect your own read-only Google Drive or MEGA storage. Other users and private legacy remotes remain inaccessible.') : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
 </section>
 <header><p class="muted">Existing connections grouped by provider. Rclone configuration is not proof of connectivity.</p>
 <div class="warn">GitHub permissions and repository writes require explicit grants. No default-branch writes, workflow dispatch, credential editing, billing or infrastructure actions.</div></header>

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import { ConnectorsService } from './connectors.service';
 import { TenantRcloneService } from './tenant-rclone.service';
+import { assertPublicTenantGoogleOwnerId } from './public-tenant-provider.policy';
 
 function publicBase() {
   const value = process.env.NYX_PUBLIC_URL || '';
@@ -51,6 +52,7 @@ export class TenantMegaEnrollmentService implements OnModuleInit, OnModuleDestro
     return root;
   }
   async begin(ownerId: string, connectionId: string, rootPath: string) {
+    assertPublicTenantGoogleOwnerId(ownerId);
     const origin = publicBase();
     const root = this.root(rootPath);
     const c = await this.connections.getOwned(ownerId,connectionId);
@@ -132,6 +134,9 @@ export class TenantMegaEnrollmentService implements OnModuleInit, OnModuleDestro
       [digest]);
     if (row.rowCount !== 1) throw new Error('TENANT_MEGA_ENROLLMENT_EXPIRED');
     const {owner_id:ownerId,connection_id:connectionId,root_path:root} = row.rows[0];
+    // Reject pending links issued before Google-only mode was enabled.
+    // State alone is not proof of a Google-authenticated owner.
+    assertPublicTenantGoogleOwnerId(ownerId);
     const item = await this.connections.getOwned(ownerId,connectionId);
     if (item.provider!=='mega' || item.status==='revoked' ||
         (item.status==='active' && item.externalAccountId!==normalized) ||

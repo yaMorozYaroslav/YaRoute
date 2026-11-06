@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 import { privateDevSingleGoogleOwnerAllowed } from './private-dev-google-login.policy';
+import { assertPublicTenantGoogleSubject } from '../connectors/public-tenant-provider.policy';
 
 /** A temporary issuer/JWKS failure is not evidence that the user's grant expired. */
 class SigningKeysTemporarilyUnavailable extends Error {
@@ -100,6 +101,20 @@ export class McpAuthService {
       // Rclone, CLI, or private handoff tools. Keep strict allowlist in private mode.
       const connectorMode = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true';
+      // Only trusted issuer-signed Google OAuth logins can reach public MEGA
+      // in the configured MEGA-only rollout. Do not accept a client-supplied
+      // email or subject argument as proof of the Google login.
+      if (connectorMode) {
+        try {
+          assertPublicTenantGoogleSubject(payload.sub);
+        } catch {
+          res.status(403).json({
+            error: 'access_denied',
+            error_description: 'Sign in with Google before connecting MEGA',
+          });
+          return false;
+        }
+      }
       if (!connectorMode && !allowedSubjects.has(payload.sub)) {
         res.status(403).json({ error: 'access_denied', error_description: 'Private NYX instance: user not authorized' });
         return false;

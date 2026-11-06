@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Pool } from 'pg';
-import { assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
+import { assertPublicTenantGoogleOwnerId, assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorsService } from './connectors.service';
 
 export type TenantRcloneProvider = 'google-drive' | 'mega';
@@ -142,6 +142,7 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
   }
 
   private owner(ownerId: string, connectionId: string) {
+    assertPublicTenantGoogleOwnerId(ownerId);
     if (typeof ownerId !== 'string' || !/^oauth:[^\x00-\x1f]{1,500}$/.test(ownerId) ||
         typeof connectionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(connectionId)) {
       throw new Error('TENANT_RCLONE_IDENTITY_REQUIRED');
