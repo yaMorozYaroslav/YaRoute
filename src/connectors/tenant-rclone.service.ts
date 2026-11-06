@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Pool } from 'pg';
+import { assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorsService } from './connectors.service';
 
 export type TenantRcloneProvider = 'google-drive' | 'mega';
@@ -147,7 +148,8 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async owned(ownerId: string, connectionId: string, provider?: TenantRcloneProvider) {
+  private async owned(ownerId: string, connectionId: string, provider?: TenantRcloneProvider,
+                      allowRevokeOnly = false) {
     this.owner(ownerId, connectionId);
     const item = await this.connectors.getOwned(ownerId, connectionId).catch(() => undefined);
     if (!item || item.status === 'revoked' ||
@@ -155,6 +157,9 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
         (provider && provider !== item.provider)) {
       throw new Error('TENANT_RCLONE_CONNECTION_FORBIDDEN');
     }
+    // Existing Google tenant records may be revoked after switching to
+    // MEGA-only, but never probed, staged, activated or listed.
+    if (!allowRevokeOnly) assertPublicTenantStorageProvider(item.provider);
     return item;
   }
 
@@ -352,7 +357,7 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
    * Provider-side token/session revocation remains the user's separate action.
    */
   async revokeStorage(ownerId: string, connectionId: string) {
-    await this.owned(ownerId, connectionId);
+    await this.owned(ownerId, connectionId, undefined, true);
     const client = await this.db().connect();
     try {
       await client.query('BEGIN');

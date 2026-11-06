@@ -9,6 +9,7 @@ export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v9.html';
 const publicTenantStorage = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
   process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
   process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true';
+const publicMegaOnly = publicTenantStorage && process.env.NYX_PUBLIC_TENANT_MEGA_ONLY === 'true';
 const ownerLinkEnabled = publicTenantStorage && process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true';
 const privateBrokerEnabled = ownerLinkEnabled && process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true';
 const iconOrigin = process.env.NYX_PUBLIC_URL?.startsWith('https://')
@@ -75,12 +76,12 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <section id="nyx-add-menu" hidden aria-label="Add a connection">
 <h2>Add a connection</h2>
 <div id="nyx-provider-choices" role="group" aria-label="Choose a provider">
-<button type="button" data-open="nyx-google-group">🌈 Google Drive<small>Connect your own Google Drive</small></button>
+<button type="button" data-open="nyx-google-group" ${publicMegaOnly ? 'hidden' : ''}>🌈 Google Drive<small>Connect your own Google Drive</small></button>
 <button type="button" data-open="nyx-mega-group">🗄️ MEGA<small>Connect your own MEGA account</small></button>
 <button type="button" data-open="nyx-rclone-group" ${publicTenantStorage ? 'hidden' : ''}>🧰 Existing Rclone<small>View private configuration metadata</small></button>
 <button type="button" data-open="nyx-other-group" data-github="true">🐙 GitHub<small>Create a named GitHub connection</small></button>
 </div>
-<p class="muted">${publicTenantStorage ? 'Connect your own read-only Google Drive or MEGA storage. Other users and private legacy remotes remain inaccessible.' : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
+<p class="muted">${publicTenantStorage ? (publicMegaOnly ? 'Connect your own read-only MEGA account. The operator\'s private Rclone is inaccessible to public tenants.' : 'Connect your own read-only Google Drive or MEGA storage. Other users and private legacy remotes remain inaccessible.') : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
 </section>
 <header><p class="muted">Existing connections grouped by provider. Rclone configuration is not proof of connectivity.</p>
 <div class="warn">GitHub permissions and repository writes require explicit grants. No default-branch writes, workflow dispatch, credential editing, billing or infrastructure actions.</div></header>
@@ -112,6 +113,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 (function(){
 'use strict';
 const publicTenantStorage=${JSON.stringify(publicTenantStorage)};
+const publicMegaOnly=${JSON.stringify(publicMegaOnly)};
 const ownerLinkEnabled=${JSON.stringify(ownerLinkEnabled)};
 const privateBrokerEnabled=${JSON.stringify(privateBrokerEnabled)};
 const root=document.getElementById('connection-list');
@@ -410,7 +412,7 @@ async function refreshTenantStorage(){
   const data=await call('nyx_storage_connections_list',{});
   if(!Array.isArray(data))throw Error('Storage tools unavailable');
   tenantToolsAvailable=true;
-  for(const name of ['google','mega'])document.getElementById('tenant-'+name+'-create').hidden=false;
+  for(const name of ['google','mega'])document.getElementById('tenant-'+name+'-create').hidden=(publicMegaOnly && name==='google');
   renderTenant(data);
  }catch{
   tenantToolsAvailable=false;
@@ -557,7 +559,7 @@ for(const choice of document.querySelectorAll('#nyx-provider-choices button[data
   }else{
    const label=choice.dataset.open==='nyx-google-group'?'google':'mega';
    if(tenantToolsAvailable){
-    document.getElementById('tenant-'+label+'-create').hidden=false;
+    document.getElementById('tenant-'+label+'-create').hidden=(publicMegaOnly && label==='google');
     document.getElementById('tenant-'+label+'-name').focus();
     show('Create a separate '+label+' connection. Never enter credentials into ChatGPT.');
    }else{
