@@ -42,6 +42,8 @@ export function publicMegaActivationPreflight(
     if (!condition) blockers.push(code);
   };
   const current = httpsOrigin(env.NYX_PUBLIC_URL);
+  // In the two-app cutover Pro stays private and Dev becomes public.
+  // Never compare the public app to its own historical private Dev URL.
   const existingPrivate = httpsOrigin(options.existingPrivateOrigin);
   check(env.NYX_DEPLOYMENT_MODE === 'public', 'PUBLIC_DEPLOYMENT_MODE_REQUIRED');
   check(env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true', 'PUBLIC_CONNECTORS_REQUIRED');
@@ -55,7 +57,7 @@ export function publicMegaActivationPreflight(
   check(Boolean(current), 'DEDICATED_HTTPS_PUBLIC_ORIGIN_REQUIRED');
   check(Boolean(existingPrivate), 'EXISTING_PRIVATE_ORIGIN_EVIDENCE_REQUIRED');
   check(Boolean(current) && Boolean(existingPrivate) &&
-        current !== existingPrivate, 'PUBLIC_ORIGIN_MUST_DIFFER_FROM_PRIVATE_DEV');
+        current !== existingPrivate, 'PUBLIC_ORIGIN_MUST_DIFFER_FROM_PRIVATE_PRO');
   check(env.NYX_SERVICE_NAME === 'NestNyxPublicPilot', 'PUBLIC_PILOT_SERVICE_ID_REQUIRED');
   check(Boolean(httpsOrigin(env.NYX_OAUTH_ISSUER)), 'TRUSTED_HTTPS_OAUTH_ISSUER_REQUIRED');
   check(Boolean(current) && env.NYX_OAUTH_AUDIENCE === current + '/mcp',
@@ -67,6 +69,21 @@ export function publicMegaActivationPreflight(
     'ASYMMETRIC_RSA256_JWT_REQUIRED');
 
   check(postgresUrl(env.DATABASE_URL), 'DEDICATED_POSTGRES_REQUIRED');
+  // A valid Postgres URL is not sufficient: require the host to match the
+  // independently inventoried EMPTY Neon public project, NOT private Dev/Pro.
+  // Only hostnames are compared; usernames/passwords are never emitted.
+  let matchesNeon = false;
+  try {
+    const url = new URL(String(env.DATABASE_URL || ''));
+    const expected = String(env.NYX_PUBLIC_NEON_HOST || '').trim().toLowerCase();
+    const direct = expected;
+    const pooled = expected.replace(/^([^.]+)(\.)/, '$1-pooler$2');
+    const secure = ['require','verify-ca','verify-full'].includes(url.searchParams.get('sslmode') || '');
+    matchesNeon = /^ep-[a-z0-9-]+\.[a-z0-9-]+\.eu-central-1\.aws\.neon\.tech$/.test(expected) &&
+      (url.hostname.toLowerCase() === direct || url.hostname.toLowerCase() === pooled) &&
+      url.pathname === '/neondb' && secure;
+  } catch { /* Missing or malformed URL: block without revealing it. */ }
+  check(matchesNeon, 'DEDICATED_PUBLIC_NEON_HOST_TLS_REQUIRED');
   check(aes32(env.NYX_STORAGE_ENCRYPTION_KEY), 'DEDICATED_AES256_KEY_REQUIRED');
 
   const legacyVariables = Object.entries(env).some(([name,value]) =>
@@ -119,13 +136,9 @@ export function publicMegaActivationPreflight(
 }
 
 if (require.main === module) {
-  let oldPrivateOrigin = '';
-  try {
-    const reference = JSON.parse(
-      fs.readFileSync(path.resolve(__dirname, '../../config/heroku-public.json'), 'utf8'),
-    );
-    oldPrivateOrigin = reference.NYX_PUBLIC_URL || '';
-  } catch { /* Fail closed via missing evidence. */ }
+  // The old tracked Heroku profile points to Dev and MUST NOT be used as
+  // the private reference when Dev is repurposed as public.
+  const oldPrivateOrigin = process.env.NYX_PRIVATE_PRO_URL || '';
   const report = publicMegaActivationPreflight(process.env, {
     existingPrivateOrigin: oldPrivateOrigin,
   });

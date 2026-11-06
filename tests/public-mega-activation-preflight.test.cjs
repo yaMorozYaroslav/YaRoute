@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {publicMegaActivationPreflight}=require('../dist/runtime/public-mega-activation-preflight');
 
-const privateOrigin='https://private-dev.example.com';
+const privateProOrigin='https://nestnyx-pro.example.com';
 function prepared() {
   return {
     NYX_PUBLIC_URL:'https://public-pilot.herokuapp.com',
@@ -15,7 +15,8 @@ function prepared() {
     NYX_OAUTH_AUDIENCE:'https://public-pilot.herokuapp.com/mcp',
     NYX_OAUTH_SCOPES:'nyx.read,nyx.write',
     NYX_OAUTH_ALGORITHMS:'RS256',
-    DATABASE_URL:['postgresql://synthetic:test-only-password','db.example.com/pilot'].join('@'),
+    DATABASE_URL:['postgresql://synthetic:test-only-password','ep-test-public.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require'].join('@'),
+    NYX_PUBLIC_NEON_HOST:'ep-test-public.c-7.eu-central-1.aws.neon.tech',
     NYX_STORAGE_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64'),
     NYX_PRIVATE_OWNER_LINK_ENABLED:'false',
     NYX_PRIVATE_BROKER_CLIENT_ENABLED:'false',
@@ -24,7 +25,7 @@ function prepared() {
 }
 async function check(env,options={}) {
   return publicMegaActivationPreflight(env,{
-    existingPrivateOrigin:privateOrigin,exists:()=>false,...options,
+    existingPrivateOrigin:privateProOrigin,exists:()=>false,...options,
   });
 }
 test('valid isolated public config is PREPARED, never misrepresented as live verified',async()=>{
@@ -37,16 +38,16 @@ test('valid isolated public config is PREPARED, never misrepresented as live ver
   assert.equal(result.ownerPrivateBrokerVerified,false);
   assert.equal(result.noSecretValuesReturned,true);
   const safe=JSON.stringify(result);
-  assert.doesNotMatch(safe,/test-only-password|NYX_STORAGE_ENCRYPTION_KEY|db\.example/);
+  assert.doesNotMatch(safe,/test-only-password|NYX_STORAGE_ENCRYPTION_KEY|ep-test-public/);
   assert.doesNotMatch(safe,new RegExp(env.NYX_STORAGE_ENCRYPTION_KEY.replace(/[+/=]/g,'')));
 });
 test('cannot point public pilot at the existing private application',async()=>{
   const env=prepared();
-  env.NYX_PUBLIC_URL=privateOrigin;
-  env.NYX_OAUTH_AUDIENCE=privateOrigin+'/mcp';
+  env.NYX_PUBLIC_URL=privateProOrigin;
+  env.NYX_OAUTH_AUDIENCE=privateProOrigin+'/mcp';
   const result=await check(env);
   assert.equal(result.status,'BLOCKED');
-  assert.ok(result.blockers.includes('PUBLIC_ORIGIN_MUST_DIFFER_FROM_PRIVATE_DEV'));
+  assert.ok(result.blockers.includes('PUBLIC_ORIGIN_MUST_DIFFER_FROM_PRIVATE_PRO'));
   const noReference=await check(prepared(),{existingPrivateOrigin:''});
   assert.ok(noReference.blockers.includes('EXISTING_PRIVATE_ORIGIN_EVIDENCE_REQUIRED'));
 });
@@ -81,6 +82,7 @@ test('missing security prerequisites never pass initial public pilot preflight',
     ['NYX_OAUTH_ALGORITHMS','HS256','ASYMMETRIC_RSA256_JWT_REQUIRED'],
     ['NYX_STORAGE_ENCRYPTION_KEY','weak','DEDICATED_AES256_KEY_REQUIRED'],
     ['DATABASE_URL','sqlite://in-memory','DEDICATED_POSTGRES_REQUIRED'],
+    ['NYX_PUBLIC_NEON_HOST','ep-private.c-7.eu-central-1.aws.neon.tech','DEDICATED_PUBLIC_NEON_HOST_TLS_REQUIRED'],
     ['NYX_SERVICE_NAME','DevNestNyx','PUBLIC_PILOT_SERVICE_ID_REQUIRED'],
   ];
   for(const [key,value,blocker] of cases) {
@@ -113,5 +115,29 @@ test('simultaneous or missing provider switches fail closed',async()=>{
     assert.equal(result.status,'BLOCKED');
     assert.equal(result.providerMode,'invalid');
     assert.ok(result.blockers.includes('EXACTLY_ONE_TENANT_PROVIDER_MODE_REQUIRED'));
+  }
+});
+
+test('Dev can be public when Pro remains private and database is Neon-public',async()=>{
+  const env=prepared();
+  env.NYX_PUBLIC_URL='https://dev-nest-nyx.herokuapp.com';
+  env.NYX_OAUTH_AUDIENCE=env.NYX_PUBLIC_URL+'/mcp';
+  env.NYX_PUBLIC_TENANT_MEGA_ONLY='false';
+  env.NYX_PUBLIC_TENANT_GOOGLE_MULTI_ENABLED='true';
+  const report=await check(env);
+  assert.equal(report.status,'CONFIG_PREPARED_LIVE_TESTS_REQUIRED');
+  assert.equal(report.providerMode,'mega-and-google-drive');
+});
+test('wrong Neon host or disabled TLS prevents Dev public cutover',async()=>{
+  const env=prepared();
+  for(const bad of [
+    {...env,DATABASE_URL:env.DATABASE_URL.replace('ep-test-public','ep-dev-private')},
+    {...env,DATABASE_URL:env.DATABASE_URL.replace('sslmode=require','sslmode=disable')},
+    {...env,DATABASE_URL:env.DATABASE_URL.replace('/neondb','/private')},
+  ]){
+    const report=await check(bad);
+    assert.equal(report.status,'BLOCKED');
+    assert.ok(report.blockers.includes('DEDICATED_PUBLIC_NEON_HOST_TLS_REQUIRED'));
+    assert.equal(report.noSecretValuesReturned,true);
   }
 });
