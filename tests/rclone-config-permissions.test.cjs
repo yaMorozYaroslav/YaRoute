@@ -52,7 +52,7 @@ test('Rclone config permissions include only safe boolean flags and recognized s
 });
 
 test('Rclone permission sections are read-only and never render raw config or secret inputs',()=>{
- assert.match(CONNECTIONS_PANEL_URI,/v8\.html$/);
+ assert.match(CONNECTIONS_PANEL_URI,/v9\.html$/);
  const ui=CONNECTIONS_PANEL_HTML;
  assert.match(ui,/Configured scope:/);
  assert.match(ui,/Connectivity:/);

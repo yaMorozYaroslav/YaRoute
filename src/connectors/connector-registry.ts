@@ -72,7 +72,7 @@ export function validateResourceRules(provider: ConnectorProvider, rules: Connec
       (provider === 'google-drive' && !['drive','folder'].includes(rule.kind)) ||
       (provider === 'mega' && rule.kind !== 'mega-root') ||
       (provider === 'heroku' && !['heroku-app','heroku-account'].includes(rule.kind))) throw new Error('CONNECTOR_RESOURCE_PROVIDER_MISMATCH');
-    if (rule.kind === 'repository' && (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(rule.id) || rule.id.includes('..'))) throw new Error('CONNECTOR_REPOSITORY_INVALID');
+    if (rule.kind === 'repository' && (!/^[A-Za-z0-9_.-]+\/(?:[A-Za-z0-9_.-]+|\*)$/.test(rule.id) || rule.id.includes('..'))) throw new Error('CONNECTOR_REPOSITORY_INVALID');
     if (rule.pathPrefix !== undefined && (!rule.pathPrefix || rule.pathPrefix.startsWith('/') ||
       rule.pathPrefix.includes('\\') || rule.pathPrefix.length > 2048 ||
       rule.pathPrefix.split('/').some(p => !p || p === '.' || p === '..'))) throw new Error('CONNECTOR_PATH_INVALID');
@@ -167,8 +167,16 @@ export class ConnectorRegistry {
     const connection = await this.require(ownerId,connectionId,capability);
     if (resource.path !== undefined && (resource.path.startsWith('/') || resource.path.includes('\\') ||
       resource.path.split('/').some(p => p === '.' || p === '..'))) throw new Error('CONNECTOR_PATH_INVALID');
+    // Wildcards remain limited to the GitHub App's verified installation owner.
+    const resourceOwner = resource.kind === 'repository' ? resource.id.split('/')[0] : '';
+    const verifiedOwner = connection.provider === 'github' &&
+      resourceOwner.toLowerCase() === connection.externalAccountId.toLowerCase();
     if (!(connection.resources ?? []).some(rule =>
-      rule.kind === resource.kind && rule.id.toLowerCase() === resource.id.toLowerCase() &&
+      rule.kind === resource.kind &&
+      (rule.id.toLowerCase() === resource.id.toLowerCase() ||
+        (resource.kind === 'repository' && verifiedOwner &&
+          rule.id.toLowerCase() === resourceOwner.toLowerCase() + '/*' &&
+          /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(resource.id))) &&
       rule.capabilities.includes(capability) &&
       (!rule.pathPrefix || (resource.path !== undefined &&
         (resource.path === rule.pathPrefix || resource.path.startsWith(rule.pathPrefix + '/')))) &&

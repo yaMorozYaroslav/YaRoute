@@ -12,5 +12,5 @@ import { HandoffStore } from './handoff-store.service';
 import { NyxCommandExecutor } from './command-executor.service';
 import { NyxHeadLibraryService } from './head-library.service';
 import { NyxController } from './nyx.controller';
-@Module({ imports: [StorageModule], controllers: [NyxController], providers: [NyxCliWarmupService, NyxExecutionProfileService, NyxBootstrapService, NyxHeadLibraryService, NyxCliRegistryService, NyxCommandResolver, NyxResourceResolver, NyxResourceStore, HandoffStore, NyxKeyService, NyxCommandExecutor], exports: [NyxCommandExecutor, NyxBootstrapService, NyxCliRegistryService, NyxHeadLibraryService] })
+@Module({ imports: [StorageModule], controllers: [NyxController], providers: [NyxCliWarmupService, NyxExecutionProfileService, NyxBootstrapService, NyxHeadLibraryService, NyxCliRegistryService, NyxCommandResolver, NyxResourceResolver, NyxResourceStore, HandoffStore, NyxKeyService, NyxCommandExecutor], exports: [NyxCommandExecutor, NyxBootstrapService, NyxCliRegistryService, NyxHeadLibraryService, NyxExecutionProfileService] })
 export class NyxModule {}

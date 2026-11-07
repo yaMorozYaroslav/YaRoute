@@ -9,7 +9,7 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v8\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\/connections\/v9\.html/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
@@ -23,7 +23,14 @@ test('only GitHub connection and repository resource schemas are exposed',()=>{
  assert.doesNotMatch(panel,/<option value="heroku"/);
  assert.doesNotMatch(panel,/call\('nyx_connection_verify_heroku'/);
  assert.match(service,/provider !== 'github'/);
- assert.doesNotMatch(src('src/connectors/connectors.module.ts'),/HerokuReadonlyConnector|HerokuBrokerClient/);
+ // Account creation/authorization remains GitHub-only; the Heroku bridge has
+ // no provider connection, no Heroku token in Nest, and defaults OFF.
+ const module=src('src/connectors/connectors.module.ts');
+ assert.doesNotMatch(module,/HerokuReadonlyConnector/);
+ assert.match(module,/HerokuBrokerClient/);
+ assert.match(mcp,/if \(process\.env\.NYX_HEROKU_READ_ENABLED === 'true'\)/);
+ assert.match(mcp,/herokuReadAuthorization\(this\.connectorOwner\(\),app\)/);
+ assert.doesNotMatch(mcp,/server\.registerTool\('nyx_heroku_(?:config|deploy|logs|billing)/);
 });
 
 test('MCP panel is auxiliary and does not modify Head CLI definitions',()=>{
@@ -57,7 +64,11 @@ test('ChatGPT gets separate authenticated conversation-tab and global-sidebar la
  assert.ok(mcp.includes("providers:[{id:'github'"));
  assert.ok(!mcp.includes("entrypoints:[{type:'global'},{type:'thread'}]"));
  // This production change intentionally does not expose unfinished public storage.
- assert.ok(mcp.includes("Google Drive and MEGA migration remains under separate review"));
+ // Private plugin remains legacy-only; isolated public mode advertises storage
+ // providers only after explicit feature-gate checks, never by default.
+ assert.ok(mcp.includes("NYX_MULTIUSER_RCLONE_ENABLED === 'true'"));
+ assert.ok(mcp.includes("isolated_read_only_pilot"));
+ assert.ok(mcp.includes("private NestNyx GitHub connection manager"));
 });
 
 test('green add menu is accessible and provider lists stay visible when closed',()=>{
@@ -84,7 +95,7 @@ test('existing MEGA and Drive remotes use read-only private inventory, never cre
  assert.match(panel,/Write access: Not tested/);
  assert.match(panel,/Test connection/);
  assert.match(panel,/nyx_rclone_connection_test_read/);
- assert.match(panel,/New Google Drive\/MEGA authorization is not enabled in production/);
+ assert.match(panel,/New Google Drive\/MEGA authorization is not enabled on this deployment/);
  assert.doesNotMatch(panel,/nyx_connection_create.{0,180}provider:.*mega/s);
  assert.doesNotMatch(panel,/type="password"/);
  assert.match(mcp,/provider:z\.literal\('github'\)/);
