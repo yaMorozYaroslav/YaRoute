@@ -25,13 +25,18 @@ export interface PrivateDevGoogleOwnerConfig {
 
 const GOOGLE_SOCIAL_SUBJECT = /^google-oauth2\|[A-Za-z0-9_-]{8,128}$/;
 
-export function privateDevSingleGoogleOwnerAllowed(
+/**
+ * Optional single-owner gate for a PRIVATE instance, including production.
+ * Call only with claims already verified by McpAuthService (signature, issuer,
+ * audience and scopes). This binds the approved OAuth subject, not an email;
+ * the operator must independently verify the subject-to-Google-email mapping.
+ */
+export function privateSingleGoogleOwnerAllowed(
   claims: SignedMcpSubject,
   config: PrivateDevGoogleOwnerConfig,
 ): boolean {
   if (!claims || !config ||
       config.NYX_DEPLOYMENT_MODE !== 'private' ||
-      config.NYX_SERVICE_NAME !== 'DevNestNyx' ||
       typeof config.NYX_OAUTH_ISSUER !== 'string' ||
       !config.NYX_OAUTH_ISSUER.startsWith('https://') ||
       claims.iss !== config.NYX_OAUTH_ISSUER) return false;
@@ -47,4 +52,13 @@ export function privateDevSingleGoogleOwnerAllowed(
   // Reject malformed comma-separated ACLs and hidden duplicate entries.
   if (raw.split(',').length !== 1 || raw.trim() !== owner) return false;
   return true;
+}
+
+/** Preserve the old Dev-only opt-in without allowing it on other services. */
+export function privateDevSingleGoogleOwnerAllowed(
+  claims: SignedMcpSubject,
+  config: PrivateDevGoogleOwnerConfig,
+): boolean {
+  return config?.NYX_SERVICE_NAME === 'DevNestNyx' &&
+    privateSingleGoogleOwnerAllowed(claims, config);
 }

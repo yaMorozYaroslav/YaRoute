@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
-import { privateDevSingleGoogleOwnerAllowed } from './private-dev-google-login.policy';
+import { privateDevSingleGoogleOwnerAllowed, privateSingleGoogleOwnerAllowed } from './private-dev-google-login.policy';
 import { assertPublicTenantGoogleSubject } from '../connectors/public-tenant-provider.policy';
 
 /** A temporary issuer/JWKS failure is not evidence that the user's grant expired. */
@@ -117,6 +117,18 @@ export class McpAuthService {
       }
       if (!connectorMode && !allowedSubjects.has(payload.sub)) {
         res.status(403).json({ error: 'access_denied', error_description: 'Private NYX instance: user not authorized' });
+        return false;
+      }
+      // General private-instance hardening, separately opt-in on Pro. Reject
+      // missing, duplicate or non-Google owner subjects before any legacy tool
+      // can access process-wide Rclone credentials. Never infer email from sub.
+      if (!connectorMode &&
+          process.env.NYX_PRIVATE_SINGLE_GOOGLE_OWNER === 'true' &&
+          !privateSingleGoogleOwnerAllowed(payload, process.env)) {
+        res.status(403).json({
+          error: 'access_denied',
+          error_description: 'Private Google owner verification required',
+        });
         return false;
       }
       // Opt-in Dev-only second gate: restrict the legacy private Rclone tools
