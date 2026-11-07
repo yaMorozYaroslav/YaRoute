@@ -34,7 +34,9 @@ function fixture() {
       DATABASE_URL:'postgresql://private-db.example.test/nyx',
       NYX_STORAGE_ENCRYPTION_KEY:'private-key-placeholder',
       RCLONE_CONFIG_B64:'not-a-real-config',
-      NYX_PRIVATE_OAUTH_SUBJECTS:'approved-subject',
+      NYX_PRIVATE_OAUTH_SUBJECTS:'google-oauth2|12345678901234567890',
+      NYX_PRIVATE_LEGACY_OWNER_MCP_SUBJECT:'google-oauth2|12345678901234567890',
+      NYX_PRIVATE_SINGLE_GOOGLE_OWNER:'true',
     },
   };
 }
@@ -71,9 +73,25 @@ operatorTest('public broker delegation identity and key do not falsely imply leg
   assert.equal(result.report.dev.hasBrokerDelegationKey,true);
   assert.equal(result.report.dev.hasPrivateBrokerServerEnabled,false);
   assert.equal(result.report.publicCutoverReadyForLiveAcceptance,true);
+  assert.equal(result.report.pro.singleGoogleOwnerConfigured,true);
   assert.equal(result.report.legacyProRemotesOnlineVerified,false);
   assert.doesNotMatch(JSON.stringify(result.report),/nonsecret-fixture-marker|not-a-real-config/);
   assert.equal(result.stderr,'');
+});
+
+operatorTest('public activation is blocked until private Pro has exactly one approved Google subject',()=>{
+  for(const changes of [
+    {NYX_PRIVATE_SINGLE_GOOGLE_OWNER:'false'},
+    {NYX_PRIVATE_LEGACY_OWNER_MCP_SUBJECT:''},
+    {NYX_PRIVATE_OAUTH_SUBJECTS:'google-oauth2|12345678901234567890,google-oauth2|222222222222'},
+  ]) {
+    const c=fixture();
+    Object.assign(c['nest-nyx-pro'],changes);
+    const result=audit(c);
+    assert.equal(result.code,2);
+    assert.equal(result.report.pro.singleGoogleOwnerConfigured,false);
+    assert.equal(result.report.publicCutoverReadyForLiveAcceptance,false);
+  }
 });
 
 operatorTest('public app with inherited legacy operator Rclone or OAuth allowlist is denied',()=>{

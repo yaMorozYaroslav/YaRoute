@@ -16,7 +16,10 @@ const dev = {NYX_DEPLOYMENT_MODE:'private',NYX_PUBLIC_URL:devUrl,
   RCLONE_CONFIG_B64:'private-dev-secret',NYX_PRIVATE_OAUTH_SUBJECTS:'legacy',
   NYX_PRIVATE_BROKER_SHARED_KEY_B64:'legacy-key',NYX_API_KEY:'legacy-api',DATABASE_URL:devDb};
 const pro = {NYX_DEPLOYMENT_MODE:'private',NYX_PUBLIC_URL:proUrl,
-  RCLONE_CONFIG_B64:'private-pro-secret',NYX_PRIVATE_OAUTH_SUBJECTS:'owner',
+  RCLONE_CONFIG_B64:'private-pro-secret',
+  NYX_PRIVATE_OAUTH_SUBJECTS:'google-oauth2|12345678901234567890',
+  NYX_PRIVATE_LEGACY_OWNER_MCP_SUBJECT:'google-oauth2|12345678901234567890',
+  NYX_PRIVATE_SINGLE_GOOGLE_OWNER:'true',
   DATABASE_URL:proDb,NYX_STORAGE_ENCRYPTION_KEY:'pro-key'};
 const state = () => inspectState(dev,pro,devApp,proApp,[],[{size:'eco',quantity:1}]);
 const input = () => ({databaseUrl:neon,proDatabaseUrl:proDb,
@@ -52,6 +55,17 @@ test('blocks missing Pro private credentials or incorrect owner',()=>{
     devApp,proApp),/PRO_PRIVATE_BASELINE_INCOMPLETE/);
   assert.throws(()=>inspectState(dev,pro,devApp,
     {web_url:devUrl,owner}),/HEROKU_ORIGINS_NOT_VERIFIED/);
+});
+test('public cutover requires a sole, pinned Google owner on private Pro',()=>{
+  for(const overrides of [
+    {NYX_PRIVATE_SINGLE_GOOGLE_OWNER:'false'},
+    {NYX_PRIVATE_LEGACY_OWNER_MCP_SUBJECT:''},
+    {NYX_PRIVATE_OAUTH_SUBJECTS:pro.NYX_PRIVATE_OAUTH_SUBJECTS+',google-oauth2|222222222222'},
+    {NYX_PRIVATE_OAUTH_SUBJECTS:pro.NYX_PRIVATE_OAUTH_SUBJECTS+','+pro.NYX_PRIVATE_OAUTH_SUBJECTS},
+    {NYX_PRIVATE_OAUTH_SUBJECTS:'auth0|some-other-identity',
+      NYX_PRIVATE_LEGACY_OWNER_MCP_SUBJECT:'auth0|some-other-identity'},
+  ]) assert.throws(()=>inspectState(dev,{...pro,...overrides},devApp,proApp),
+    /PRO_SINGLE_GOOGLE_OWNER_NOT_VERIFIED/);
 });
 test('prevents silent encryption-key rotation after successful public cutover',()=>{
   const first=buildPatch(dev,state(),input());
