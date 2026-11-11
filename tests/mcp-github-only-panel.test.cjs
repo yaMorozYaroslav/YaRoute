@@ -59,7 +59,10 @@ test('ChatGPT gets separate authenticated conversation-tab and global-sidebar la
  assert.ok(thread.includes('ui:{resourceUri:CONNECTIONS_PANEL_URI'));
  assert.ok(global.includes("'openai/outputTemplate':CONNECTIONS_HOME_URI"));
  assert.ok(global.includes('ui:{resourceUri:CONNECTIONS_HOME_URI'));
- assert.equal((mcp.match(/server\.registerResource\(/g)||[]).length,2);
+ assert.equal((mcp.match(/server\.registerResource\(/g)||[]).length,3);
+ assert.match(mcp,/legacyConnectionsResourceUri='ui:\/\/nestnyx\/connections\/v9\.html'/);
+ assert.match(mcp,/uri:legacyConnectionsResourceUri,mimeType:'text\/html;profile=mcp-app'/);
+ assert.match(mcp,/text:CONNECTIONS_PANEL_HTML/);
  for(const tool of [thread,global]){
    assert.ok(tool.includes("inputSchema:z.object({})"));
    assert.ok(tool.includes("annotations:{readOnlyHint:true,destructiveHint:false"));
