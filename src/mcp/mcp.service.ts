@@ -3,6 +3,8 @@ import { NyxCommandExecutor } from '../nyx/command-executor.service';
 import { NyxBootstrapService } from '../nyx/bootstrap.service';
 import { NyxCliRegistryService } from '../nyx/cli-registry.service';
 import { NyxHeadLibraryService } from '../nyx/head-library.service';
+import { NyxKeyService } from '../nyx/key.service';
+import { extractKeySignals } from '../nyx/key-chat-extractor';
 import { RuntimeMaintenanceService } from './runtime-maintenance.service';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
@@ -43,6 +45,7 @@ export class McpService {
     private readonly bootstrap: NyxBootstrapService,
     private readonly cliRegistry: NyxCliRegistryService,
     private readonly headLibrary: NyxHeadLibraryService,
+    private readonly keys: NyxKeyService,
     private readonly connections: ConnectorsService,
     private readonly tenantRclone: TenantRcloneService,
     private readonly tenantGoogle: TenantGoogleOAuthService,
@@ -721,6 +724,48 @@ export class McpService {
     // Public multi-user connector mode deliberately omits all legacy global
     // storage roots, Rclone, NYX CLI commands and cross-user private handoffs.
     if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;
+
+    // KEY uses only caller-supplied messages; it has no access to ChatGPT's
+    // hidden transcript. Public tenants must never access private MAIN keys.
+    const chatMessageSchema = z.object({
+      role:z.enum(['user','assistant']),
+      text:z.string().min(1).max(6000),
+      id:z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional(),
+    }).strict();
+    const chatMessagesSchema = z.array(chatMessageSchema).min(1).max(80);
+    server.registerTool('nyx_key_extract_preview',{
+      title:'Preview actionable KEY signals from supplied chat messages',
+      description:'Private read-only extractor; accepts only explicitly supplied bounded chat text. User instructions only; no ChatGPT transcript access, storage writes, seed or canonical changes.',
+      inputSchema:z.object({messages:chatMessagesSchema}).strict(),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async({messages})=>this.safeTool(async()=>{
+      this.connectorOwner();
+      return extractKeySignals(messages);
+    }));
+    server.registerTool('nyx_key_stage',{
+      title:'Stage verified KEY oF or pending oS seed proposal',
+      description:'Private owner-scoped staging only. oF creates immutable temp-key transaction receipts, no seed. oS additionally creates pending-validation seed proposals. Requires NYX_KEY_MCP_ENABLED=true and a configured private KEY store; never rewrites canonical bundles or promotes seeds.',
+      inputSchema:z.object({
+        stage:z.enum(['oF','oS']),
+        scope:z.enum(['local','global']).default('local'),
+        transactionId:z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+        messages:chatMessagesSchema,
+      }).strict(),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    },async({stage,scope,transactionId,messages})=>this.safeTool(async()=>{
+      this.connectorOwner();
+      if(process.env.NYX_KEY_MCP_ENABLED!=='true')
+        throw Error('KEY_ENDPOINT_DISABLED_PENDING_AUTH_AND_CANONICAL_VALIDATION');
+      const extracted=extractKeySignals(messages);
+      if(!extracted.candidates.length)throw Error('KEY_NO_GROUNDED_CANDIDATES');
+      const candidates=extracted.candidates.map(({evidence,...candidate})=>candidate);
+      const staged=await this.keys.execute({stage,scope,transactionId,candidates});
+      return {...staged,source:'explicit-supplied-chat',
+        suppliedMessageCount:extracted.suppliedMessageCount,
+        persistedCandidateCount:candidates.length,
+        seedStatus:stage==='oS'?'pending_validation':'none',
+        canonicalChanged:false};
+    }));
 
     // Private-only, read-only discovery of configured Rclone remotes. Never
     // expose the operator's Rclone config, tokens, remote options or file contents.
