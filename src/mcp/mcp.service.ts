@@ -744,7 +744,7 @@ export class McpService {
     }));
     server.registerTool('nyx_key_stage',{
       title:'Stage verified KEY oF or pending oS seed proposal',
-      description:'Owner-isolated staging only. Public mode stores in tenant-specific Neon rows, never private MAIN. oF creates immutable temp-key transaction receipts, no seed. oS additionally creates pending-validation seed proposals. Requires NYX_KEY_TENANT_ENABLED=true in public, or NYX_KEY_MCP_ENABLED=true in private; never rewrites canonical bundles or promotes seeds.',
+      description:'Owner-isolated staging only. Public mode stores in tenant-specific Neon rows, never private MAIN. oF creates immutable temp-key transaction receipts, no seed. oS additionally creates pending-validation seed proposals. Public tenant writes require DATABASE_URL and may be disabled with NYX_KEY_TENANT_ENABLED=false; private requires NYX_KEY_MCP_ENABLED=true; never rewrites canonical bundles or promotes seeds.',
       inputSchema:z.object({
         stage:z.enum(['oF','oS']),
         scope:z.enum(['local','global']).default('local'),
