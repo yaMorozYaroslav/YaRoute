@@ -26,7 +26,7 @@ import { GithubWriteConnector } from '../connectors/github-writes';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
 import { githubInstallationUrl } from '../connectors/github-app.service';
-import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
+import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_HOME_URI, CONNECTIONS_HOME_HTML, CONNECTIONS_PANEL_LABEL, CONNECTIONS_HOME_LABEL, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 
 @Injectable()
@@ -145,11 +145,26 @@ export class McpService {
     // MCP Apps connection manager. It is an authenticated UI resource, NOT an
     // alternate backend API or a way to bypass per-user MCP authorization.
     server.registerResource(
-      'NestNyx GitHub Connections', CONNECTIONS_PANEL_URI,
+      CONNECTIONS_PANEL_LABEL, CONNECTIONS_PANEL_URI,
       {mimeType:'text/html;profile=mcp-app'},
       async () => ({contents:[{
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_PANEL_HTML,
+        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN ? [CONNECTIONS_PANEL_BRAND_ORIGIN] : []}},
+          'openai/widgetCSP':{redirect_domains:[
+            'https://github.com','https://accounts.google.com',
+            ...(CONNECTIONS_PANEL_BRAND_ORIGIN ? [CONNECTIONS_PANEL_BRAND_ORIGIN] : []),
+          ]},
+          'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
+      }]}),
+    );
+
+    server.registerResource(
+      CONNECTIONS_HOME_LABEL, CONNECTIONS_HOME_URI,
+      {mimeType:'text/html;profile=mcp-app'},
+      async () => ({contents:[{
+        uri:CONNECTIONS_HOME_URI, mimeType:'text/html;profile=mcp-app',
+        text:CONNECTIONS_HOME_HTML,
         _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN ? [CONNECTIONS_PANEL_BRAND_ORIGIN] : []}},
           'openai/widgetCSP':{redirect_domains:[
             'https://github.com','https://accounts.google.com',
@@ -181,7 +196,7 @@ export class McpService {
     });
 
     server.registerTool('nyx_connections_panel',{
-      title:'☁️ NestNyx Connections',
+      title:CONNECTIONS_PANEL_LABEL,
       description:process.env.NYX_DEPLOYMENT_MODE === 'public' && process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
          'Open connections for GitHub and isolated user-owned MEGA/Google Drive read-only pilot. Credentials are entered only in first-party provider flows.' :
          'Open the private NestNyx GitHub connection manager. MEGA and Google Drive use the existing private storage backend.',
@@ -195,13 +210,13 @@ export class McpService {
     },connectionsPanelResult);
 
     server.registerTool('nyx_connections_home',{
-      title:'☁️ NestNyx',
+      title:CONNECTIONS_HOME_LABEL,
       description:'Open authenticated NestNyx Connections from the sidebar. Isolated storage onboarding appears only in the separately deployed public tenant pilot; no credentials are entered in ChatGPT.',
       inputSchema:z.object({}),
       _meta:{
-        ui:{resourceUri:CONNECTIONS_PANEL_URI,visibility:['model','app']},
+        ui:{resourceUri:CONNECTIONS_HOME_URI,visibility:['model','app']},
         'openai/ui':{entrypoints:[{type:'global'}]},
-        'openai/outputTemplate':CONNECTIONS_PANEL_URI,
+        'openai/outputTemplate':CONNECTIONS_HOME_URI,
       },
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },connectionsPanelResult);
