@@ -43,7 +43,9 @@ export class NyxTenantKeyService {
       candidates: KeyCandidate[];
     },
   ) {
-    if (process.env.NYX_KEY_TENANT_ENABLED !== 'true')
+    // Public Dev is opt-in per explicit authenticated tool invocation. A
+    // deliberate false config is the emergency rollback/kill switch.
+    if (process.env.NYX_KEY_TENANT_ENABLED === 'false')
       throw Error('KEY_TENANT_STAGE_NOT_ENABLED');
     if (!/^oauth:[A-Za-z0-9._:@|\-]{1,300}$/.test(owner))
       throw Error('KEY_OWNER_NOT_VERIFIED');
