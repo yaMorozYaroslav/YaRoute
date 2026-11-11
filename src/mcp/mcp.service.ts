@@ -142,6 +142,30 @@ export class McpService {
       })),
     );
 
+    // Backward compatibility for authenticated ChatGPT clients that cached the
+    // v9 UI URI before Dev/Tester switched to environment-specific v10 keys.
+    // Keep the old key temporarily to prevent "App unavailable" on resource read.
+    // The legacy resource renders the same current, owner-scoped UI and cannot
+    // access private Rclone credentials from the public tenant deployment.
+    const legacyConnectionsResourceUri='ui://nestnyx/connections/v9.html';
+    server.registerResource(
+      'NestNyx Connections (legacy UI)',legacyConnectionsResourceUri,
+      {mimeType:'text/html;profile=mcp-app'},
+      async()=>({contents:[{
+        uri:legacyConnectionsResourceUri,mimeType:'text/html;profile=mcp-app',
+        text:CONNECTIONS_PANEL_HTML,
+        _meta:{
+          ui:{prefersBorder:true,csp:{connectDomains:[],
+            resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]}},
+          'openai/widgetCSP':{redirect_domains:[
+            'https://github.com','https://accounts.google.com',
+            ...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]),
+          ]},
+          'openai/ui':{availableDisplayModes:['inline','fullscreen']},
+        },
+      }]}),
+    );
+
     // MCP Apps connection manager. It is an authenticated UI resource, NOT an
     // alternate backend API or a way to bypass per-user MCP authorization.
     server.registerResource(
