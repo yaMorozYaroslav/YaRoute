@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, tester]
   pull_request:
   workflow_dispatch:
 
@@ -22,10 +22,20 @@ jobs:
       - name: Reject Heroku deployment credentials in GitHub Actions
         run: node scripts/guard-no-heroku-actions.mjs
       - name: Install dependencies
+        env:
+          NYX_SKIP_RCLONE_INSTALL: '1'
         run: npm ci
       - name: Security check
         run: npm run security:check
       - name: Build NestJS
         run: npm run build
+      - name: Install Rclone for integration tests
+        run: |
+          if ! command -v rclone >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends rclone
+          fi
+          rclone version
+          echo "RCLONE_BINARY=$(command -v rclone)" >> "$GITHUB_ENV"
       - name: Run tests
         run: npm test

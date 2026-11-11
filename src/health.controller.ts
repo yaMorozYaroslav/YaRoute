@@ -16,7 +16,7 @@ export class HealthController {
     const version = await this.rclone.version();
     return {
       ok: true,
-      service: 'NestNyx',
+      service: process.env.NYX_SERVICE_NAME?.trim() || 'NestNyx',
       commit: process.env.HEROKU_SLUG_COMMIT ?? require('./build-info.json').commit,
       rclone: version,
       durableJobs: this.jobs.isDurable(),

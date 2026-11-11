@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { assertPublicRcloneIsolation } from './public-rclone-isolation';
 
 @Injectable()
 export class RcloneService implements OnModuleInit {
@@ -12,7 +13,13 @@ export class RcloneService implements OnModuleInit {
     // A process-wide rclone.conf contains one operator's storage credentials.
     // Never start a public multi-user service with that configuration.
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
-      throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
+      assertPublicRcloneIsolation();
+      // Public tenant storage uses ephemeral owner-scoped configs exclusively.
+      // Never read, decode or overwrite RCLONE_CONFIG_B64/RCLONE_CONFIG_PATH here.
+      if (process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') {
+        throw new Error('PUBLIC_STORAGE_ISOLATION_NOT_IMPLEMENTED');
+      }
+      return;
     }
     const encoded = process.env.RCLONE_CONFIG_B64;
     if (encoded) {
@@ -25,8 +32,38 @@ export class RcloneService implements OnModuleInit {
   }
 
   async version(): Promise<string> {
-    const { stdout } = await this.run(['version']);
-    return stdout.split('\n')[0]?.trim() || 'unknown';
+    if (process.env.NYX_DEPLOYMENT_MODE !== 'public') {
+      const { stdout } = await this.run(['version']);
+      return stdout.split('\n')[0]?.trim() || 'unknown';
+    }
+    // Public tenants must not call private RcloneService.run(), even for /health.
+    // Version requires no remote and is executed without inherited Rclone config.
+    return new Promise((resolve,reject)=>{
+      let done=false,stdout='',seen=0;
+      const child=spawn(this.binary,['version'],{
+        env:{PATH:process.env.PATH||'',HOME:'/tmp',XDG_CONFIG_HOME:'/tmp'},
+        stdio:['ignore','pipe','pipe'],
+      });
+      const finish=(error?:Error)=>{
+        if(done)return;
+        done=true;clearTimeout(timer);
+        if(error)reject(error);
+        else resolve(stdout.split('\n')[0]?.trim()||'unknown');
+      };
+      const timer=setTimeout(()=>{
+        child.kill('SIGKILL');finish(new Error('RCLONE_VERSION_TIMEOUT'));
+      },5000);
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data',(chunk:string)=>{
+        seen+=Buffer.byteLength(chunk);
+        if(seen>2048){
+          child.kill('SIGKILL');finish(new Error('RCLONE_VERSION_INVALID'));
+        }else stdout+=chunk;
+      });
+      child.stderr.on('data',()=>{});
+      child.once('error',()=>finish(new Error('RCLONE_VERSION_FAILED')));
+      child.once('close',code=>finish(code===0?undefined:new Error('RCLONE_VERSION_FAILED')));
+    });
   }
 
   /**
@@ -154,6 +191,9 @@ export class RcloneService implements OnModuleInit {
   }
 
   async run(args: string[], maxOutputBytes?: number): Promise<{ stdout: string; stderr: string }> {
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    }
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, ['--config', this.configPath, ...args], {
         env: process.env,
