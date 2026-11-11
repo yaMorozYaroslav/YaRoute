@@ -78,6 +78,27 @@ export class McpService {
       icons: CONNECTIONS_PANEL_BRAND_ORIGIN ? [{src:CONNECTIONS_PANEL_BRAND_ORIGIN+'/branding/icon.png',mimeType:'image/png',sizes:['96x96']}] : [],
     });
 
+    // Minimal read-only MCP Apps delivery probe. If this static resource does
+    // not render in ChatGPT while the tool responds, the failure is in host
+    // resource retrieval or app registration rather than Connections JS.
+    const diagnosticUi='ui://nestnyx/diagnostic/v1.html';
+    server.registerResource('NestNyx UI Diagnostic',diagnosticUi,
+      {mimeType:'text/html;profile=mcp-app'},
+      async()=>({contents:[{
+        uri:diagnosticUi,mimeType:'text/html;profile=mcp-app',
+        text:'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>NestNyx UI Diagnostic</title></head><body><main style="font:16px system-ui;padding:24px"><h1>NestNyx UI resource loaded</h1><p>This is a static, read-only rendering check. No credentials or storage were accessed.</p></main></body></html>',
+        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}}},
+      }]}));
+    server.registerTool('nyx_ui_diagnostic',{
+      title:'Open NestNyx UI diagnostic',
+      description:'Show a minimal static MCP Apps resource to distinguish ChatGPT UI-resource failures from NestNyx Connections JavaScript problems. Does not access private data or change storage.',
+      inputSchema:z.object({}),
+      _meta:{ui:{resourceUri:diagnosticUi,visibility:['model','app']},
+        'openai/outputTemplate':diagnosticUi},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>this.safeTool(async()=>({schema:'nyx.ui-diagnostic.v1',result:'resource-requested',
+      noCredentialsRead:true,noStorageAccess:true})));
+
     // Capability discovery is advisory: canonical Head/nyxcli.json defines semantics.
     // A supported tool failing authorization is NOT a GPT fallback condition.
     server.registerTool(
