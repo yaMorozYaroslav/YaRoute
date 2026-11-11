@@ -88,3 +88,41 @@ test('private legacy browse controls need both verified owner linkage and broker
   const privateMode=renderPanel('private','false','false','true','true');
   assert.match(privateMode,/const privateBrokerEnabled=false;/);
 });
+
+
+test('activated storage uses active probe, not consumed pending credential',()=>{
+ const html=renderPanel('public','true','true');
+ const pendingStart=html.indexOf("if(item.status!=='active'){");
+ const activeStart=html.indexOf("if(item.status==='active'){",pendingStart);
+ const end=html.indexOf("host.append(box);",activeStart);
+ assert.ok(pendingStart>0&&activeStart>pendingStart&&end>activeStart);
+ const pending=html.slice(pendingStart,activeStart);
+ const active=html.slice(activeStart,end);
+ assert.match(pending,/Test new connection/);
+ assert.match(pending,/nyx_storage_connection_test_pending/);
+ assert.match(pending,/Activate after test/);
+ assert.doesNotMatch(active,/nyx_storage_connection_test_pending/);
+ assert.doesNotMatch(active,/Activate after test/);
+ assert.match(active,/Test active connection/);
+ assert.match(active,/nyx_storage_connection_test_active/);
+ assert.match(active,/result!=='verified'/);
+ assert.match(active,/nyx_storage_connection_list_files/);
+ assert.match(html,/root\.readOnly=item\.status==='active'/);
+});
+
+test('public storage hides legacy remote placeholders and reports actual grants',()=>{
+ const publicHtml=renderPanel('public','true','true');
+ assert.match(publicHtml,/id="nyx-mega-list" hidden aria-live="polite"/);
+ assert.match(publicHtml,/id="nyx-google-list" hidden aria-live="polite"/);
+ assert.match(publicHtml,/Permissions for this connection/);
+ assert.match(publicHtml,/providerCapabilities\|\|\[\]\)\.includes\('storage:list'\)/);
+ assert.match(publicHtml,/storage:list\) — /);
+ assert.match(publicHtml,/Read or download file contents — unavailable in pilot/);
+ assert.match(publicHtml,/Upload, edit or move files — unavailable in pilot/);
+ assert.match(publicHtml,/Delete files — unavailable in pilot/);
+ assert.match(publicHtml,/check\.disabled=true/);
+ assert.doesNotMatch(publicHtml,/call\('nyx_storage_connection_permissions',[^\n]*storage:write/);
+ const privateHtml=renderPanel('private','false','false');
+ assert.doesNotMatch(privateHtml,/id="nyx-mega-list" hidden/);
+ assert.doesNotMatch(privateHtml,/id="nyx-google-list" hidden/);
+});

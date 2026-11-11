@@ -96,9 +96,9 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 <div class="warn">GitHub permissions and repository writes require explicit grants. No default-branch writes, workflow dispatch, credential editing, billing or infrastructure actions.</div></header>
 <h2>Existing connections</h2>
 <details class="nyx-provider-group" id="nyx-google-group"><summary>🌈 Google Drive <span class="nyx-provider-count" id="nyx-google-count">Loading</span></summary>
-<div class="nyx-provider-list"><div class="row" id="tenant-google-create" hidden><label>Name <input id="tenant-google-name" type="text" maxlength="80" placeholder="My Google Drive"></label><button type="button" id="tenant-google-add">Create Google connection</button></div><div id="tenant-google-list" aria-live="polite"></div><div id="nyx-google-list" aria-live="polite">Checking configured remotes…</div></div></details>
+<div class="nyx-provider-list"><div class="row" id="tenant-google-create" hidden><label>Name <input id="tenant-google-name" type="text" maxlength="80" placeholder="My Google Drive"></label><button type="button" id="tenant-google-add">Create Google connection</button></div><div id="tenant-google-list" aria-live="polite"></div><div id="nyx-google-list" ${publicTenantStorage ? 'hidden' : ''} aria-live="polite">Checking configured remotes…</div></div></details>
 <details class="nyx-provider-group" id="nyx-mega-group"><summary>🗄️ MEGA <span class="nyx-provider-count" id="nyx-mega-count">Loading</span></summary>
-<div class="nyx-provider-list"><div class="row" id="tenant-mega-create" hidden><label>Name <input id="tenant-mega-name" type="text" maxlength="80" placeholder="My MEGA"></label><button type="button" id="tenant-mega-add">Create MEGA connection</button></div><div id="tenant-mega-list" aria-live="polite"></div><div id="nyx-mega-list" aria-live="polite">Checking configured remotes…</div></div></details>
+<div class="nyx-provider-list"><div class="row" id="tenant-mega-create" hidden><label>Name <input id="tenant-mega-name" type="text" maxlength="80" placeholder="My MEGA"></label><button type="button" id="tenant-mega-add">Create MEGA connection</button></div><div id="tenant-mega-list" aria-live="polite"></div><div id="nyx-mega-list" ${publicTenantStorage ? 'hidden' : ''} aria-live="polite">Checking configured remotes…</div></div></details>
 <details class="nyx-provider-group" id="nyx-rclone-group" ${publicTenantStorage ? 'hidden' : ''}><summary>🧰 Rclone <span class="nyx-provider-count" id="nyx-rclone-count">Private inventory</span></summary>
 <div class="nyx-provider-list"><p class="provider-note">Existing private Rclone metadata; remotes are listed under their providers above. This does not import, connect or modify credentials.</p>
 <button id="rclone-refresh" type="button">Refresh configured remotes</button>
@@ -297,9 +297,32 @@ function renderTenant(connections){
    const root=input((item.resources||[]).find(x=>x.kind===kind)?.id || (provider==='mega'?'MEGA_ROOT':''));
    root.maxLength=256;
    root.placeholder=provider==='mega'?'MEGA_ROOT or subfolder':'Google folder ID';
+   // Activated scope is immutable until separately reauthorized. Editing the
+   // text box must not silently invalidate a verified root grant.
+   root.readOnly=item.status==='active';
    const line=el('div');line.className='row';
    line.append(el('span','Allowed root'),root);box.append(line);
-   box.append(el('p','Read-only access. Old Rclone connections stay unchanged.'));
+   const activeRoot=(item.resources||[]).find(x=>x.kind===kind);
+   const hasReadList=item.status==='active' &&
+     (item.capabilities||[]).includes('storage:list') &&
+     (item.providerCapabilities||[]).includes('storage:list') &&
+     (activeRoot?.capabilities||[]).includes('storage:list');
+   const permissions=el('fieldset');
+   permissions.append(el('legend','Permissions for this connection'));
+   const scope=el('label');
+   const listCheck=el('input');listCheck.type='checkbox';
+   listCheck.checked=hasReadList;listCheck.disabled=true;
+   scope.append(listCheck,el('span','Browse names (storage:list) — '+(hasReadList?'enabled':'not verified')));
+   permissions.append(scope);
+   for(const label of ['Read or download file contents — unavailable in pilot',
+      'Upload, edit or move files — unavailable in pilot',
+      'Delete files — unavailable in pilot']){
+     const option=el('label');const check=el('input');
+     check.type='checkbox';check.disabled=true;check.checked=false;
+     option.append(check,el('span',label));permissions.append(option);
+   }
+   permissions.append(el('p','These are server-enforced grants, not permissions assigned by ChatGPT. Private legacy Rclone remotes are separate.'));
+   box.append(permissions);
    const configure=async()=>{
     const value=root.value.trim();
     if(!value || value.length>256)throw Error('Enter an allowed root first');
@@ -308,6 +331,7 @@ function renderTenant(connections){
       resources:[{kind,id:value,capabilities:['storage:list']}]});
     return value;
    };
+   if(item.status!=='active'){
    box.append(button('Save read-only root',async()=>{
     await configure();show('Root selected. Sign in separately to authorize access.');
    }));
@@ -337,7 +361,18 @@ function renderTenant(connections){
     show('Storage connection: '+String(result.status));
     await refreshTenantStorage();
    }));
+   }
    if(item.status==='active'){
+    box.append(button('Test active connection',async()=>{
+      const rootId=root.value.trim();
+      if(!rootId||!(item.resources||[]).some(r=>r.kind===kind&&r.id===rootId))
+        throw Error('No active authorized root');
+      const result=await call('nyx_storage_connection_test_active',{
+        id:item.id,provider,rootId,path:''
+      });
+      if(result!=='verified')throw Error('Active credential read not verified');
+      show('Active '+provider+' read verified on your selected root.');
+    }));
     const filePanel=el('div');filePanel.setAttribute('aria-live','polite');
     box.append(button('Browse selected folder (read only)',async()=>{
      const rootId=root.value.trim();
