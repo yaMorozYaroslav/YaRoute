@@ -5,6 +5,9 @@ import { parseLegacyKey, appendLegacyProposals } from './key-legacy';
 export interface KeyStore {
   read(path: string): Promise<string | null>;
   writeNew(path: string, content: string): Promise<void>;
+  // Optional provider-atomic update for the active mutable key. Never pretend
+  // local/rclone writes have compare-and-swap guarantees they do not provide.
+  compareAndSwap?(path: string, previous: string, next: string): Promise<boolean>;
 }
 export interface KeyCandidate {
   id: string;
@@ -77,7 +80,18 @@ export class KeyEngine {
       dispositions: { active: active.map(x=>x.id), archived: archived.map(x=>x.id) },
       diff: { before: original, after: next },
     }, null, 2) + '\n');
-    // Does not overwrite active temp_key: promotion requires provider-backed CAS and Footer checkpoint.
-    return { status: 'STAGED', stage: input.stage, mutations, activeCount: active.length, archivedCount: archived.length };
+    // Immutable transaction artifacts and receipt must be read back before an
+    // active key CAS. Only providers with a genuine atomic CAS may promote it.
+    let activeUpdated = false;
+    if (this.store.compareAndSwap) {
+      if (!await this.store.compareAndSwap(input.keyPath, original, next))
+        throw Error('KEY_ACTIVE_CONFLICT');
+      if (await this.store.read(input.keyPath) !== next)
+        throw Error('KEY_ACTIVE_READBACK_FAILED');
+      activeUpdated = true;
+    }
+    return { status: activeUpdated ? 'APPLIED' : 'STAGED',
+      stage: input.stage, mutations, activeUpdated,
+      activeCount: active.length, archivedCount: archived.length };
   }
 }
