@@ -3,7 +3,16 @@
  * APIs, external forms or finance controls. All data/actions go through
  * authenticated MCP tools. Render untrusted names with textContent only.
  */
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/connections/v9.html';
+// Distinct names and cache keys prevent Dev and Pro MCP Apps from sharing a tab identity.
+// The deployment environment is authoritative; no owner or secret data affects branding.
+const connectionsIsDev = process.env.NYX_DEPLOYMENT_MODE === 'public' ||
+  process.env.NYX_SERVICE_NAME === 'DevProNestNyx' ||
+  process.env.NYX_PUBLIC_URL === 'https://dev-nest-nyx-0df80c227630.herokuapp.com';
+const connectionsKind = connectionsIsDev ? 'dev' : 'pro';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v10.html';
+export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v10.html';
+export const CONNECTIONS_PANEL_LABEL = connectionsIsDev ? '🔵 NestNyx Dev · Connections' : '🟣 NestNyx Pro · Connections';
+export const CONNECTIONS_HOME_LABEL = connectionsIsDev ? '🏠 NestNyx Dev · Home' : '🏠 NestNyx Pro · Home';
 // Public users connect only their own storage; never show the operator's
 // private Rclone inventory in the shared, authenticated tenant UI.
 const publicTenantStorage = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
@@ -21,7 +30,7 @@ const iconMarkup = iconOrigin
 export const CONNECTIONS_PANEL_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NestNyx Connections</title>
+<title>${connectionsIsDev ? 'NestNyx Dev · Connections' : 'NestNyx Pro · Connections'}</title>
 <style>
 :root{color-scheme:light dark;font:14px/1.5 system-ui,sans-serif}
 body{margin:0;padding:18px;max-width:950px;color:var(--nyx-fg,inherit)}
@@ -70,7 +79,7 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 </style></head>
 <body>
 <div id="nyx-quick">
-<strong class="brand">${iconMarkup} NestNyx</strong><span class="muted">Connections</span><span class="spacer"></span>
+<strong class="brand">${iconMarkup} ${connectionsIsDev ? '🔵 NestNyx Dev' : '🟣 NestNyx Pro'}</strong><span class="muted">Connections</span><span class="spacer"></span>
 <button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">＋</button>
 </div>
 <section id="nyx-add-menu" hidden aria-label="Add a connection">
@@ -600,3 +609,9 @@ ready.then(()=>{
 }).catch(e=>show('MCP Apps unavailable: '+e.message,true));
 })();
 </script></body></html>`;
+
+// The sidebar/home launcher receives its own resource title, not a duplicate tab.
+// Both views keep exactly the same authenticated owner-scoped RPC behaviour.
+export const CONNECTIONS_HOME_HTML = CONNECTIONS_PANEL_HTML
+  .replace(/<title>[^<]*<\/title>/, '<title>'+(connectionsIsDev ? 'NestNyx Dev · Home' : 'NestNyx Pro · Home')+'</title>')
+  .replace('<span class="muted">Connections</span>', '<span class="muted">Home</span>');

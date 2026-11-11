@@ -9,7 +9,10 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  const panel=src('src/connectors/connections-panel.ts');
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
- assert.match(panel,/ui:\/\/nestnyx\/connections\/v9\.html/);
+ assert.match(panel,/ui:\/\/nestnyx\//);
+ assert.match(panel,/\/connections\/v10\.html/);
+ assert.match(panel,/\/home\/v10\.html/);
+ assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_HOME_URI/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
 
@@ -50,12 +53,15 @@ test('ChatGPT gets separate authenticated conversation-tab and global-sidebar la
  assert.ok(global.startsWith("server.registerTool('nyx_connections_home'"));
  assert.ok(thread.includes("'openai/ui':{entrypoints:[{type:'thread'}]}"));
  assert.ok(global.includes("'openai/ui':{entrypoints:[{type:'global'}]}"));
- assert.ok(thread.includes("title:'☁️ NestNyx Connections'"));
- assert.ok(global.includes("title:'☁️ NestNyx'"));
+ assert.ok(thread.includes('title:CONNECTIONS_PANEL_LABEL'));
+ assert.ok(global.includes('title:CONNECTIONS_HOME_LABEL'));
+ assert.ok(thread.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
+ assert.ok(thread.includes('ui:{resourceUri:CONNECTIONS_PANEL_URI'));
+ assert.ok(global.includes("'openai/outputTemplate':CONNECTIONS_HOME_URI"));
+ assert.ok(global.includes('ui:{resourceUri:CONNECTIONS_HOME_URI'));
+ assert.equal((mcp.match(/server\.registerResource\(/g)||[]).length,2);
  for(const tool of [thread,global]){
    assert.ok(tool.includes("inputSchema:z.object({})"));
-   assert.ok(tool.includes("'openai/outputTemplate':CONNECTIONS_PANEL_URI"));
-   assert.ok(tool.includes("ui:{resourceUri:CONNECTIONS_PANEL_URI"));
    assert.ok(tool.includes("annotations:{readOnlyHint:true,destructiveHint:false"));
    assert.ok(tool.includes("},connectionsPanelResult);"));
  }
