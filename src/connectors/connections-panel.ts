@@ -9,8 +9,8 @@ const connectionsIsDev = process.env.NYX_DEPLOYMENT_MODE === 'public' ||
   process.env.NYX_SERVICE_NAME === 'DevProNestNyx' ||
   process.env.NYX_PUBLIC_URL === 'https://dev-nest-nyx-0df80c227630.herokuapp.com';
 const connectionsKind = connectionsIsDev ? 'dev' : 'pro';
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v11.html';
-export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v11.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v12.html';
+export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v12.html';
 export const CONNECTIONS_PANEL_LABEL = connectionsIsDev ? '🔵 NestNyx Dev · Connections' : '🟣 NestNyx Pro · Connections';
 export const CONNECTIONS_HOME_LABEL = connectionsIsDev ? '🏠 NestNyx Dev · Home' : '🏠 NestNyx Pro · Home';
 // Public users connect only their own storage; never show the operator's
@@ -19,6 +19,7 @@ const publicTenantStorage = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
   process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
   process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true';
 const publicMegaOnly = publicTenantStorage && process.env.NYX_PUBLIC_TENANT_MEGA_ONLY === 'true';
+const megaMutationEnabled = publicTenantStorage && process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true';
 const ownerLinkEnabled = publicTenantStorage && process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true';
 const privateBrokerEnabled = ownerLinkEnabled && process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true';
 const iconOrigin = process.env.NYX_PUBLIC_URL?.startsWith('https://')
@@ -159,6 +160,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 'use strict';
 const publicTenantStorage=${JSON.stringify(publicTenantStorage)};
 const publicMegaOnly=${JSON.stringify(publicMegaOnly)};
+const megaMutationEnabled=${JSON.stringify(megaMutationEnabled)};
 const ownerLinkEnabled=${JSON.stringify(ownerLinkEnabled)};
 const privateBrokerEnabled=${JSON.stringify(privateBrokerEnabled)};
 const root=document.getElementById('connection-list');
@@ -387,12 +389,52 @@ function renderTenant(connections){
    listCheck.checked=hasReadList;listCheck.disabled=true;
    scope.append(listCheck,el('span','Browse names (storage:list) — '+(hasReadList?'enabled':'not verified')));
    permissions.append(scope);
-   for(const label of ['Read or download file contents — unavailable in pilot',
-      'Upload, edit or move files — unavailable in pilot',
-      'Delete files — unavailable in pilot']){
-     const option=el('label');const check=el('input');
-     check.type='checkbox';check.disabled=true;check.checked=false;
-     option.append(check,el('span',label));permissions.append(option);
+   if(provider==='mega' && megaMutationEnabled && item.status==='active'){
+     const toggles=[];
+     for(const [label,cap] of [['Move/rename files','storage:move'],
+       ['Delete files to MEGA rubbish bin','storage:delete']]){
+       const row=el('label');const check=el('input');check.type='checkbox';
+       check.checked=(item.capabilities||[]).includes(cap) &&
+         (activeRoot?.capabilities||[]).includes(cap);
+       row.append(check,el('span',label));permissions.append(row);
+       toggles.push({cap,check});
+     }
+     permissions.append(button('Save file permissions',async()=>{
+       const caps=['storage:list',...toggles.filter(x=>x.check.checked).map(x=>x.cap)];
+       await call('nyx_storage_connection_permissions',{id:item.id,capabilities:caps});
+       await call('nyx_storage_connection_roots',{id:item.id,resources:[
+         {kind:'mega-root',id:root.value.trim(),capabilities:caps}]});
+       show('File permissions saved. Write access also requires MEGA reauthorization.');
+       await refreshTenantStorage();
+     }));
+     if(!['storage:move','storage:delete'].every(cap=>
+         (item.providerCapabilities||[]).includes(cap))){
+       permissions.append(button('Reauthorize MEGA for writes',async()=>{
+         const result=await call('nyx_storage_connection_begin_mega',
+           {id:item.id,rootPath:root.value.trim()});
+         const link=new URL(result.url);const base=${JSON.stringify(iconOrigin)};
+         if(link.protocol!=='https:' || !base || link.origin!==base ||
+           link.pathname!=='/connect/mega/setup')throw Error('Untrusted sign-in URL');
+         await request('ui/open-link',{url:result.url});
+         show('Reauthorize securely, then finish activation here.');
+       }));
+     }
+     permissions.append(button('Finish pending MEGA reauthorization',async()=>{
+       const result=await call('nyx_storage_connection_test_pending',{id:item.id});
+       if(result!=='verified')throw Error('Pending MEGA credentials have not passed read probe');
+       const activated=await call('nyx_storage_connection_activate',{id:item.id});
+       if(activated.status!=='active')throw Error('MEGA activation failed');
+       show('Reauthorized MEGA account activated; permissions will be refreshed.');
+       await refreshTenantStorage();
+     }));
+   }else{
+     for(const label of ['Read or download file contents — unavailable in pilot',
+       'Upload, edit or move files — unavailable in pilot',
+       'Delete files — unavailable in pilot']){
+       const option=el('label');const check=el('input');
+       check.type='checkbox';check.disabled=true;check.checked=false;
+       option.append(check,el('span',label));permissions.append(option);
+     }
    }
    permissions.append(el('p','These are server-enforced grants, not permissions assigned by ChatGPT. Private legacy Rclone remotes are separate.'));
    box.append(permissions);
@@ -447,23 +489,70 @@ function renderTenant(connections){
       show('Active '+provider+' read verified on your selected root.');
     }));
     const filePanel=el('div');filePanel.setAttribute('aria-live','polite');
-    box.append(button('Browse selected folder (read only)',async()=>{
-     const rootId=root.value.trim();
-     if(!rootId || !(item.resources||[]).some(r=>r.kind===kind&&r.id===rootId))
-      throw Error('Select and save the granted root first');
-     const data=await call('nyx_storage_connection_list_files',{
-      id:item.id,provider,rootId,path:''
-     });
-     if(!data||!Array.isArray(data.items)||typeof data.truncated!=='boolean')
-      throw Error('Storage listing not available');
-     filePanel.replaceChildren(el('p',data.items.length+' items'+(data.truncated?' (additional items hidden)':'')));
-     const ul=el('ul');
-     for(const entry of data.items.slice(0,100)){
-      if(!entry||typeof entry.path!=='string')continue;
-      ul.append(el('li',(entry.isDir?'📁 ':'📄 ')+entry.path));
-     }
-     filePanel.append(ul);
+    const folder=input('');folder.maxLength=2048;
+    folder.placeholder='Relative folder path';folder.setAttribute('aria-label','Browse folder path');
+    const navigation=el('div');navigation.className='row';
+    navigation.append(el('label','Folder'),folder);
+    navigation.append(button('Up',async()=>{
+      const parts=folder.value.trim().split('/').filter(Boolean);
+      parts.pop();folder.value=parts.join('/');await browse();
     }));
+    box.append(navigation);
+    const browse=async()=>{
+      const rootId=root.value.trim();
+      if(!rootId || !(item.resources||[]).some(r=>r.kind===kind&&r.id===rootId))
+        throw Error('Select and save the granted root first');
+      const relativeFolder=folder.value.trim();
+      const data=await call('nyx_storage_connection_list_files',{
+        id:item.id,provider,rootId,path:relativeFolder
+      });
+      if(!data||!Array.isArray(data.items)||typeof data.truncated!=='boolean')
+        throw Error('Storage listing not available');
+      filePanel.replaceChildren(el('p','/'+relativeFolder+' — '+data.items.length+' items'+
+        (data.truncated?' (additional items hidden)':'')));
+      const list=el('ul');
+      const can=(cap)=>provider==='mega' && megaMutationEnabled &&
+        (item.capabilities||[]).includes(cap) &&
+        (item.providerCapabilities||[]).includes(cap) &&
+        (activeRoot?.capabilities||[]).includes(cap);
+      for(const entry of data.items.slice(0,100)){
+        if(!entry||typeof entry.path!=='string')continue;
+        const fullPath=[relativeFolder,entry.path].filter(Boolean).join('/');
+        const li=el('li');li.append(el('span',(entry.isDir?'📁 ':'📄 ')+entry.path));
+        if(entry.isDir){
+          li.append(button('Open folder',async()=>{
+            folder.value=fullPath;await browse();
+          }));
+        }else if(can('storage:move')||can('storage:delete')){
+          const actions=el('div');actions.className='controls';
+          const mutate=async(operation,destinationPath)=>{
+            const args={id:item.id,rootId,operation,sourcePath:fullPath};
+            if(destinationPath!==undefined)args.destinationPath=destinationPath;
+            const result=await call('nyx_storage_mega_file_mutate',args);
+            if(result.status!=='verified')throw Error('MEGA operation needs audit reconciliation');
+            await browse();
+            show('MEGA '+operation+' verified. Audit receipt '+result.id);
+          };
+          if(can('storage:move')){
+            const rename=input(fullPath);rename.maxLength=2048;
+            rename.placeholder='New name in same folder';
+            actions.append(rename,button('Rename',()=>mutate('rename',rename.value.trim())));
+            const move=input(fullPath);move.maxLength=2048;
+            move.placeholder='New path within selected root';
+            actions.append(move,button('Move',()=>mutate('move',move.value.trim())));
+          }
+          if(can('storage:delete')){
+            // Deliberately single click: authenticated owner + chosen grants; MEGA rubbish bin.
+            actions.append(button('Delete to trash',()=>mutate('trash')));
+          }
+          li.append(actions);
+        }
+        list.append(li);
+      }
+      filePanel.append(list);
+    };
+    box.append(button(provider==='mega' && megaMutationEnabled ?
+      'Browse and manage MEGA files' : 'Browse selected folder (read only)',browse));
     box.append(filePanel);
    }
    host.append(box);
