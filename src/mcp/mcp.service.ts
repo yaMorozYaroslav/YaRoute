@@ -201,6 +201,35 @@ export class McpService {
       }]}),
     );
 
+
+    // Cached MCP Apps tool metadata can still request a previous resource
+    // after deployment. Keep v10-v12 URIs fetchable so ChatGPT doesn't display
+    // "App unavailable" when it has cached an old Connections/Home template.
+    // Each alias serves the current UI, with the requested URI in the response.
+    for (const version of [10,11,12]) {
+      for (const item of [
+        {label:CONNECTIONS_PANEL_LABEL,uri:CONNECTIONS_PANEL_URI,html:CONNECTIONS_PANEL_HTML},
+        {label:CONNECTIONS_HOME_LABEL,uri:CONNECTIONS_HOME_URI,html:CONNECTIONS_HOME_HTML},
+      ]) {
+        const oldUri=item.uri.replace(/\/v13\.html$/, '/v'+version+'.html');
+        if (oldUri===item.uri)throw new Error('NYX_MCP_UI_ALIAS_URI_INVALID');
+        server.registerResource(item.label+' (compatibility v'+version+')',oldUri,
+          {mimeType:'text/html;profile=mcp-app'},
+          async()=>({contents:[{
+            uri:oldUri,mimeType:'text/html;profile=mcp-app',text:item.html,
+            _meta:{
+              ui:{prefersBorder:true,csp:{connectDomains:[],
+                resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]}},
+              'openai/widgetCSP':{redirect_domains:[
+                'https://github.com','https://accounts.google.com',
+                ...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[])]},
+              'openai/ui':{availableDisplayModes:['inline','fullscreen']},
+            },
+          }]}),
+        );
+      }
+    }
+
     // MCP Apps connection manager. It is an authenticated UI resource, NOT an
     // alternate backend API or a way to bypass per-user MCP authorization.
     server.registerResource(
