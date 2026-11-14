@@ -34,10 +34,10 @@ function view(mode,service,url){
 test('blue Dev pilot and purple private Pro get distinct branded MCP Apps resource IDs',()=>{
  const dev=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com');
  const pro=view('private','NestNyx','https://example.com');
- assert.match(dev.connectionsUri,/\/dev\/connections\/v10\.html$/);
- assert.match(pro.connectionsUri,/\/pro\/connections\/v10\.html$/);
- assert.match(dev.homeUri,/\/dev\/home\/v10\.html$/);
- assert.match(pro.homeUri,/\/pro\/home\/v10\.html$/);
+ assert.match(dev.connectionsUri,/\/dev\/connections\/v11\.html$/);
+ assert.match(pro.connectionsUri,/\/pro\/connections\/v11\.html$/);
+ assert.match(dev.homeUri,/\/dev\/home\/v11\.html$/);
+ assert.match(pro.homeUri,/\/pro\/home\/v11\.html$/);
  assert.notEqual(dev.connectionsUri,pro.connectionsUri);
  assert.notEqual(dev.connectionsUri,dev.homeUri);
  assert.notEqual(pro.connectionsUri,pro.homeUri);
@@ -55,4 +55,19 @@ test('blue Dev pilot and purple private Pro get distinct branded MCP Apps resour
  assert.match(dev.connectionsHtml,/<span class="muted">Connections<\/span>/);
  assert.match(dev.connectionsHtml,/\/branding\/icon\.png/);
  assert.match(pro.connectionsHtml,/\/branding\/icon\.png/);
+});
+
+test('Connections UI selects an authenticated owner-scoped account without switching the ChatGPT principal',()=>{
+ const dev=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com');
+ const html=dev.connectionsHtml;
+ assert.match(html,/id="nyx-account-select"/);
+ assert.match(html,/id="nyx-active-identity"/);
+ assert.match(html,/id="nyx-google-shortcut"/);
+ assert.match(html,/function updateAccountSelector\(connections\)/);
+ assert.match(html,/const active=connections\.filter\(/);
+ assert.match(html,/item\.status==='active'/);
+ assert.match(html,/Account selection never changes your authenticated NestNyx user/);
+ assert.match(html,/@media\(max-width:520px\)/);
+ assert.match(html,/Google OAuth sign-in/);
+ assert.doesNotMatch(html,/localStorage|sessionStorage|document\.cookie/);
 });

@@ -10,8 +10,8 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
  assert.match(panel,/ui:\/\/nestnyx\//);
- assert.match(panel,/\/connections\/v10\.html/);
- assert.match(panel,/\/home\/v10\.html/);
+ assert.match(panel,/\/connections\/v11\.html/);
+ assert.match(panel,/\/home\/v11\.html/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_HOME_URI/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });

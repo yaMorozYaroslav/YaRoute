@@ -9,8 +9,8 @@ const connectionsIsDev = process.env.NYX_DEPLOYMENT_MODE === 'public' ||
   process.env.NYX_SERVICE_NAME === 'DevProNestNyx' ||
   process.env.NYX_PUBLIC_URL === 'https://dev-nest-nyx-0df80c227630.herokuapp.com';
 const connectionsKind = connectionsIsDev ? 'dev' : 'pro';
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v10.html';
-export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v10.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v11.html';
+export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v11.html';
 export const CONNECTIONS_PANEL_LABEL = connectionsIsDev ? '🔵 NestNyx Dev · Connections' : '🟣 NestNyx Pro · Connections';
 export const CONNECTIONS_HOME_LABEL = connectionsIsDev ? '🏠 NestNyx Dev · Home' : '🏠 NestNyx Pro · Home';
 // Public users connect only their own storage; never show the operator's
@@ -76,11 +76,47 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 .nyx-remote .nyx-remote-permissions{padding:7px 4px 11px}
 .nyx-remote .nyx-remote-permissions p{margin:5px 0}
 .nyx-remote>summary:focus-visible{outline:3px solid #18a56c;outline-offset:2px}
+
+:root{--nyx-accent:#0a927c;--nyx-border:#89959d4f;--nyx-surface:#7998ad0c}
+body{max-width:900px;padding:clamp(10px,2.8vw,22px);line-height:1.45}
+#nyx-quick{background:var(--nyx-surface);border-color:var(--nyx-border);padding:13px}
+#nyx-quick .brand{display:flex;align-items:center;gap:8px;min-width:0}
+#nyx-add{background:var(--nyx-accent);border-color:var(--nyx-accent);font:600 26px system-ui;border-radius:50%;width:46px;height:46px;min-width:46px;aspect-ratio:1}
+#nyx-add:hover{background:#087362}
+.nyx-logo{width:38px;height:38px;min-width:38px;aspect-ratio:1;border-radius:50%;background:#087e52;color:white;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid #229e90;box-sizing:border-box;font-size:19px;line-height:1}
+.nyx-logo img{width:100%!important;height:100%!important;object-fit:cover!important;border-radius:50%;display:block}
+#nyx-account-bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,205px);gap:13px;padding:14px;border:1px solid var(--nyx-border);border-radius:14px;background:var(--nyx-surface);margin-bottom:17px}
+#nyx-account-bar .kicker{font-size:11px;opacity:.7;text-transform:uppercase;letter-spacing:.06em}
+#nyx-account-bar .session-label{font-weight:700;font-size:15px}
+#nyx-account-bar .account-detail{font-size:12px;opacity:.78;overflow-wrap:anywhere;margin-top:5px}
+#nyx-account-bar .account-picker{display:flex;flex-direction:column;gap:5px}
+#nyx-account-bar label{font-size:12px}
+#nyx-account-bar select,#nyx-google-shortcut{width:100%;box-sizing:border-box;border-radius:9px;min-height:38px}
+#nyx-google-shortcut{border-color:var(--nyx-accent)}
+.nyx-provider-group{background:var(--nyx-surface);border-color:var(--nyx-border);overflow:hidden}
+.nyx-provider-group[open]>summary{border-bottom:1px solid var(--nyx-border)}
+.nyx-provider-list .card{border:1px solid var(--nyx-border);border-radius:11px;padding:12px;margin:9px 0;background:var(--nyx-surface)}
+.nyx-provider-list .card:first-child{border-top:1px solid var(--nyx-border)}
+.nyx-provider-list .card.nyx-selected{border-color:var(--nyx-accent);box-shadow:inset 3px 0 var(--nyx-accent)}
+.nyx-provider-list .nyx-connection-detail{opacity:.76;font-size:12px;overflow-wrap:anywhere}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--nyx-accent);outline-offset:2px}
+@media(max-width:520px){#nyx-account-bar{grid-template-columns:1fr}#nyx-quick>.muted{display:none}}
 </style></head>
 <body>
 <div id="nyx-quick">
-<strong class="brand">${iconMarkup} ${connectionsIsDev ? '🔵 NestNyx Dev' : '🟣 NestNyx Pro'}</strong><span class="muted">Connections</span><span class="spacer"></span>
-<button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">＋</button>
+<strong class="brand"><span class="nyx-logo" aria-hidden="true">${iconMarkup || "🌀"}</span> ${connectionsIsDev ? '🔵 NestNyx Dev' : '🟣 NestNyx Pro'}</strong><span class="muted">Connections</span><span class="spacer"></span>
+<button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">+</button>
+</div>
+<div id="nyx-account-bar" aria-label="Current session and selected storage account">
+ <div><div class="kicker">Authenticated NestNyx session</div>
+ <div class="session-label">${publicTenantStorage ? 'Google OAuth session' : 'Authenticated connector session'}</div>
+ <p class="account-detail" id="nyx-active-identity">No active cloud account selected.</p>
+ </div>
+ <div class="account-picker">
+ <label for="nyx-account-select">Selected cloud account</label>
+ <select id="nyx-account-select" aria-label="Switch between your authorized storage accounts"><option value="">No active account</option></select>
+ <button id="nyx-google-shortcut" type="button" ${publicMegaOnly ? 'disabled title="Google Drive is disabled in MEGA-only mode"' : ''}>Connect Google Drive</button>
+ </div>
 </div>
 <section id="nyx-add-menu" hidden aria-label="Add a connection">
 <h2>Add a connection</h2>
@@ -283,7 +319,30 @@ async function refreshRclone(){
 }
 
 let tenantToolsAvailable=false;
+let selectedTenantAccount='';
+function updateAccountSelector(connections){
+ const active=connections.filter(x=>(x.provider==='google-drive'||x.provider==='mega')&&x.status==='active');
+ if(!active.some(x=>x.id===selectedTenantAccount))selectedTenantAccount=active[0]?.id||'';
+ const select=document.getElementById('nyx-account-select');select.replaceChildren();
+ if(!active.length){
+   const o=el('option','No active cloud accounts');o.value='';select.append(o);select.disabled=true;
+ }else{
+   select.disabled=false;
+   for(const item of active){
+     const o=el('option',item.displayName+' · '+(item.provider==='mega'?'MEGA':'Google Drive'));
+     o.value=item.id;o.selected=item.id===selectedTenantAccount;select.append(o);
+   }
+ }
+ const chosen=active.find(x=>x.id===selectedTenantAccount);
+ document.getElementById('nyx-active-identity').textContent=chosen
+   ?'Selected storage: '+chosen.displayName+(chosen.provider==='mega' &&
+      typeof chosen.externalAccountId==='string' && chosen.externalAccountId.includes('@')
+      ?' ('+chosen.externalAccountId+')':'')+
+     '. Account selection never changes your authenticated NestNyx user.'
+   :'No active cloud account selected. Add and verify an account below.';
+}
 function renderTenant(connections){
+ updateAccountSelector(connections);
  for(const [provider,label] of [['google-drive','google'],['mega','mega']]){
   const host=document.getElementById('tenant-'+label+'-list');
   host.replaceChildren();
@@ -293,7 +352,21 @@ function renderTenant(connections){
   host.append(el('p',items.length+' separate NestNyx connection(s).'));
   for(const item of items){
    const box=el('div');box.className='card';
-   box.append(el('strong',item.displayName),el('p','Connection status: '+item.status));
+   if(item.id===selectedTenantAccount)box.classList.add('nyx-selected');
+   const heading=el('div');heading.className='row';
+   heading.append(el('strong',item.displayName));
+   const state=el('span',item.status==='active'?'● Connected':'○ Pending');
+   state.className='badge';heading.append(state);box.append(heading);
+   const detail=el('p',item.provider==='mega'&&item.status==='active'?
+     'Verified MEGA identity: '+item.externalAccountId:
+     item.provider==='google-drive'&&item.status==='active'?
+     'Verified Google account (private subject identifier)':'Authorization required');
+   detail.className='nyx-connection-detail';box.append(detail);
+   if(item.status==='active')box.append(button(
+     item.id===selectedTenantAccount?'✓ Selected account':'Use this account',async()=>{
+       selectedTenantAccount=item.id;renderTenant(connections);
+       show('Selected '+item.displayName+'. Account permissions remain isolated.');
+     }));
    const root=input((item.resources||[]).find(x=>x.kind===kind)?.id || (provider==='mega'?'MEGA_ROOT':''));
    root.maxLength=256;
    root.placeholder=provider==='mega'?'MEGA_ROOT or subfolder':'Google folder ID';
@@ -614,6 +687,16 @@ for(const choice of document.querySelectorAll('#nyx-provider-choices button[data
   quickAdd.setAttribute('aria-expanded','false');
  });
 }
+document.getElementById('nyx-account-select').addEventListener('change',e=>{
+ selectedTenantAccount=e.target.value;refreshTenantStorage();
+});
+document.getElementById('nyx-google-shortcut').addEventListener('click',()=>{
+ if(publicMegaOnly)return show('Google Drive onboarding requires enabling the multi-provider deployment.',true);
+ document.getElementById('nyx-google-group').open=true;
+ document.getElementById('tenant-google-create').hidden=!tenantToolsAvailable;
+ document.getElementById('tenant-google-name').focus();
+ show('Create a Google Drive connection, enter its folder ID, and press Google OAuth sign-in. Consent opens securely in your browser.');
+});
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
 document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
 for(const [provider,label] of [['google-drive','google'],['mega','mega']]){
