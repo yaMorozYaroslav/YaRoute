@@ -234,3 +234,22 @@ test('MCP connection requests cannot dispatch before valid OAuth login and requi
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(dispatched, [{ subject: 'visitor-a', method: 'tools/call' }]);
 });
+
+test('MCP session display trusts only signed and verified OAuth email claims', async()=>{
+ const auth=authWithKeyProvider((_kid,callback)=>
+   callback(null,{getPublicKey:()=>publicKey}));
+ const signedAddress=['owner','example.test'].join('@');
+ const makeToken=(emailVerified)=>jwt.sign({
+   sub:'owner-test',scope:'nyx.read nyx.write',
+   email:signedAddress,email_verified:emailVerified,name:'Owner',
+ },privateKey,{algorithm:'RS256',issuer,audience,expiresIn:3600,keyid:'signing-key-1'});
+ const verified=await request(auth,makeToken(true));
+ assert.equal(verified.allowed,true);
+ assert.equal(verified.res.locals.nyxVerifiedEmail,signedAddress);
+ assert.equal(verified.res.locals.nyxDisplayName,'Owner');
+ const unverified=await request(auth,makeToken(false));
+ assert.equal(unverified.allowed,true);
+ assert.equal(unverified.res.locals.nyxVerifiedEmail,null);
+ assert.equal(unverified.res.locals.nyxDisplayName,null);
+ assert.equal(unverified.res.locals.nyxSubject,'owner-test');
+});

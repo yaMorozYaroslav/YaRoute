@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
 import { NyxCommandExecutor } from '../nyx/command-executor.service';
 import { NyxBootstrapService } from '../nyx/bootstrap.service';
 import { NyxCliRegistryService } from '../nyx/cli-registry.service';
@@ -35,6 +36,9 @@ import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/c
 @Injectable()
 export class McpService {
   private readonly ownerContext = new AsyncLocalStorage<string>();
+  private readonly signedDisplayContext = new AsyncLocalStorage<{
+    email: string | null; name: string | null;
+  }>();
   private readonly logger = new Logger(McpService.name);
   private readonly nodeHandler: ReturnType<typeof toNodeHandler>;
 
@@ -73,7 +77,12 @@ export class McpService {
       res.status(503).json({ error: 'public_storage_migration_incomplete' });
       return;
     }
-    await this.ownerContext.run(`oauth:${res.locals.nyxSubject}`, () => this.nodeHandler(req, res, parsedBody));
+    const display = {
+      email: typeof res.locals.nyxVerifiedEmail === 'string' ? res.locals.nyxVerifiedEmail : null,
+      name: typeof res.locals.nyxDisplayName === 'string' ? res.locals.nyxDisplayName : null,
+    };
+    await this.ownerContext.run(`oauth:${res.locals.nyxSubject}`, () =>
+      this.signedDisplayContext.run(display, () => this.nodeHandler(req, res, parsedBody)));
   }
 
   private buildServer() {
@@ -245,6 +254,32 @@ export class McpService {
       };
     });
 
+    // Display identity is derived from a signed OAuth token; the caller cannot
+    // select an owner ID or switch tenants by choosing a storage connection.
+    server.registerTool('nyx_session_info',{
+      title:'Show my signed-in NestNyx account',
+      description:'Show the current verified OAuth identity and effective storage write feature status. Read-only, current user only; no raw subject or credentials.',
+      inputSchema:z.object({}),
+      _meta:{ui:{visibility:['app']}},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>this.safeTool(()=>{
+      const owner=this.connectorOwner();
+      const signed=this.signedDisplayContext.getStore();
+      const subjectHint=createHash('sha256').update(owner).digest('hex').slice(0,10);
+      return {
+        authenticated:true,
+        provider:process.env.NYX_DEPLOYMENT_MODE==='public'?'Google OAuth':'OAuth',
+        accountHint:subjectHint,
+        email:signed?.email||null,
+        displayName:signed?.name||null,
+        storageWriteAvailable:process.env.NYX_DEPLOYMENT_MODE==='public' &&
+          process.env.NYX_PUBLIC_CONNECTORS_ENABLED==='true' &&
+          process.env.NYX_MULTIUSER_RCLONE_ENABLED==='true' &&
+          process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true',
+        sessionSwitchRequiresReconnect:true,
+      };
+    }));
+    
     server.registerTool('nyx_connections_panel',{
       title:CONNECTIONS_PANEL_LABEL,
       description:process.env.NYX_DEPLOYMENT_MODE === 'public' && process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
@@ -570,8 +605,8 @@ export class McpService {
         this.connections.createStorage(this.connectorOwner(),provider,name)));
 
       server.registerTool('nyx_storage_connection_permissions', {
-        title: 'Select read-only storage permission',
-        description: 'Set storage:list only. A user selection cannot grant provider permissions.',
+        title: 'Select storage connection capabilities',
+        description: 'Select read and, where explicitly enabled by server policy, MEGA move/trash permissions. Provider permissions remain independently enforced.',
         inputSchema: z.object({id: z.string().uuid(),
            capabilities: z.array(z.enum(['storage:list','storage:move','storage:delete'])).max(3)}),
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
@@ -623,7 +658,7 @@ export class McpService {
         this.tenantRclone.activate(this.connectorOwner(),id)));
       server.registerTool('nyx_storage_connection_list_files', {
         title:'List my MEGA or Google Drive folder from my independent connection',
-        description:'Read-only: lists up to 100 names from the exact owner-authorized root. Uses an isolated per-connection Rclone config, never private legacy credentials. Does not read file contents, copy, modify or delete.',
+        description:'Read-only: lists up to 100 names within the exact owner-authorized root using an isolated per-connection Rclone config. Separate gated tools govern changes.',
         inputSchema:z.object({
           id:z.string().uuid(),provider:z.enum(['google-drive','mega']),
           rootId:z.string().min(1).max(256),

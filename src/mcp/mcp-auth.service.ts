@@ -145,6 +145,18 @@ export class McpAuthService {
         });
         return false;
       }
+      // Display claims are trusted ONLY when signed by the configured issuer.
+      // An account's Google email may be absent from an OAuth access token.
+      // Never accept a client-supplied email, and never treat it as the owner key.
+      const verifiedEmail = payload.email_verified === true &&
+        typeof payload.email === 'string' &&
+        /^[^\s@\x00-\x1f]{1,100}@[^\s@\x00-\x1f]{1,150}$/.test(payload.email)
+          ? payload.email : null;
+      res.locals.nyxVerifiedEmail = verifiedEmail;
+      res.locals.nyxDisplayName = verifiedEmail &&
+        typeof payload.name === 'string' &&
+        payload.name.length <= 120 && !/[\x00-\x1f\x7f]/.test(payload.name)
+          ? payload.name : null;
       res.locals.nyxSubject = payload.sub;
       return true;
     } catch (error) {
