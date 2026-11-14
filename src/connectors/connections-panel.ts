@@ -9,8 +9,8 @@ const connectionsIsDev = process.env.NYX_DEPLOYMENT_MODE === 'public' ||
   process.env.NYX_SERVICE_NAME === 'DevProNestNyx' ||
   process.env.NYX_PUBLIC_URL === 'https://dev-nest-nyx-0df80c227630.herokuapp.com';
 const connectionsKind = connectionsIsDev ? 'dev' : 'pro';
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v12.html';
-export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v12.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v13.html';
+export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v13.html';
 export const CONNECTIONS_PANEL_LABEL = connectionsIsDev ? '🔵 NestNyx Dev · Connections' : '🟣 NestNyx Pro · Connections';
 export const CONNECTIONS_HOME_LABEL = connectionsIsDev ? '🏠 NestNyx Dev · Home' : '🏠 NestNyx Pro · Home';
 // Public users connect only their own storage; never show the operator's
@@ -82,10 +82,18 @@ fieldset{border:1px solid #8885;border-radius:7px;margin:7px 0}
 body{max-width:900px;padding:clamp(10px,2.8vw,22px);line-height:1.45}
 #nyx-quick{background:var(--nyx-surface);border-color:var(--nyx-border);padding:13px}
 #nyx-quick .brand{display:flex;align-items:center;gap:8px;min-width:0}
-#nyx-add{background:var(--nyx-accent);border-color:var(--nyx-accent);font:600 26px system-ui;border-radius:50%;width:46px;height:46px;min-width:46px;aspect-ratio:1}
+#nyx-add{background:var(--nyx-accent);border-color:var(--nyx-accent);border-radius:999px!important;width:44px;height:44px;min-width:44px;min-height:44px;padding:0;display:flex;align-items:center;justify-content:center;flex:none}
+#nyx-add .nyx-plus-mark{width:20px;height:20px;display:block;position:relative}
+#nyx-add .nyx-plus-mark::before,#nyx-add .nyx-plus-mark::after{content:"";position:absolute;display:block;background:#fff;border-radius:3px;top:50%;left:50%;transform:translate(-50%,-50%)}
+#nyx-add .nyx-plus-mark::before{width:19px;height:3px}
+#nyx-add .nyx-plus-mark::after{width:3px;height:19px}
 #nyx-add:hover{background:#087362}
 .nyx-logo{width:38px;height:38px;min-width:38px;aspect-ratio:1;border-radius:50%;background:#087e52;color:white;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid #229e90;box-sizing:border-box;font-size:19px;line-height:1}
 .nyx-logo img{width:100%!important;height:100%!important;object-fit:cover!important;border-radius:50%;display:block}
+#nyx-account-bar .session-switch{font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--nyx-border);margin-top:7px}
+#nyx-account-bar .session-reference{font:11px ui-monospace,monospace;opacity:.68;margin-top:4px;overflow-wrap:anywhere}
+#nyx-account-bar .account-picker button{font-size:12px}
+#nyx-account-bar .session-label{overflow-wrap:anywhere}
 #nyx-account-bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,205px);gap:13px;padding:14px;border:1px solid var(--nyx-border);border-radius:14px;background:var(--nyx-surface);margin-bottom:17px}
 #nyx-account-bar .kicker{font-size:11px;opacity:.7;text-transform:uppercase;letter-spacing:.06em}
 #nyx-account-bar .session-label{font-weight:700;font-size:15px}
@@ -106,11 +114,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <body>
 <div id="nyx-quick">
 <strong class="brand"><span class="nyx-logo" aria-hidden="true">${iconMarkup || "🌀"}</span> ${connectionsIsDev ? '🔵 NestNyx Dev' : '🟣 NestNyx Pro'}</strong><span class="muted">Connections</span><span class="spacer"></span>
-<button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu">+</button>
+<button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu"><span class="nyx-plus-mark" aria-hidden="true"></span></button>
 </div>
 <div id="nyx-account-bar" aria-label="Current session and selected storage account">
  <div><div class="kicker">Authenticated NestNyx session</div>
- <div class="session-label">${publicTenantStorage ? 'Google OAuth session' : 'Authenticated connector session'}</div>
+ <div class="session-label" id="nyx-session-user">Checking signed-in account…</div>
+ <div class="session-reference" id="nyx-session-reference">OAuth verification pending</div>
+ <button class="session-switch" id="nyx-switch-login" type="button">Change Google login</button>
  <p class="account-detail" id="nyx-active-identity">No active cloud account selected.</p>
  </div>
  <div class="account-picker">
@@ -321,7 +331,26 @@ async function refreshRclone(){
 }
 
 let tenantToolsAvailable=false;
+let liveMegaWritesAvailable=megaMutationEnabled;
 let selectedTenantAccount='';
+async function refreshSessionIdentity(){
+ try{
+   const identity=await call('nyx_session_info',{});
+   if(!identity || identity.authenticated!==true)throw Error('Verified session unavailable');
+   const label=identity.email || identity.displayName ||
+     (identity.provider+' · Account '+identity.accountHint);
+   document.getElementById('nyx-session-user').textContent=label;
+   document.getElementById('nyx-session-reference').textContent=
+     identity.provider+' · Session ID '+identity.accountHint+
+     (identity.email?' · verified email':' · email not provided by OAuth provider');
+   liveMegaWritesAvailable=identity.storageWriteAvailable===true;
+ }catch{
+   document.getElementById('nyx-session-user').textContent='Authenticated session';
+   document.getElementById('nyx-session-reference').textContent=
+     'Identity details unavailable. Disconnect/reconnect to refresh tools.';
+   liveMegaWritesAvailable=false;
+ }
+}
 function updateAccountSelector(connections){
  const active=connections.filter(x=>(x.provider==='google-drive'||x.provider==='mega')&&x.status==='active');
  if(!active.some(x=>x.id===selectedTenantAccount))selectedTenantAccount=active[0]?.id||'';
@@ -427,6 +456,16 @@ function renderTenant(connections){
        show('Reauthorized MEGA account activated; permissions will be refreshed.');
        await refreshTenantStorage();
      }));
+   }else if(provider==='mega'){
+     for(const label of [
+       'Read/download file contents — not implemented',
+       'Rename or move files — disabled by server',
+       'Delete to MEGA rubbish bin — disabled by server']){
+       const option=el('label');const check=el('input');
+       check.type='checkbox';check.disabled=true;
+       option.append(check,el('span',label));permissions.append(option);
+     }
+     permissions.append(el('p','MEGA writes require the Dev server flag, refreshed tools and per-account grants. This connection is currently read-only.'));
    }else{
      for(const label of ['Read or download file contents — unavailable in pilot',
        'Upload, edit or move files — unavailable in pilot',
@@ -776,6 +815,9 @@ for(const choice of document.querySelectorAll('#nyx-provider-choices button[data
   quickAdd.setAttribute('aria-expanded','false');
  });
 }
+document.getElementById('nyx-switch-login').addEventListener('click',()=>{
+ show('To change your Google login, disconnect NestNyx Dev in ChatGPT Apps / Plugins and reconnect with the other Google account. Selecting a MEGA account here only changes storage; it does not switch the authenticated user.');
+});
 document.getElementById('nyx-account-select').addEventListener('change',e=>{
  selectedTenantAccount=e.target.value;refreshTenantStorage();
 });
@@ -808,6 +850,7 @@ document.getElementById('new-form').addEventListener('submit',async e=>{
  }catch(e){show(e.message,true);}
 });
 ready.then(()=>{
+ refreshSessionIdentity().catch(()=>{});
  refresh().catch(e=>show(e.message,true));
  if(publicTenantStorage){
   refreshTenantStorage();
