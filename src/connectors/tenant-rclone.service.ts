@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { spawn } from 'node:child_process';
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -131,6 +131,19 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       read_verified_at timestamptz,
       updated_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (owner_id, connection_id, state)
+    )`);
+    // Durable receipts: an interrupted operation remains "running" for reconciliation.
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_rclone_mega_mutations_v1 (
+      id uuid PRIMARY KEY,
+      owner_id text NOT NULL,
+      connection_id text NOT NULL,
+      root_id text NOT NULL,
+      operation text NOT NULL CHECK (operation IN ('rename','move','trash')),
+      source_path text NOT NULL,
+      destination_path text,
+      state text NOT NULL CHECK (state IN ('running','verified','uncertain')),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      completed_at timestamptz
     )`);
   }
 
@@ -431,6 +444,144 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
                            resourceId:string, relativePath='') {
     const target=await this.authorizedTarget(ownerId,connectionId,provider,resourceId,relativePath);
     return this.listIsolated(target.profile,target.path);
+  }
+
+
+  /**
+   * Opt-in, owner-authorized single-file MEGA operations.
+   * Trash is the MEGA backend's *provider rubbish bin*, not a folder called Trash.
+   * Never run --mega-hard-delete or rclone purge; no per-file confirmation token.
+   */
+  async mutateMegaFile(ownerId:string, connectionId:string, rootId:string,
+    operation:'rename'|'move'|'trash', sourcePath:string, destinationPath?:string) {
+    if (process.env.NYX_DEPLOYMENT_MODE!=='public' ||
+        process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED!=='true')
+      throw new Error('TENANT_MEGA_MUTATIONS_DISABLED');
+    if (!['rename','move','trash'].includes(operation))
+      throw new Error('TENANT_MEGA_OPERATION_INVALID');
+    const clean=(value:string) => {
+      const result=tenantRclonePath(value);
+      if (!result || result!==value || value.split('/').some(part=>!part || part==='.' || part==='..'))
+        throw new Error('TENANT_MEGA_FILE_PATH_INVALID');
+      return result;
+    };
+    const source=clean(sourcePath);
+    const destination=operation==='trash' ? undefined : clean(destinationPath || '');
+    if (destination && destination===source)throw new Error('TENANT_MEGA_NOOP_FORBIDDEN');
+    if (destination && operation==='rename' &&
+        source.split('/').slice(0,-1).join('/') !== destination.split('/').slice(0,-1).join('/'))
+      throw new Error('TENANT_MEGA_RENAME_PARENT_CHANGED');
+    if (operation==='trash' && destinationPath!==undefined)
+      throw new Error('TENANT_MEGA_TRASH_DESTINATION_FORBIDDEN');
+
+    const scope=operation==='trash'?'storage:delete':'storage:move';
+    // Require the same exact owner/connection/resource for source AND destination.
+    const policy=this.connectors.registryPolicy();
+    await policy.requireResource(ownerId,connectionId,scope,{kind:'mega-root',id:rootId,path:source});
+    if (destination) await policy.requireResource(ownerId,connectionId,scope,
+      {kind:'mega-root',id:rootId,path:destination});
+    const target=await this.authorizedTarget(ownerId,connectionId,'mega',rootId,source);
+    const next=destination ? await this.authorizedTarget(
+      ownerId,connectionId,'mega',rootId,destination) : undefined;
+    if (target.profile.provider!=='mega')throw new Error('TENANT_MEGA_PROVIDER_INVALID');
+
+    // PG advisory lock serializes mutations for the same tenant+account across dynos.
+    const client=await this.db().connect();
+    let locked=false;
+    try {
+      await client.query('SELECT pg_advisory_lock(hashtext($1),hashtext($2))',
+        [ownerId,connectionId]);locked=true;
+      const dir=await fs.mkdtemp(path.join(os.tmpdir(),'nyx-tenant-mega-write-'));
+      const cfg=path.join(dir,'rclone.conf');
+      try {
+        await fs.chmod(dir,0o700);
+        await fs.writeFile(cfg,tenantRcloneConfig(target.profile),{mode:0o600,flag:'wx'});
+        const run=async(args:string[],maxOutput=256*1024):Promise<string> =>
+          new Promise((resolve,reject)=>{
+            let settled=false,bytes=0,stdout='';
+            const child=spawn(this.binary,['--config',cfg,'--mega-hard-delete=false',
+              '--retries=1',...args],{
+                env:{PATH:process.env.PATH||'',HOME:dir,TMPDIR:dir,XDG_CONFIG_HOME:dir},
+                stdio:['ignore','pipe','pipe'],
+              });
+            const finish=(error?:Error)=>{
+              if(settled)return;settled=true;clearTimeout(timer);
+              if(error)reject(error);else resolve(stdout);
+            };
+            const timer=setTimeout(()=>{
+              child.kill('SIGKILL');finish(new Error('TENANT_MEGA_OPERATION_TIMEOUT'));
+            },45000);
+            child.stdout.on('data',(chunk:Buffer)=>{
+              bytes+=chunk.length;
+              if(bytes>maxOutput){child.kill('SIGKILL');
+                finish(new Error('TENANT_MEGA_RESPONSE_OVERSIZE'));}
+              else stdout+=chunk.toString('utf8');
+            });
+            // Provider stderr can contain sensitive account data.
+            child.stderr.on('data',()=>{});
+            child.once('error',()=>finish(new Error('TENANT_MEGA_COMMAND_FAILED')));
+            child.once('close',code=>finish(code===0?undefined:
+              new Error('TENANT_MEGA_COMMAND_FAILED')));
+          });
+        const findFile=async(fullPath:string)=>{
+          const parent=path.posix.dirname(fullPath)==='.'?'':path.posix.dirname(fullPath);
+          const leaf=path.posix.basename(fullPath);
+          const raw=await run(['lsjson','tenant:'+parent,'--max-depth','1']);
+          let listing:unknown;
+          try{listing=JSON.parse(raw);}catch{throw new Error('TENANT_MEGA_LIST_INVALID');}
+          if(!Array.isArray(listing) || listing.length>10000)
+            throw new Error('TENANT_MEGA_LIST_INVALID');
+          const matches=listing.filter(x=>x && typeof x==='object' &&
+            (x as Record<string,unknown>).Path===leaf);
+          if(matches.length>1)throw new Error('TENANT_MEGA_DUPLICATE_PATH');
+          if(!matches.length)return null;
+          const entry=matches[0] as Record<string,unknown>;
+          if(entry.IsDir!==false)throw new Error('TENANT_MEGA_FILES_ONLY');
+          return {id:typeof entry.ID==='string'?entry.ID:null,
+            size:typeof entry.Size==='number'?entry.Size:null};
+        };
+        const before=await findFile(target.path);
+        if(!before)throw new Error('TENANT_MEGA_SOURCE_MISSING');
+        if(next && await findFile(next.path))
+          throw new Error('TENANT_MEGA_DESTINATION_EXISTS');
+        const receiptId=randomUUID();
+        await client.query(`INSERT INTO nyx_rclone_mega_mutations_v1
+          (id,owner_id,connection_id,root_id,operation,source_path,destination_path,state)
+          VALUES($1,$2,$3,$4,$5,$6,$7,'running')`,
+          [receiptId,ownerId,connectionId,rootId,operation,source,destination||null]);
+        try {
+          if(operation==='trash') {
+            // MEGA backend defaults to rubbish-bin deletion; hard-delete forced false.
+            await run(['deletefile','tenant:'+target.path]);
+          } else {
+            // --ignore-existing additionally prevents overwrites if destination appears.
+            await run(['moveto','tenant:'+target.path,'tenant:'+next!.path,'--ignore-existing']);
+          }
+          const missing=await findFile(target.path);
+          const present=next?await findFile(next.path):null;
+          if(missing || (next && (!present || present.size!==before.size)))
+            throw new Error('TENANT_MEGA_POSTCHECK_UNCERTAIN');
+          await client.query(`UPDATE nyx_rclone_mega_mutations_v1
+            SET state='verified',completed_at=now() WHERE id=$1
+            AND owner_id=$2 AND connection_id=$3`,[receiptId,ownerId,connectionId]);
+          return {id:receiptId,operation,status:'verified' as const,
+            sourcePath:source,destinationPath:destination||null,
+            trashPolicy:operation==='trash'?'mega-provider-rubbish-bin':null,
+            confirmationRequired:false};
+        } catch {
+          await client.query(`UPDATE nyx_rclone_mega_mutations_v1
+            SET state='uncertain',completed_at=now() WHERE id=$1
+            AND owner_id=$2 AND connection_id=$3`,[receiptId,ownerId,connectionId]);
+          throw new Error('TENANT_MEGA_OPERATION_UNCERTAIN_CHECK_AUDIT');
+        }
+      } finally {
+        await fs.rm(dir,{recursive:true,force:true});
+      }
+    } finally {
+      if(locked)await client.query('SELECT pg_advisory_unlock(hashtext($1),hashtext($2))',
+        [ownerId,connectionId]).catch(()=>{});
+      client.release();
+    }
   }
 
   private async listIsolated(profile:TenantRcloneProfile, relativePath:string) {

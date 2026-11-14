@@ -572,7 +572,8 @@ export class McpService {
       server.registerTool('nyx_storage_connection_permissions', {
         title: 'Select read-only storage permission',
         description: 'Set storage:list only. A user selection cannot grant provider permissions.',
-        inputSchema: z.object({id: z.string().uuid(),capabilities: z.array(z.literal('storage:list')).max(1)}),
+        inputSchema: z.object({id: z.string().uuid(),
+           capabilities: z.array(z.enum(['storage:list','storage:move','storage:delete'])).max(3)}),
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
       }, async ({id,capabilities}) => this.safeTool(() =>
         this.connections.storagePermissions(this.connectorOwner(),id,capabilities)));
@@ -583,7 +584,7 @@ export class McpService {
         inputSchema: z.object({id:z.string().uuid(),resources:z.array(z.object({
           kind:z.enum(['drive','mega-root']),
           id:z.string().min(1).max(256),
-          capabilities:z.array(z.literal('storage:list')).min(1).max(1),
+          capabilities:z.array(z.enum(['storage:list','storage:move','storage:delete'])).min(1).max(3),
         }).strict()).max(10)}),
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
       }, async ({id,resources}) => this.safeTool(() =>
@@ -632,6 +633,25 @@ export class McpService {
       },async({id,provider,rootId,path})=>this.safeTool(()=>
         this.tenantRclone.listAuthorizedRoot(
           this.connectorOwner(),id,provider,rootId,path||'')));
+
+
+      if (process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true') {
+        // No extra click-by-click confirmation. Permissions are independently
+        // selected per verified MEGA account, and deletion uses MEGA rubbish bin.
+        server.registerTool('nyx_storage_mega_file_mutate', {
+          title:'Rename, move, or trash one file in my MEGA account',
+          description:'Single-file action under one exact owner-authorized MEGA root. Trash uses MEGA rubbish bin; no permanent deletion. Never accepts owner IDs or remote names.',
+          inputSchema:z.object({
+            id:z.string().uuid(),rootId:z.string().min(1).max(256),
+            operation:z.enum(['rename','move','trash']),
+            sourcePath:z.string().min(1).max(2048),
+            destinationPath:z.string().max(2048).optional(),
+          }).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+        },async({id,rootId,operation,sourcePath,destinationPath})=>this.safeTool(()=>
+          this.tenantRclone.mutateMegaFile(this.connectorOwner(),id,rootId,
+            operation,sourcePath,destinationPath)));
+      }
 
       server.registerTool('nyx_storage_connection_revoke', {
         title:'Revoke my MEGA or Google Drive connection',

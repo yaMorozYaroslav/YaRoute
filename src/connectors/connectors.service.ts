@@ -220,8 +220,11 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     if (!['google-drive','mega'].includes(connection.provider)) {
       throw new Error('CONNECTOR_PROVIDER_DISABLED');
     }
+    const allowed=connection.provider==='mega' &&
+      process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
+      ? ['storage:list','storage:move','storage:delete'] : ['storage:list'];
     if (!Array.isArray(capabilities) ||
-        capabilities.some(c => c !== 'storage:list')) {
+        capabilities.some(c => !allowed.includes(c))) {
       throw new Error('TENANT_RCLONE_READ_ONLY');
     }
     const updated = await this.policy().setPermissions(ownerId, id, capabilities);
@@ -239,9 +242,12 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
     // Empty selection is permitted to revoke access, but not to enroll.
     if (connection.provider === 'mega' && Array.isArray(resources) && resources.length > 1)
       throw new Error('TENANT_MEGA_SINGLE_ROOT_REQUIRED');
+    const allowed=connection.provider==='mega' &&
+      process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
+      ? ['storage:list','storage:move','storage:delete'] : ['storage:list'];
     if (!Array.isArray(resources) || resources.length > 10 ||
         resources.some(r => !r || r.kind !== (connection.provider === 'mega' ? 'mega-root' : 'drive') ||
-          !Array.isArray(r.capabilities) || r.capabilities.some(c => c !== 'storage:list') ||
+          !Array.isArray(r.capabilities) || r.capabilities.some(c => !allowed.includes(c)) ||
           r.branches !== undefined || r.pathPrefix !== undefined ||
           typeof r.id !== 'string' || r.id.length > 256 ||
           !/^[A-Za-z0-9_.\\/-]+$/.test(r.id) || r.id.split('/').some(p => p === '..' || p === '.'))) {
@@ -269,7 +275,10 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       ...connection, externalAccountId: verifiedAccountId,
       // Provider consent grants only metadata for read-only operations.
       // User-enabled capabilities and chosen resources remain separate.
-      providerCapabilities: ['storage:list'], status: 'active',
+      providerCapabilities: provider==='mega' &&
+        process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
+        ? ['storage:list','storage:move','storage:delete'] : ['storage:list'],
+      status: 'active',
     };
     await this.repository!.save(verified);
     return this.view(verified);
