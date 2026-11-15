@@ -36,8 +36,11 @@ export class MegaEnrollmentController {
       '<br><br><label>Six-digit MEGA authenticator code (if enabled)<br>' +
       '<input type="text" name="twoFactorCode" inputmode="numeric" pattern="[0-9]{6}" ' +
       'maxlength="6" minlength="6" autocomplete="one-time-code"></label>' +
-      '<br><br><button type="submit">Verify read-only connection</button></form>' +
-      '<p>If MFA is enabled, enter a fresh code when submitting. Your code is never stored. ' +
+      '<br><br><button type="submit">Verify MEGA credentials and connection</button></form>' +
+      '<p>This step checks MEGA login and read connectivity only. It does not perform a write test. ' +
+      'NestNyx will require separately selected file permissions and a disposable-file write test ' +
+      'before writes can be considered verified. ' +
+      'If MFA is enabled, enter a fresh code when submitting. Your code is never stored. ' +
       'Enrollment requires a reusable MEGA session after verification.</p></main>'
     );
   }
@@ -51,8 +54,10 @@ export class MegaEnrollmentController {
       await this.enrollment.complete(body.state,body.email,body.password,
         body.twoFactorCode || undefined);
       return res.status(200).type('html').send(
-        '<!doctype html><meta charset="utf-8"><h1>MEGA read access verified</h1>' +
-        '<p>Return to NestNyx to activate your separate connection. No old account was replaced.</p>'
+        '<!doctype html><meta charset="utf-8"><h1>MEGA login and read connectivity verified</h1>' +
+        '<p>Return to NestNyx to activate your separate connection. If you selected move/trash, ' +
+        'verify effective permissions there and test on a disposable file. ' +
+        'No write was attempted in this step. No old account was replaced.</p>'
       );
     } catch {
       return res.status(400).type('html').send(
