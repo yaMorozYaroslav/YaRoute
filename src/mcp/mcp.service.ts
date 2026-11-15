@@ -37,7 +37,7 @@ import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/c
 export class McpService {
   private readonly ownerContext = new AsyncLocalStorage<string>();
   private readonly signedDisplayContext = new AsyncLocalStorage<{
-    email: string | null; name: string | null;
+    email: string | null; name: string | null; picture: string | null;
   }>();
   private readonly logger = new Logger(McpService.name);
   private readonly nodeHandler: ReturnType<typeof toNodeHandler>;
@@ -80,6 +80,7 @@ export class McpService {
     const display = {
       email: typeof res.locals.nyxVerifiedEmail === 'string' ? res.locals.nyxVerifiedEmail : null,
       name: typeof res.locals.nyxDisplayName === 'string' ? res.locals.nyxDisplayName : null,
+      picture: typeof res.locals.nyxProfilePicture === 'string' ? res.locals.nyxProfilePicture : null,
     };
     await this.ownerContext.run(`oauth:${res.locals.nyxSubject}`, () =>
       this.signedDisplayContext.run(display, () => this.nodeHandler(req, res, parsedBody)));
@@ -136,7 +137,7 @@ export class McpService {
           sum: { tool: 'nyx_sum', status: 'registered' },
         },
         auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ?
-          ['nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview',
+          ['get_profile','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview',
            ...(process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
                process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
             ['nyx_storage_connections_list','nyx_storage_connection_create',
@@ -191,7 +192,7 @@ export class McpService {
         text:CONNECTIONS_PANEL_HTML,
         _meta:{
           ui:{prefersBorder:true,csp:{connectDomains:[],
-            resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]}},
+            resourceDomains:[...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]),'https://lh3.googleusercontent.com']}},
           'openai/widgetCSP':{redirect_domains:[
             'https://github.com','https://accounts.google.com',
             ...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]),
@@ -206,12 +207,12 @@ export class McpService {
     // after deployment. Keep v10-v12 URIs fetchable so ChatGPT doesn't display
     // "App unavailable" when it has cached an old Connections/Home template.
     // Each alias serves the current UI, with the requested URI in the response.
-    for (const version of [10,11,12]) {
+    for (const version of [10,11,12,13]) {
       for (const item of [
         {label:CONNECTIONS_PANEL_LABEL,uri:CONNECTIONS_PANEL_URI,html:CONNECTIONS_PANEL_HTML},
         {label:CONNECTIONS_HOME_LABEL,uri:CONNECTIONS_HOME_URI,html:CONNECTIONS_HOME_HTML},
       ]) {
-        const oldUri=item.uri.replace(/\/v13\.html$/, '/v'+version+'.html');
+        const oldUri=item.uri.replace(/\/v14\.html$/, '/v'+version+'.html');
         if (oldUri===item.uri)throw new Error('NYX_MCP_UI_ALIAS_URI_INVALID');
         server.registerResource(item.label+' (compatibility v'+version+')',oldUri,
           {mimeType:'text/html;profile=mcp-app'},
@@ -219,7 +220,7 @@ export class McpService {
             uri:oldUri,mimeType:'text/html;profile=mcp-app',text:item.html,
             _meta:{
               ui:{prefersBorder:true,csp:{connectDomains:[],
-                resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]}},
+                resourceDomains:[...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]),'https://lh3.googleusercontent.com']}},
               'openai/widgetCSP':{redirect_domains:[
                 'https://github.com','https://accounts.google.com',
                 ...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[])]},
@@ -238,7 +239,7 @@ export class McpService {
       async () => ({contents:[{
         uri:CONNECTIONS_PANEL_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_PANEL_HTML,
-        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN ? [CONNECTIONS_PANEL_BRAND_ORIGIN] : []}},
+        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]),'https://lh3.googleusercontent.com']}},
           'openai/widgetCSP':{redirect_domains:[
             'https://github.com','https://accounts.google.com',
             ...(CONNECTIONS_PANEL_BRAND_ORIGIN ? [CONNECTIONS_PANEL_BRAND_ORIGIN] : []),
@@ -253,7 +254,7 @@ export class McpService {
       async () => ({contents:[{
         uri:CONNECTIONS_HOME_URI, mimeType:'text/html;profile=mcp-app',
         text:CONNECTIONS_HOME_HTML,
-        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN ? [CONNECTIONS_PANEL_BRAND_ORIGIN] : []}},
+        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[...(CONNECTIONS_PANEL_BRAND_ORIGIN?[CONNECTIONS_PANEL_BRAND_ORIGIN]:[]),'https://lh3.googleusercontent.com']}},
           'openai/widgetCSP':{redirect_domains:[
             'https://github.com','https://accounts.google.com',
             ...(CONNECTIONS_PANEL_BRAND_ORIGIN ? [CONNECTIONS_PANEL_BRAND_ORIGIN] : []),
@@ -283,6 +284,39 @@ export class McpService {
       };
     });
 
+    // OpenAI plugin multi-account discovery. One stable opaque profile per
+    // validated OAuth principal; never use mutable email or client UI selections.
+    server.registerTool('get_profile',{
+      title:'Get my NestNyx profile',
+      description:'Read the verified profile for these OAuth credentials. Stable per account; never returns another account or credentials.',
+      inputSchema:z.object({}),
+      outputSchema:z.object({
+        id:z.string().min(1),
+        name:z.string().optional(),
+        email:z.string().email().optional(),
+        nickname:z.string().optional(),
+      }).strict(),
+      _meta:{'openai/profile':true},
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    },async()=>{
+      try {
+        const owner=this.connectorOwner();
+        const signed=this.signedDisplayContext.getStore();
+        const hash=createHash('sha256').update('nestnyx-profile-v1:'+owner).digest('hex');
+        const profile={
+          id:'prf_'+hash.slice(0,32),
+          ...(signed?.name?{name:signed.name}:{}),
+          ...(signed?.email?{email:signed.email}:{}),
+          nickname:'NestNyx account '+hash.slice(0,8),
+        };
+        return {structuredContent:profile,
+          content:[{type:'text' as const,text:JSON.stringify(profile)}]};
+      } catch {
+        return {isError:true,
+          content:[{type:'text' as const,text:'CONNECTOR_OWNER_REQUIRED'}]};
+      }
+    });
+
     // Display identity is derived from a signed OAuth token; the caller cannot
     // select an owner ID or switch tenants by choosing a storage connection.
     server.registerTool('nyx_session_info',{
@@ -301,6 +335,7 @@ export class McpService {
         accountHint:subjectHint,
         email:signed?.email||null,
         displayName:signed?.name||null,
+        pictureUrl:signed?.picture||null,
         storageWriteAvailable:process.env.NYX_DEPLOYMENT_MODE==='public' &&
           process.env.NYX_PUBLIC_CONNECTORS_ENABLED==='true' &&
           process.env.NYX_MULTIUSER_RCLONE_ENABLED==='true' &&
