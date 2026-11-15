@@ -102,7 +102,9 @@ body{max-width:900px;padding:clamp(10px,2.8vw,22px);line-height:1.45}
 #nyx-account-bar .session-actions button{margin-top:0}
 #nyx-add-google-login{border-color:var(--nyx-accent)!important}
 #nyx-login-add-help{border:1px solid var(--nyx-border);border-radius:10px;padding:9px 11px;margin-top:8px;font-size:12px}
-#nyx-login-add-help[hidden]{display:none}
+#nyx-login-add-help[hidden],#nyx-switch-help[hidden]{display:none}
+#nyx-switch-help{border:1px solid var(--nyx-border);border-radius:10px;padding:9px 11px;margin-top:8px;font-size:12px}
+#nyx-session-account-state{font-size:12px;font-weight:650;margin:3px 0;color:var(--nyx-fg,inherit)}
 
 #nyx-account-bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,205px);gap:13px;padding:14px;border:1px solid var(--nyx-border);border-radius:14px;background:var(--nyx-surface);margin-bottom:17px}
 #nyx-account-bar .kicker{font-size:11px;opacity:.7;text-transform:uppercase;letter-spacing:.06em}
@@ -127,16 +129,26 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <button id="nyx-add" type="button" title="Add a connection" aria-label="Add a connection" aria-expanded="false" aria-controls="nyx-add-menu"><span class="nyx-plus-mark" aria-hidden="true"></span></button>
 </div>
 <div id="nyx-account-bar" aria-label="Current session and selected storage account">
- <div><div class="kicker">Authenticated NestNyx session</div>
+ <div><div class="kicker">Current Google login for this panel</div>
+ <div id="nyx-session-account-state" role="status" aria-live="polite">Identifying the OAuth connection…</div>
  <div class="session-person"><span class="session-avatar" id="nyx-session-avatar" aria-label="Google profile avatar unavailable">G</span>
  <div class="session-person-main"><div class="session-label" id="nyx-session-user">Checking signed-in account…</div>
  <div class="session-reference" id="nyx-session-reference">OAuth verification pending</div></div></div>
  <div class="session-actions"><button class="session-switch" id="nyx-add-google-login" type="button" aria-expanded="false" aria-controls="nyx-login-add-help">+ Add Google account</button>
- <button class="session-switch" id="nyx-switch-login" type="button">Change Google login</button></div>
+ <button class="session-switch" id="nyx-switch-login" type="button" aria-expanded="false" aria-controls="nyx-switch-help">How to switch Google login</button></div>
  <div id="nyx-login-add-help" hidden role="region" aria-label="Add a Google login">
  <strong>Keep your existing account connected.</strong>
  <p>To connect another NestNyx Google identity, use ChatGPT Settings → Plugins → NestNyx Dev → Connected accounts → Connect another account, when available. Complete Google OAuth there, then reopen this panel.</p>
  <p>ChatGPT owns the Google login picker. NestNyx cannot start that native picker inside an MCP Apps iframe. This panel's cloud-account selector only shows storage authorized to the current login.</p>
+ </div>
+ <div id="nyx-switch-help" hidden role="region" aria-label="Switch the Google account used by NestNyx">
+ <strong>No reconnection required for already connected accounts.</strong>
+ <p>To open NestNyx under another Google login, ask ChatGPT: “Open NestNyx Connections using Personal” or “Open NestNyx Connections using Primary.” ChatGPT selects that separately authenticated plugin connection.</p>
+ <p>See all connected logins in ChatGPT Settings → Plugins → DevNestNyx → Connected accounts. Switching here cannot replace ChatGPT's OAuth credentials. The storage dropdown below only changes your current login's MEGA/Drive connection.</p>
+ <label for="nyx-switch-account-label">Connected account label</label>
+ <input id="nyx-switch-account-label" type="text" maxlength="80" autocomplete="off" placeholder="Personal or Primary" aria-label="Connected ChatGPT account name">
+ <button class="session-switch" id="nyx-open-google-account" type="button">Open account in ChatGPT</button>
+ <p>The button requests a new ChatGPT view with your selected connected account. It does not change this panel's login and does not reconnect OAuth.</p>
  </div>
  <p class="account-detail" id="nyx-active-identity">No active cloud account selected.</p>
  </div>
@@ -357,6 +369,9 @@ async function refreshSessionIdentity(){
    const label=identity.email || identity.displayName ||
      (identity.provider+' · Account '+identity.accountHint);
    document.getElementById('nyx-session-user').textContent=label;
+   document.getElementById('nyx-session-account-state').textContent=
+     (identity.email?'Verified Google login: ':'Google account reference: ')+
+     (identity.email||identity.accountHint)+' · This login owns the connections below';
    // Avatar is optional and must come only from verified issuer-signed claims.
    const avatar=document.getElementById('nyx-session-avatar');
    avatar.replaceChildren();
@@ -381,6 +396,8 @@ async function refreshSessionIdentity(){
    liveMegaWritesAvailable=identity.storageWriteAvailable===true;
  }catch{
    document.getElementById('nyx-session-user').textContent='Authenticated session';
+   document.getElementById('nyx-session-account-state').textContent=
+     'Google login information unavailable; this view remains owner-scoped';
    document.getElementById('nyx-session-reference').textContent=
      'Identity details unavailable. Disconnect/reconnect to refresh tools.';
    liveMegaWritesAvailable=false;
@@ -857,7 +874,23 @@ document.getElementById('nyx-add-google-login').addEventListener('click',()=>{
  document.getElementById('nyx-add-google-login').setAttribute('aria-expanded',String(!help.hidden));
 });
 document.getElementById('nyx-switch-login').addEventListener('click',()=>{
- show('For a different Google identity, use ChatGPT Settings → Plugins → NestNyx Dev → Connected accounts. Prefer Connect another account to keep existing logins; disconnect only when you intend to replace the current login. Selecting a MEGA account only changes storage.');
+ const help=document.getElementById('nyx-switch-help');help.hidden=!help.hidden;
+ document.getElementById('nyx-switch-login').setAttribute('aria-expanded',String(!help.hidden));
+});
+document.getElementById('nyx-open-google-account').addEventListener('click',async()=>{
+ const label=document.getElementById('nyx-switch-account-label').value.trim();
+ // The user supplies only a human-readable account label; never a token or URL.
+ if(!/^[\\p{L}\\p{N} ._@+\\-]{1,80}$/u.test(label))
+   return show('Enter an already connected account label, such as Personal or Primary.',true);
+ const send=window.openai?.sendFollowUpMessage;
+ if(typeof send!=='function')
+   return show('Your ChatGPT host does not expose account-opening from this panel. Ask in chat: Open NestNyx Connections using '+label+'.',true);
+ try {
+   await send({prompt:'Open NestNyx Dev Connections using my already connected plugin account labelled "'+label+'". Use credentials for that exact connection; do not relink accounts or change grants.'});
+   show('Requested the '+label+' account in ChatGPT. A new panel will use the account chosen by the host.');
+ }catch{
+   show('ChatGPT could not open that account from this panel. Ask in chat: Open NestNyx Connections using '+label+'.',true);
+ }
 });
 document.getElementById('nyx-account-select').addEventListener('change',e=>{
  selectedTenantAccount=e.target.value;refreshTenantStorage();
