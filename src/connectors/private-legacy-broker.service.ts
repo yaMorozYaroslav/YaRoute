@@ -23,6 +23,8 @@ export class PrivateLegacyBrokerService implements OnModuleInit, OnModuleDestroy
     const key = process.env.NYX_PRIVATE_BROKER_SHARED_KEY_B64 || '';
     const rawAreas = process.env.NYX_PRIVATE_BROKER_ALLOWED_AREAS || '';
     const areas = rawAreas.split(',').map(s => s.trim()).filter(Boolean);
+    const remotes = (process.env.NYX_PRIVATE_BROKER_ALLOWED_REMOTES || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
     const allowlist = (process.env.NYX_PRIVATE_OAUTH_SUBJECTS || '')
       .split(',').map(s => s.trim()).filter(Boolean);
     privateBrokerKey(key);
@@ -34,12 +36,14 @@ export class PrivateLegacyBrokerService implements OnModuleInit, OnModuleDestroy
         !/^[A-Za-z0-9_-]{5,255}$/.test(googleSubject) ||
         allowlist.length !== 1 || allowlist[0] !== mcpSubject ||
         areas.length < 1 || areas.length > 20 ||
+        remotes.length > 20 || new Set(remotes).size !== remotes.length ||
+        !remotes.every(r => /^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(r)) ||
         new Set(areas).size !== areas.length ||
         !areas.every(a => /^[A-Z][A-Z0-9_]{0,39}$/.test(a)) ||
         !process.env.DATABASE_URL)
       throw new Error('PRIVATE_BROKER_CONFIGURATION_INVALID');
     return {here,expectedPublic,mcpIssuer,mcpSubject,googleSubject,
-      key,areas};
+      key,areas,remotes};
   }
 
   async onModuleInit() {
@@ -66,7 +70,9 @@ export class PrivateLegacyBrokerService implements OnModuleInit, OnModuleDestroy
       mcpSubject:cfg.mcpSubject,
       googleSubject:cfg.googleSubject,
     });
-    if (claims.op === 'list' && !cfg.areas.includes(claims.root))
+    if ((claims.op === 'list' && !cfg.areas.includes(claims.root)) ||
+        (claims.op === 'remote-list' && !cfg.remotes.includes(claims.root)) ||
+        (claims.op === 'connections' && cfg.remotes.length === 0))
       throw new Error('PRIVATE_BROKER_ACCESS_DENIED');
     // Globally one-use even across dynos. Rate limiting is atomic in Postgres.
     const client = await this.pool.connect();
@@ -93,8 +99,21 @@ export class PrivateLegacyBrokerService implements OnModuleInit, OnModuleDestroy
 
     if (claims.op === 'roots')
       return {schema:'nyx.private-legacy-broker.v1',roots:[...cfg.areas]};
+    // The operator alone decides which private Rclone remote names can be
+    // delegated. Never return raw Rclone configuration, options or tokens.
+    if (claims.op === 'connections') {
+      const inventory = await this.storage.rcloneConnections();
+      const connections = inventory.remotes
+        .filter(remote => cfg.remotes.includes(remote.name))
+        .map(remote => ({name:remote.name,provider:remote.provider}));
+      if (connections.length !== cfg.remotes.length)
+        throw new Error('PRIVATE_BROKER_REMOTE_MISSING');
+      return {schema:'nyx.private-legacy-broker.v1',connections};
+    }
     try {
-      const raw = await this.storage.list(claims.root,claims.path);
+      const raw = claims.op === 'remote-list'
+        ? await this.storage.privateRemoteList(claims.root,claims.path)
+        : await this.storage.list(claims.root,claims.path);
       if (!Array.isArray(raw) || raw.length > 5000)
         throw new Error('PRIVATE_BROKER_BACKEND_UNAVAILABLE');
       const entries = raw.slice(0,100).map((entry:unknown) => {

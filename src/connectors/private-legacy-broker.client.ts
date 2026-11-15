@@ -40,6 +40,10 @@ export class PrivateLegacyBrokerClient {
     if (op === 'list') {
       privateBrokerRoot(root);
       privateBrokerPath(relativePath);
+    } else if (op === 'remote-list') {
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(root))
+        throw new Error('PRIVATE_BROKER_REMOTE_INVALID');
+      privateBrokerPath(relativePath);
     } else if (root !== '' || relativePath !== '') {
       throw new Error('PRIVATE_BROKER_ARGUMENTS_DENIED');
     }
@@ -69,6 +73,18 @@ export class PrivateLegacyBrokerClient {
         (result as {schema?:unknown}).schema !== 'nyx.private-legacy-broker.v1')
       throw new Error('PRIVATE_BROKER_RESPONSE_INVALID');
     const data = result as Record<string,unknown>;
+    if (op === 'connections') {
+      const items = data.connections;
+      if (!Array.isArray(items) || items.length > 20 ||
+          !items.every(x => x && typeof x === 'object' &&
+            Object.keys(x).sort().join(',') === 'name,provider' &&
+            typeof x.name === 'string' &&
+            /^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(x.name) &&
+            (x.provider === 'google-drive' || x.provider === 'mega')) ||
+          new Set(items.map(x=>x.name)).size !== items.length)
+        throw new Error('PRIVATE_BROKER_RESPONSE_INVALID');
+      return {schema:data.schema,connections:items as Array<{name:string;provider:'google-drive'|'mega'}>};
+    }
     if (op === 'roots') {
       if (!Array.isArray(data.roots) || data.roots.length > 20 ||
           !data.roots.every(r => typeof r === 'string' &&
@@ -86,6 +102,10 @@ export class PrivateLegacyBrokerClient {
   }
 
   async roots(ownerId: string) { return this.invoke(ownerId,'roots'); }
+  async connections(ownerId: string) { return this.invoke(ownerId,'connections'); }
+  async listRemote(ownerId: string, name: string, path = '') {
+    return this.invoke(ownerId,'remote-list',name,path);
+  }
   async list(ownerId: string, root: string, path = '') {
     return this.invoke(ownerId,'list',root,path);
   }

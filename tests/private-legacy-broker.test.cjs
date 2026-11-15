@@ -26,7 +26,7 @@ function claims(overrides={}){
 const names=['NYX_PRIVATE_BROKER_SERVER_ENABLED','NYX_DEPLOYMENT_MODE',
   'NYX_PUBLIC_URL','NYX_PRIVATE_BROKER_EXPECTED_PUBLIC_URL','NYX_OAUTH_ISSUER',
   'NYX_PRIVATE_LEGACY_OWNER_MCP_SUBJECT','NYX_PRIVATE_BROKER_GOOGLE_SUBJECT',
-  'NYX_PRIVATE_BROKER_SHARED_KEY_B64','NYX_PRIVATE_BROKER_ALLOWED_AREAS',
+  'NYX_PRIVATE_BROKER_SHARED_KEY_B64','NYX_PRIVATE_BROKER_ALLOWED_AREAS','NYX_PRIVATE_BROKER_ALLOWED_REMOTES',
   'NYX_PRIVATE_OAUTH_SUBJECTS','DATABASE_URL',
   'NYX_PRIVATE_BROKER_CLIENT_ENABLED','NYX_PRIVATE_BROKER_URL',
   'NYX_PRIVATE_OWNER_LINK_ENABLED','NYX_PUBLIC_CONNECTORS_ENABLED',
@@ -148,4 +148,62 @@ test('public broker client requires verified owner and never inherits private Rc
   process.env.RCLONE_CONFIG_B64='not-a-real-secret';
   await assert.rejects(()=>svc.roots('oauth:'+expected.mcpSubject),
     /LEGACY_CONFIG_FORBIDDEN/);
+});
+
+test('private broker exposes only allowlisted Pro remote metadata and owner-bound remote listings',async t=>{
+  env(t,{
+    NYX_PRIVATE_BROKER_SERVER_ENABLED:'true',NYX_DEPLOYMENT_MODE:'private',
+    NYX_PUBLIC_URL:'https://private-service.herokuapp.com',
+    NYX_PRIVATE_BROKER_EXPECTED_PUBLIC_URL:'https://public-service.herokuapp.com',
+    NYX_OAUTH_ISSUER:expected.mcpIssuer,
+    NYX_PRIVATE_LEGACY_OWNER_MCP_SUBJECT:expected.mcpSubject,
+    NYX_PRIVATE_BROKER_GOOGLE_SUBJECT:expected.googleSubject,
+    NYX_PRIVATE_BROKER_SHARED_KEY_B64:key,
+    NYX_PRIVATE_BROKER_ALLOWED_AREAS:'MAIN',
+    NYX_PRIVATE_BROKER_ALLOWED_REMOTES:'drive_alpha,mega_alpha',
+    NYX_PRIVATE_OAUTH_SUBJECTS:expected.mcpSubject,
+    DATABASE_URL:'postgresql://placeholder.invalid/unused',
+  });
+  const replay=new Set();
+  const client={
+    query:async(sql,args=[])=>{
+      if(sql.includes('INSERT INTO nyx_private_broker_replay_v1')){
+        if(replay.has(args[0]))return {rowCount:0,rows:[]};
+        replay.add(args[0]);return {rowCount:1,rows:[{jti:args[0]}]};
+      }
+      if(sql.includes('INSERT INTO nyx_private_broker_rate_v1'))
+        return {rowCount:1,rows:[{count:replay.size}]};
+      return {rowCount:1,rows:[]};
+    },
+    release(){},
+  };
+  const reads=[];
+  const svc=new PrivateLegacyBrokerService({
+    rcloneConnections:async()=>({remotes:[
+      {name:'drive_alpha',provider:'google-drive',configuration:{token:'DO_NOT_EXPOSE'}},
+      {name:'mega_alpha',provider:'mega'},
+      {name:'unapproved',provider:'mega'},
+    ]}),
+    privateRemoteList:async(root,relativePath)=>{
+      reads.push([root,relativePath]);
+      return [{Name:'safe-file.txt',IsDir:false,Size:7,Metadata:{secret:'HIDDEN'}}];
+    },
+  });
+  svc.pool={connect:async()=>client,end:async()=>{}};
+  const priorNow=Date.now;Date.now=()=>now*1000;
+  t.after(()=>{Date.now=priorNow;});
+  const dispatch=async(op,root='',path='')=>svc.execute('NyxBroker '+
+    signPrivateBrokerDelegation(claims({op,root,path}),key,now));
+  const discovered=await dispatch('connections');
+  assert.deepEqual(discovered,{schema:'nyx.private-legacy-broker.v1',
+    connections:[{name:'drive_alpha',provider:'google-drive'},
+      {name:'mega_alpha',provider:'mega'}]});
+  assert.doesNotMatch(JSON.stringify(discovered),/unapproved|DO_NOT_EXPOSE|token/);
+  const files=await dispatch('remote-list','drive_alpha','');
+  assert.deepEqual(files,{schema:'nyx.private-legacy-broker.v1',
+    entries:[{name:'safe-file.txt',isDir:false,size:7}]});
+  assert.deepEqual(reads,[['drive_alpha','']]);
+  await assert.rejects(()=>dispatch('remote-list','unapproved',''),/ACCESS_DENIED/);
+  process.env.NYX_PRIVATE_BROKER_ALLOWED_REMOTES='drive_alpha,mega_alpha,missing';
+  await assert.rejects(()=>dispatch('connections'),/REMOTE_MISSING/);
 });

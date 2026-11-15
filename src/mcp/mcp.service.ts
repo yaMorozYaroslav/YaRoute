@@ -33,6 +33,8 @@ import { githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_HOME_URI, CONNECTIONS_HOME_HTML, CONNECTIONS_PANEL_LABEL, CONNECTIONS_HOME_LABEL, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 import { ACCOUNT_VIEW_URI, ACCOUNT_VIEW_HTML, signStorageView, verifyStorageView } from '../connectors/multi-account-view';
+import { PRIVATE_REMOTE_ROOT, findPrivateRemote, privateRemoteView,
+  type ApprovedPrivateRemote } from '../connectors/private-pro-virtual-connections';
 
 @Injectable()
 export class McpService {
@@ -333,6 +335,31 @@ export class McpService {
       }
     });
 
+    const privateVirtualRemotesEnabled =
+      process.env.NYX_DEPLOYMENT_MODE==='public' &&
+      process.env.NYX_PUBLIC_CONNECTORS_ENABLED==='true' &&
+      process.env.NYX_MULTIUSER_RCLONE_ENABLED==='true' &&
+      process.env.NYX_PRIVATE_OWNER_LINK_ENABLED==='true' &&
+      process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED==='true';
+
+    // Never trust the display-selected Google account or a supplied connection
+    // ID as an authorization grant. Re-verify the exact authenticated owner,
+    // immutable OIDC owner link and private broker allowlist for EACH request.
+    const privateRemotesForOwner=async(ownerId:string):Promise<ApprovedPrivateRemote[]>=>{
+      if(!privateVirtualRemotesEnabled)return [];
+      const link=await this.ownerLink.status(ownerId);
+      if(!link.eligible||!link.linked)return [];
+      const result=await this.privateBroker.connections(ownerId);
+      if(!result || !('connections' in result) || !Array.isArray(result.connections))
+        throw Error('PRIVATE_BROKER_RESPONSE_INVALID');
+      return result.connections;
+    };
+    const privateRemoteById=async(ownerId:string,id:string)=>{
+      const available=await privateRemotesForOwner(ownerId);
+      return findPrivateRemote(ownerId,id,available,
+        process.env.NYX_PRIVATE_BROKER_SHARED_KEY_B64||'');
+    };
+
     // The model obtains one short-lived, signed nonsecret snapshot under EACH
     // OAuth link_id, then renders both in one panel. Profile tab selection is
     // display-only and has no authority to switch OAuth or mutate a connection.
@@ -349,7 +376,11 @@ export class McpService {
         const signed=this.signedDisplayContext.getStore();
         const hint=createHash('sha256').update(owner).digest('hex').slice(0,10);
         const label=signed?.email||signed?.name||'Google account '+hint;
-        const connections=await this.connections.listStorage(owner);
+        const publicConnections=await this.connections.listStorage(owner);
+        const linkedRemotes=await privateRemotesForOwner(owner);
+        const key=process.env.NYX_PRIVATE_BROKER_SHARED_KEY_B64||'';
+        const connections=[...publicConnections,
+          ...linkedRemotes.map(remote=>privateRemoteView(owner,remote,key))];
         const filtered=(caps:string[])=>caps.filter(c=>
           ['storage:list','storage:move','storage:delete'].includes(c));
         const token=signStorageView(owner,label,connections.map(c=>({
@@ -729,7 +760,14 @@ export class McpService {
         description: 'Owner-scoped storage connections only, with no credentials or legacy rclone configuration.',
         inputSchema: z.object({}),
         annotations: {readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false},
-      }, async () => this.safeTool(() => this.connections.listStorage(this.connectorOwner())));
+      }, async () => this.safeTool(async () => {
+        const ownerId=this.connectorOwner();
+        const ordinary=await this.connections.listStorage(ownerId);
+        const remotes=await privateRemotesForOwner(ownerId);
+        if(!remotes.length)return ordinary;
+        const key=process.env.NYX_PRIVATE_BROKER_SHARED_KEY_B64||'';
+        return [...ordinary,...remotes.map(remote=>privateRemoteView(ownerId,remote,key))];
+      }));
 
       server.registerTool('nyx_storage_connection_create', {
         title: 'Add a separate storage connection',
@@ -800,9 +838,22 @@ export class McpService {
           path:z.string().max(2048).optional(),
         }),
         annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-      },async({id,provider,rootId,path})=>this.safeTool(()=>
-        this.tenantRclone.listAuthorizedRoot(
-          this.connectorOwner(),id,provider,rootId,path||'')));
+      },async({id,provider,rootId,path})=>this.safeTool(async()=>{
+        const ownerId=this.connectorOwner();
+        const remote=await privateRemoteById(ownerId,id);
+        if(remote) {
+          if(provider!==remote.provider || rootId!==PRIVATE_REMOTE_ROOT)
+            throw Error('TENANT_RCLONE_CONNECTION_FORBIDDEN');
+          const result=await this.privateBroker.listRemote(ownerId,remote.name,path||'');
+          if(!('entries' in result)||!Array.isArray(result.entries))
+            throw Error('PRIVATE_BROKER_RESPONSE_INVALID');
+          return {items:result.entries.map(e=>({path:e.name,isDir:e.isDir,size:e.size})),
+            truncated:result.entries.length===100,readOnly:true,
+            source:'private-pro-broker'};
+        }
+        return this.tenantRclone.listAuthorizedRoot(
+          ownerId,id,provider,rootId,path||'');
+      }));
 
 
       if (process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true') {
@@ -840,9 +891,18 @@ export class McpService {
           path:z.string().max(2048).optional(),
         }),
         annotations: {readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-      }, async ({id,provider,rootId,path}) => this.safeTool(() =>
-        this.tenantRclone.probeAuthorizedRoot(
-          this.connectorOwner(),id,provider,rootId,path || '')));
+      }, async ({id,provider,rootId,path}) => this.safeTool(async()=>{
+        const ownerId=this.connectorOwner();
+        const remote=await privateRemoteById(ownerId,id);
+        if(remote) {
+          if(provider!==remote.provider || rootId!==PRIVATE_REMOTE_ROOT)
+            throw Error('TENANT_RCLONE_CONNECTION_FORBIDDEN');
+          await this.privateBroker.listRemote(ownerId,remote.name,path||'');
+          return 'verified';
+        }
+        return this.tenantRclone.probeAuthorizedRoot(
+          ownerId,id,provider,rootId,path || '');
+      }));
     }
 
     // Isolated, owner-bound HEROKU read-only metadata bridge (OFF by default).

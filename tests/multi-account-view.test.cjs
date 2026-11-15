@@ -41,7 +41,8 @@ test('viewer is display-only and requires signed, distinct, caller-included owne
  const source=fs.readFileSync(path.join(__dirname,'..','src/mcp/mcp.service.ts'),'utf8');
  assert.match(source,/registerTool\('nyx_account_view_snapshot'/);
  assert.match(source,/registerTool\('nyx_accounts_view'/);
- assert.match(source,/connections=await this\.connections\.listStorage\(owner\)/);
+ assert.match(source,/publicConnections=await this\.connections\.listStorage\(owner\)/);
+ assert.match(source,/linkedRemotes=await privateRemotesForOwner\(owner\)/);
  assert.match(source,/verifyStorageView\(a\.snapshot,key\)/);
  assert.match(source,/NYX_ACCOUNT_VIEW_DUPLICATE_OWNER/);
  assert.match(source,/NYX_ACCOUNT_VIEW_CALLER_NOT_INCLUDED/);

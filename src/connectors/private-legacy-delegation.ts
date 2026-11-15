@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 /** Dedicated service-to-service proof. Never contains a provider token or Rclone secret. */
-export type PrivateBrokerOperation = 'roots' | 'list';
+export type PrivateBrokerOperation = 'roots' | 'list' | 'connections' | 'remote-list';
 export interface PrivateBrokerClaims {
   v: 1;
   iss: string;
@@ -50,7 +50,7 @@ function valid(claims: PrivateBrokerClaims, now: number): boolean {
   return claims && typeof claims === 'object' &&
     Object.keys(claims).sort().join(',') === claimKeys &&
     claims.v === 1 &&
-    ['roots','list'].includes(claims.op) &&
+    ['roots','list','connections','remote-list'].includes(claims.op) &&
     typeof claims.iss === 'string' && claims.iss.length > 8 &&
     typeof claims.aud === 'string' && claims.aud.length > 8 &&
     typeof claims.mcpIssuer === 'string' && claims.mcpIssuer.length > 8 &&
@@ -59,8 +59,10 @@ function valid(claims: PrivateBrokerClaims, now: number): boolean {
     typeof claims.googleSubject === 'string' && claims.googleSubject.length > 0 &&
     claims.googleSubject.length <= 255 &&
     typeof claims.root === 'string' && typeof claims.path === 'string' &&
-    (claims.op === 'roots' ? claims.root === '' && claims.path === '' :
-      /^[A-Z][A-Z0-9_]{0,39}$/.test(claims.root) &&
+    (claims.op === 'roots' || claims.op === 'connections' ?
+      claims.root === '' && claims.path === '' :
+      (claims.op === 'list' ? /^[A-Z][A-Z0-9_]{0,39}$/ :
+        /^[A-Za-z][A-Za-z0-9_.-]{0,119}$/).test(claims.root) &&
       claims.path.length <= 1024 && !claims.path.startsWith('/') &&
       !/[:\\\x00-\x1f]/.test(claims.path) &&
       claims.path.split('/').every(p => p !== '.' && p !== '..')) &&
