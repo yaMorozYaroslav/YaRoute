@@ -32,6 +32,7 @@ import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
 import { githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_HOME_URI, CONNECTIONS_HOME_HTML, CONNECTIONS_PANEL_LABEL, CONNECTIONS_HOME_LABEL, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
+import { ACCOUNT_VIEW_URI, ACCOUNT_VIEW_HTML, signStorageView, verifyStorageView } from '../connectors/multi-account-view';
 
 @Injectable()
 export class McpService {
@@ -138,6 +139,7 @@ export class McpService {
         },
         auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ?
           ['get_profile','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview',
+            'nyx_account_view_snapshot','nyx_accounts_view',
            ...(process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
                process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
             ['nyx_storage_connections_list','nyx_storage_connection_create',
@@ -265,6 +267,18 @@ export class McpService {
       }]}),
     );
 
+    // Separate read-only cross-profile *view*, assembled by ChatGPT from
+    // independently authenticated profile snapshots. It never accesses
+    // credentials belonging to another OAuth principal in the current call.
+    server.registerResource('NestNyx Multi-account Viewer',ACCOUNT_VIEW_URI,
+      {mimeType:'text/html;profile=mcp-app'},
+      async()=>({contents:[{
+        uri:ACCOUNT_VIEW_URI,mimeType:'text/html;profile=mcp-app',
+        text:ACCOUNT_VIEW_HTML,
+        _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
+          'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
+      }]}));
+
     // Separate global and thread entrypoints make each launcher independently
     // discoverable. Both reuse the SAME authenticated, read-only view payload.
     // No storage, Head authority, provider grants or credential paths are changed.
@@ -318,6 +332,61 @@ export class McpService {
           content:[{type:'text' as const,text:'CONNECTOR_OWNER_REQUIRED'}]};
       }
     });
+
+    // The model obtains one short-lived, signed nonsecret snapshot under EACH
+    // OAuth link_id, then renders both in one panel. Profile tab selection is
+    // display-only and has no authority to switch OAuth or mutate a connection.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public' &&
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
+        process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true') {
+      server.registerTool('nyx_account_view_snapshot',{
+        title:'Snapshot my current Google account storage for side-by-side viewing',
+        description:'Read only this authenticated Google login\'s public storage names, status and effective permissions; return a signed three-minute display snapshot, never credentials. Invoke separately for each linked ChatGPT account.',
+        inputSchema:z.object({}),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async()=>this.safeTool(async()=>{
+        const owner=this.connectorOwner();
+        const signed=this.signedDisplayContext.getStore();
+        const hint=createHash('sha256').update(owner).digest('hex').slice(0,10);
+        const label=signed?.email||signed?.name||'Google account '+hint;
+        const connections=await this.connections.listStorage(owner);
+        const filtered=(caps:string[])=>caps.filter(c=>
+          ['storage:list','storage:move','storage:delete'].includes(c));
+        const token=signStorageView(owner,label,connections.map(c=>({
+          displayName:c.displayName,provider:c.provider as 'mega'|'google-drive',
+          status:c.status as 'pending'|'active'|'revoked',
+          selected:filtered(c.capabilities),
+          providerVerified:filtered(c.providerCapabilities),
+          resourceCount:c.resources?.length??0,
+        })),process.env.NYX_STORAGE_ENCRYPTION_KEY||'');
+        return {schema:'nyx.account-view.export.v1',
+          snapshot:token,expiresInSeconds:180,ownerHint:hint,
+          connectionCount:connections.length,
+          warning:'Read-only, signed, temporary display metadata. Not a bearer grant to any storage provider.'};
+      }));
+      server.registerTool('nyx_accounts_view',{
+        title:'View two separately authenticated NestNyx accounts in one tabbed panel',
+        description:'Show a read-only tabbed comparison from separately signed and unexpired Google OAuth account snapshots. Never switches an OAuth identity, grants sharing or accepts credentials. First invoke nyx_account_view_snapshot once per connected ChatGPT account.',
+        inputSchema:z.object({accounts:z.array(z.object({
+          label:z.string().min(1).max(40),
+          snapshot:z.string().min(100).max(10100),
+        }).strict()).min(2).max(4)}).strict(),
+        _meta:{ui:{resourceUri:ACCOUNT_VIEW_URI,visibility:['model','app']},
+          'openai/outputTemplate':ACCOUNT_VIEW_URI},
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async({accounts})=>this.safeTool(async()=>{
+        const key=process.env.NYX_STORAGE_ENCRYPTION_KEY||'';
+        const snapshots=accounts.map(a=>({label:a.label,...verifyStorageView(a.snapshot,key)}));
+        const distinct=new Set(snapshots.map(a=>a.ownerHint));
+        if(distinct.size!==snapshots.length)
+          throw new Error('NYX_ACCOUNT_VIEW_DUPLICATE_OWNER');
+        const current=createHash('sha256').update(this.connectorOwner()).digest('hex').slice(0,16);
+        if(!distinct.has(current))throw new Error('NYX_ACCOUNT_VIEW_CALLER_NOT_INCLUDED');
+        return {schema:'nyx.account-view.viewer.v1',
+          accounts:snapshots,readOnly:true,noCrossTenantAuthorization:true,
+          note:'Each record is an authenticated, signed read-only display snapshot. Operations must select the original owner OAuth connection.'};
+      }));
+    }
 
     // Display identity is derived from a signed OAuth token; the caller cannot
     // select an owner ID or switch tenants by choosing a storage connection.
