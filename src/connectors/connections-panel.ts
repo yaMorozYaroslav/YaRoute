@@ -166,7 +166,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <button type="button" data-open="nyx-rclone-group" ${publicTenantStorage ? 'hidden' : ''}>🧰 Existing Rclone<small>View private configuration metadata</small></button>
 <button type="button" data-open="nyx-other-group" data-github="true">🐙 GitHub<small>Create a named GitHub connection</small></button>
 </div>
-<p class="muted">${publicTenantStorage ? (publicMegaOnly ? 'Sign in with Google to NestNyx first, then connect your own read-only MEGA account. The operator\'s private Rclone is inaccessible to public tenants.' : 'Sign in with Google to NestNyx first, then connect your own read-only Google Drive or MEGA storage. Other users and private legacy remotes remain inaccessible.') : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
+<p class="muted">${publicTenantStorage ? (publicMegaOnly ? (megaMutationEnabled ? 'Sign in with Google to NestNyx first. Your MEGA starts with listing access; you can separately request move/rename and delete-to-trash permissions and reauthorize credentials. Live writes require a disposable-file test.' : 'Sign in with Google to NestNyx first, then connect your own read-only MEGA account.') + ' The operator\'s private Rclone is inaccessible to public tenants.' : (megaMutationEnabled ? 'Connect your own Google Drive (read-only pilot) or MEGA (read-only initially, with separately gated move/trash permissions).' : 'Connect your own read-only Google Drive or MEGA storage.') + ' Other users and private legacy remotes remain inaccessible.') : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
 </section>
 <header><p class="muted">Existing connections grouped by provider. Rclone configuration is not proof of connectivity.</p>
 <div class="warn">GitHub permissions and repository writes require explicit grants. No default-branch writes, workflow dispatch, credential editing, billing or infrastructure actions.</div></header>
@@ -482,6 +482,7 @@ function renderTenant(connections){
        row.append(check,el('span',label));permissions.append(row);
        toggles.push({cap,check});
      }
+     permissions.append(el('p','These checkboxes store your requested MEGA permissions; the provider authorization and a real disposable-file write test are separate.'));
      permissions.append(button('Save file permissions',async()=>{
        const caps=['storage:list',...toggles.filter(x=>x.check.checked).map(x=>x.cap)];
        await call('nyx_storage_connection_permissions',{id:item.id,capabilities:caps});
@@ -507,7 +508,7 @@ function renderTenant(connections){
        if(result!=='verified')throw Error('Pending MEGA credentials have not passed read probe');
        const activated=await call('nyx_storage_connection_activate',{id:item.id});
        if(activated.status!=='active')throw Error('MEGA activation failed');
-       show('Reauthorized MEGA account activated; permissions will be refreshed.');
+       show('MEGA login and read connectivity verified; requested permissions recorded. Rename/move/trash are not proven until tested on a disposable file.');
        await refreshTenantStorage();
      }));
    }else if(provider==='mega'){
@@ -540,7 +541,7 @@ function renderTenant(connections){
     return value;
    };
    if(item.status!=='active'){
-   box.append(button('Save read-only root',async()=>{
+   box.append(button('Save allowed root (initially read-only)',async()=>{
     await configure();show('Root selected. Sign in separately to authorize access.');
    }));
    box.append(button(provider==='mega'?'Secure MEGA sign-in':'Google OAuth sign-in',async()=>{
@@ -558,7 +559,7 @@ function renderTenant(connections){
       throw Error('Unexpected provider sign-in URL');
     }
     await request('ui/open-link',{url:result.url});
-    show('Complete provider authorization in your browser, then return for a read-only test.');
+    show(provider==='mega' ? 'Complete secure MEGA login, then return to verify read connectivity and activate. Write operations require a later disposable-file test.' : 'Complete Google Drive authorization and return for a read-only test.');
    }));
    box.append(button('Test new connection',async()=>{
     const result=await call('nyx_storage_connection_test_pending',{id:item.id});
@@ -644,7 +645,8 @@ function renderTenant(connections){
       }
       filePanel.append(list);
     };
-    box.append(button(provider==='mega' && megaMutationEnabled ?
+    box.append(button(provider==='mega' && megaMutationEnabled &&
+      ['storage:move','storage:delete'].some(cap=>can(cap)) ?
       'Browse and manage MEGA files' : 'Browse selected folder (read only)',browse));
     box.append(filePanel);
    }

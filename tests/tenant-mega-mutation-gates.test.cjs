@@ -46,3 +46,23 @@ test('Write grants require separate flag, user-selected capability, and provider
  assert.match(ui,/Save file permissions/);
  assert.match(api,/process\.env\.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true'/);
 });
+
+test('MEGA enrollment honestly distinguishes login read check from write verification',()=>{
+ const form=fs.readFileSync(path.join(root,'src/connectors/mega-enrollment.controller.ts'),'utf8');
+ assert.match(form,/Verify MEGA credentials and connection/);
+ assert.match(form,/MEGA login and read connectivity verified/);
+ assert.match(form,/It does not perform a write test/);
+ assert.match(form,/No write was attempted in this step/);
+ assert.doesNotMatch(form,/Verify read-only connection/);
+ assert.doesNotMatch(form,/MEGA read access verified/);
+ assert.match(ui,/Reauthorize MEGA for writes/);
+ assert.match(ui,/Save allowed root \(initially read-only\)/);
+ assert.match(ui,/real disposable-file write test are separate/);
+ assert.match(ui,/Write operations require a later disposable-file test/);
+});
+test('MEGA mutation inventory matches the separately gated MCP tool registration',()=>{
+ assert.match(api,/\.\.\.\(process\.env\.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true' \?/);
+ assert.match(api,/\['nyx_storage_mega_file_mutate'\] : \[\]/);
+ assert.match(api,/if \(process\.env\.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true'\)/);
+ assert.match(api,/server\.registerTool\('nyx_storage_mega_file_mutate'/);
+});
