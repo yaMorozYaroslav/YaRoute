@@ -135,20 +135,18 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
  <div class="session-person-main"><div class="session-label" id="nyx-session-user">Checking signed-in account…</div>
  <div class="session-reference" id="nyx-session-reference">OAuth verification pending</div></div></div>
  <div class="session-actions"><button class="session-switch" id="nyx-add-google-login" type="button" aria-expanded="false" aria-controls="nyx-login-add-help">+ Add Google account</button>
- <button class="session-switch" id="nyx-switch-login" type="button" aria-expanded="false" aria-controls="nyx-switch-help">How to switch Google login</button></div>
+ <button class="session-switch" id="nyx-view-both-google" type="button">View both Google accounts</button>
+ <button class="session-switch" id="nyx-switch-login" type="button" aria-expanded="false" aria-controls="nyx-switch-help">About account views</button></div>
  <div id="nyx-login-add-help" hidden role="region" aria-label="Add a Google login">
  <strong>Keep your existing account connected.</strong>
  <p>To connect another NestNyx Google identity, use ChatGPT Settings → Plugins → NestNyx Dev → Connected accounts → Connect another account, when available. Complete Google OAuth there, then reopen this panel.</p>
  <p>ChatGPT owns the Google login picker. NestNyx cannot start that native picker inside an MCP Apps iframe. This panel's cloud-account selector only shows storage authorized to the current login.</p>
  </div>
- <div id="nyx-switch-help" hidden role="region" aria-label="Switch the Google account used by NestNyx">
- <strong>No reconnection required for already connected accounts.</strong>
- <p>To open NestNyx under another Google login, ask ChatGPT: “Open NestNyx Connections using Personal” or “Open NestNyx Connections using Primary.” ChatGPT selects that separately authenticated plugin connection.</p>
- <p>See all connected logins in ChatGPT Settings → Plugins → DevNestNyx → Connected accounts. Switching here cannot replace ChatGPT's OAuth credentials. The storage dropdown below only changes your current login's MEGA/Drive connection.</p>
- <label for="nyx-switch-account-label">Connected account label</label>
- <input id="nyx-switch-account-label" type="text" maxlength="80" autocomplete="off" placeholder="Personal or Primary" aria-label="Connected ChatGPT account name">
- <button class="session-switch" id="nyx-open-google-account" type="button">Open account in ChatGPT</button>
- <p>The button requests a new ChatGPT view with your selected connected account. It does not change this panel's login and does not reconnect OAuth.</p>
+ <div id="nyx-switch-help" hidden role="region" aria-label="How multi-account views work">
+ <strong>Primary and Personal stay connected simultaneously.</strong>
+ <p>View both Google accounts loads two separately authenticated, read-only connection summaries into ONE panel with Primary and Personal tabs. Selecting a tab changes the visible list only: no OAuth login switching and no reconnection.</p>
+ <p>ChatGPT requests a signed three-minute snapshot from each linked account. Every actual operation still uses the exact connection owner's OAuth credentials and server-enforced grants. No account inherits another account's private Rclone or MEGA credentials.</p>
+ <p>Manage the two native logins under ChatGPT Settings → Plugins → DevNestNyx → Connected accounts.</p>
  </div>
  <p class="account-detail" id="nyx-active-identity">No active cloud account selected.</p>
  </div>
@@ -879,19 +877,16 @@ document.getElementById('nyx-switch-login').addEventListener('click',()=>{
  const help=document.getElementById('nyx-switch-help');help.hidden=!help.hidden;
  document.getElementById('nyx-switch-login').setAttribute('aria-expanded',String(!help.hidden));
 });
-document.getElementById('nyx-open-google-account').addEventListener('click',async()=>{
- const label=document.getElementById('nyx-switch-account-label').value.trim();
- // The user supplies only a human-readable account label; never a token or URL.
- if(!/^[\\p{L}\\p{N} ._@+\\-]{1,80}$/u.test(label))
-   return show('Enter an already connected account label, such as Personal or Primary.',true);
+document.getElementById('nyx-view-both-google').addEventListener('click',async()=>{
+ const prompt='Open ONE NestNyx Dev combined Connections panel showing BOTH of my already linked Google accounts, Primary and Personal. Use nyx_account_view_snapshot separately with each authenticated plugin connection, then call nyx_accounts_view with both signed snapshots. Render their storage connections as two selectable display-only tabs in the same viewer. Keep both sessions connected, never substitute or share credentials, and make NO file or permission changes.';
  const send=window.openai?.sendFollowUpMessage;
  if(typeof send!=='function')
-   return show('Your ChatGPT host does not expose account-opening from this panel. Ask in chat: Open NestNyx Connections using '+label+'.',true);
- try {
-   await send({prompt:'Open NestNyx Dev Connections using my already connected plugin account labelled "'+label+'". Use credentials for that exact connection; do not relink accounts or change grants.'});
-   show('Requested the '+label+' account in ChatGPT. A new panel will use the account chosen by the host.');
+   return show('Ask ChatGPT: '+prompt,true);
+ try{
+   await send({prompt});
+   show('Requested ONE combined viewer with both connected Google accounts. File operations remain isolated by owner.');
  }catch{
-   show('ChatGPT could not open that account from this panel. Ask in chat: Open NestNyx Connections using '+label+'.',true);
+   show('ChatGPT could not open the combined viewer from this panel. Ask in chat: '+prompt,true);
  }
 });
 document.getElementById('nyx-account-select').addEventListener('change',e=>{

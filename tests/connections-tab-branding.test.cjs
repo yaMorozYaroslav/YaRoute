@@ -81,7 +81,7 @@ test('signed-in account, storage switcher, CSS plus and truthful MEGA write-gati
  assert.match(html,/call\('nyx_session_info',\{\}\)/);
  assert.match(html,/identity\.email \|\| identity\.displayName/);
  assert.match(html,/Disconnect\/reconnect to refresh tools/);
- assert.match(html,/The storage dropdown below only changes your current login's MEGA\/Drive connection/);
+ assert.match(html,/The storage dropdown below only changes your current login's MEGA\/Drive connection|Every actual operation still uses the exact connection owner's OAuth credentials/);
  assert.match(html,/class="nyx-plus-mark"/);
  assert.match(html,/nyx-plus-mark::before/);
  assert.match(html,/border-radius:999px!important/);
@@ -104,23 +104,23 @@ test('verified profile avatar and Google-account addition guide are usable and n
  assert.doesNotMatch(html,/localStorage|sessionStorage|document\.cookie/);
 });
 
-test('current Google login is prominent and switch help never claims to swap an iframe OAuth identity',()=>{
+test('combined account viewer is display-only and does not switch OAuth connections',()=>{
  const html=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com').connectionsHtml;
  assert.match(html,/Current Google login for this panel/);
  assert.match(html,/id="nyx-session-account-state" role="status"/);
  assert.match(html,/Google account reference:/);
  assert.match(html,/This login owns the connections below/);
+ assert.match(html,/id="nyx-view-both-google"/);
+ assert.match(html,/View both Google accounts/);
  assert.match(html,/id="nyx-switch-login" type="button" aria-expanded="false" aria-controls="nyx-switch-help"/);
  assert.match(html,/id="nyx-switch-help" hidden/);
- assert.match(html,/No reconnection required for already connected accounts/);
- assert.match(html,/id="nyx-switch-account-label"/);
- assert.match(html,/id="nyx-open-google-account"/);
+ assert.match(html,/Primary and Personal stay connected simultaneously/);
+ assert.match(html,/signed three-minute snapshot from each linked account/);
+ assert.match(html,/ONE combined viewer/);
+ assert.match(html,/nyx_account_view_snapshot/);
+ assert.match(html,/nyx_accounts_view/);
  assert.match(html,/sendFollowUpMessage/);
- assert.match(html,/Use credentials for that exact connection/);
- assert.match(html,/does not reconnect OAuth/);
- assert.match(html,/Open NestNyx Connections using Personal/);
- assert.match(html,/Open NestNyx Connections using Primary/);
- assert.match(html,/Switching here cannot replace ChatGPT's OAuth credentials/);
- assert.match(html,/getElementById\('nyx-switch-login'\)\.setAttribute\('aria-expanded'/);
- assert.doesNotMatch(html,/document\.cookie|localStorage|sessionStorage/);
+ assert.match(html,/no OAuth login switching and no reconnection/);
+ assert.doesNotMatch(html,/id="nyx-switch-account-label"|id="nyx-open-google-account"/);
+ assert.doesNotMatch(html,/document\\.cookie|localStorage|sessionStorage/);
 });
