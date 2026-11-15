@@ -9,8 +9,8 @@ const connectionsIsDev = process.env.NYX_DEPLOYMENT_MODE === 'public' ||
   process.env.NYX_SERVICE_NAME === 'DevProNestNyx' ||
   process.env.NYX_PUBLIC_URL === 'https://dev-nest-nyx-0df80c227630.herokuapp.com';
 const connectionsKind = connectionsIsDev ? 'dev' : 'pro';
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v13.html';
-export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v13.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v14.html';
+export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v14.html';
 export const CONNECTIONS_PANEL_LABEL = connectionsIsDev ? '🔵 NestNyx Dev · Connections' : '🟣 NestNyx Pro · Connections';
 export const CONNECTIONS_HOME_LABEL = connectionsIsDev ? '🏠 NestNyx Dev · Home' : '🏠 NestNyx Pro · Home';
 // Public users connect only their own storage; never show the operator's
@@ -94,6 +94,16 @@ body{max-width:900px;padding:clamp(10px,2.8vw,22px);line-height:1.45}
 #nyx-account-bar .session-reference{font:11px ui-monospace,monospace;opacity:.68;margin-top:4px;overflow-wrap:anywhere}
 #nyx-account-bar .account-picker button{font-size:12px}
 #nyx-account-bar .session-label{overflow-wrap:anywhere}
+#nyx-account-bar .session-person{display:flex;align-items:center;gap:11px;margin:8px 0 2px}
+#nyx-account-bar .session-avatar{height:42px;width:42px;min-width:42px;border-radius:50%;border:2px solid var(--nyx-accent);background:#138a82;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:750;overflow:hidden}
+#nyx-account-bar .session-avatar img{height:100%;width:100%;object-fit:cover;display:block}
+#nyx-account-bar .session-person-main{min-width:0}
+#nyx-account-bar .session-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+#nyx-account-bar .session-actions button{margin-top:0}
+#nyx-add-google-login{border-color:var(--nyx-accent)!important}
+#nyx-login-add-help{border:1px solid var(--nyx-border);border-radius:10px;padding:9px 11px;margin-top:8px;font-size:12px}
+#nyx-login-add-help[hidden]{display:none}
+
 #nyx-account-bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,205px);gap:13px;padding:14px;border:1px solid var(--nyx-border);border-radius:14px;background:var(--nyx-surface);margin-bottom:17px}
 #nyx-account-bar .kicker{font-size:11px;opacity:.7;text-transform:uppercase;letter-spacing:.06em}
 #nyx-account-bar .session-label{font-weight:700;font-size:15px}
@@ -118,9 +128,16 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 </div>
 <div id="nyx-account-bar" aria-label="Current session and selected storage account">
  <div><div class="kicker">Authenticated NestNyx session</div>
- <div class="session-label" id="nyx-session-user">Checking signed-in account…</div>
- <div class="session-reference" id="nyx-session-reference">OAuth verification pending</div>
- <button class="session-switch" id="nyx-switch-login" type="button">Change Google login</button>
+ <div class="session-person"><span class="session-avatar" id="nyx-session-avatar" aria-label="Google profile avatar unavailable">G</span>
+ <div class="session-person-main"><div class="session-label" id="nyx-session-user">Checking signed-in account…</div>
+ <div class="session-reference" id="nyx-session-reference">OAuth verification pending</div></div></div>
+ <div class="session-actions"><button class="session-switch" id="nyx-add-google-login" type="button" aria-expanded="false" aria-controls="nyx-login-add-help">+ Add Google account</button>
+ <button class="session-switch" id="nyx-switch-login" type="button">Change Google login</button></div>
+ <div id="nyx-login-add-help" hidden role="region" aria-label="Add a Google login">
+ <strong>Keep your existing account connected.</strong>
+ <p>To connect another NestNyx Google identity, use ChatGPT Settings → Plugins → NestNyx Dev → Connected accounts → Connect another account, when available. Complete Google OAuth there, then reopen this panel.</p>
+ <p>ChatGPT owns the Google login picker. NestNyx cannot start that native picker inside an MCP Apps iframe. This panel's cloud-account selector only shows storage authorized to the current login.</p>
+ </div>
  <p class="account-detail" id="nyx-active-identity">No active cloud account selected.</p>
  </div>
  <div class="account-picker">
@@ -340,6 +357,24 @@ async function refreshSessionIdentity(){
    const label=identity.email || identity.displayName ||
      (identity.provider+' · Account '+identity.accountHint);
    document.getElementById('nyx-session-user').textContent=label;
+   // Avatar is optional and must come only from verified issuer-signed claims.
+   const avatar=document.getElementById('nyx-session-avatar');
+   avatar.replaceChildren();
+   let photoOk=false;
+   if(typeof identity.pictureUrl==='string'){
+     try{
+       const picture=new URL(identity.pictureUrl);
+       if(picture.origin==='https://lh3.googleusercontent.com' && !picture.search && !picture.hash){
+         const img=document.createElement('img');img.src=picture.href;
+         img.alt='';img.referrerPolicy='no-referrer';
+         img.addEventListener('error',()=>{avatar.replaceChildren(document.createTextNode('G'));avatar.setAttribute('aria-label','Google profile avatar unavailable');});
+         avatar.append(img);photoOk=true;
+       }
+     }catch{}
+   }
+   if(!photoOk)avatar.append(document.createTextNode('G'));
+   avatar.setAttribute('aria-label',photoOk?'Google profile photo':'Google profile avatar unavailable');
+
    document.getElementById('nyx-session-reference').textContent=
      identity.provider+' · Session ID '+identity.accountHint+
      (identity.email?' · verified email':' · email not provided by OAuth provider');
@@ -349,6 +384,8 @@ async function refreshSessionIdentity(){
    document.getElementById('nyx-session-reference').textContent=
      'Identity details unavailable. Disconnect/reconnect to refresh tools.';
    liveMegaWritesAvailable=false;
+   const avatar=document.getElementById('nyx-session-avatar');avatar.replaceChildren(document.createTextNode('G'));
+   avatar.setAttribute('aria-label','Google profile avatar unavailable');
  }
 }
 function updateAccountSelector(connections){
@@ -815,8 +852,12 @@ for(const choice of document.querySelectorAll('#nyx-provider-choices button[data
   quickAdd.setAttribute('aria-expanded','false');
  });
 }
+document.getElementById('nyx-add-google-login').addEventListener('click',()=>{
+ const help=document.getElementById('nyx-login-add-help');help.hidden=!help.hidden;
+ document.getElementById('nyx-add-google-login').setAttribute('aria-expanded',String(!help.hidden));
+});
 document.getElementById('nyx-switch-login').addEventListener('click',()=>{
- show('To change your Google login, disconnect NestNyx Dev in ChatGPT Apps / Plugins and reconnect with the other Google account. Selecting a MEGA account here only changes storage; it does not switch the authenticated user.');
+ show('For a different Google identity, use ChatGPT Settings → Plugins → NestNyx Dev → Connected accounts. Prefer Connect another account to keep existing logins; disconnect only when you intend to replace the current login. Selecting a MEGA account only changes storage.');
 });
 document.getElementById('nyx-account-select').addEventListener('change',e=>{
  selectedTenantAccount=e.target.value;refreshTenantStorage();

@@ -34,10 +34,10 @@ function view(mode,service,url){
 test('blue Dev pilot and purple private Pro get distinct branded MCP Apps resource IDs',()=>{
  const dev=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com');
  const pro=view('private','NestNyx','https://example.com');
- assert.match(dev.connectionsUri,/\/dev\/connections\/v13\.html$/);
- assert.match(pro.connectionsUri,/\/pro\/connections\/v13\.html$/);
- assert.match(dev.homeUri,/\/dev\/home\/v13\.html$/);
- assert.match(pro.homeUri,/\/pro\/home\/v13\.html$/);
+ assert.match(dev.connectionsUri,/\/dev\/connections\/v14\.html$/);
+ assert.match(pro.connectionsUri,/\/pro\/connections\/v14\.html$/);
+ assert.match(dev.homeUri,/\/dev\/home\/v14\.html$/);
+ assert.match(pro.homeUri,/\/pro\/home\/v14\.html$/);
  assert.notEqual(dev.connectionsUri,pro.connectionsUri);
  assert.notEqual(dev.connectionsUri,dev.homeUri);
  assert.notEqual(pro.connectionsUri,pro.homeUri);
@@ -81,11 +81,25 @@ test('signed-in account, storage switcher, CSS plus and truthful MEGA write-gati
  assert.match(html,/call\('nyx_session_info',\{\}\)/);
  assert.match(html,/identity\.email \|\| identity\.displayName/);
  assert.match(html,/Disconnect\/reconnect to refresh tools/);
- assert.match(html,/Selecting a MEGA account here only changes storage/);
+ assert.match(html,/Selecting a MEGA account only changes storage/);
  assert.match(html,/class="nyx-plus-mark"/);
  assert.match(html,/nyx-plus-mark::before/);
  assert.match(html,/border-radius:999px!important/);
  assert.match(html,/Delete to MEGA rubbish bin — disabled by server/);
  assert.match(html,/Refresh/);
+ assert.doesNotMatch(html,/localStorage|sessionStorage|document\.cookie/);
+});
+
+test('verified profile avatar and Google-account addition guide are usable and never switch the tenant',()=>{
+ const html=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com').connectionsHtml;
+ assert.match(html,/id="nyx-session-avatar"/);
+ assert.match(html,/identity\.pictureUrl/);
+ assert.match(html,/lh3\.googleusercontent\.com/);
+ assert.match(html,/id="nyx-add-google-login"/);
+ assert.match(html,/aria-controls="nyx-login-add-help"/);
+ assert.match(html,/Connect another account/);
+ assert.match(html,/cannot start that native picker inside an MCP Apps iframe/);
+ assert.match(html,/id="nyx-login-add-help" hidden/);
+ assert.match(html,/setAttribute\('aria-expanded',String\(!help\.hidden\)\)/);
  assert.doesNotMatch(html,/localStorage|sessionStorage|document\.cookie/);
 });

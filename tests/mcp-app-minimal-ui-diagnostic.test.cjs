@@ -23,15 +23,15 @@ test('diagnostic requires no credentials, network, storage, or client JavaScript
  assert.match(region,/readOnlyHint:true,destructiveHint:false/);
 });
 
-test('cached v10-v12 Connections and Home URLs remain available with v13 UI',()=>{
+test('cached v10-v13 Connections and Home URLs remain available with v14 UI',()=>{
  assert.match(source,/legacyConnectionsResourceUri='ui:\/\/nestnyx\/connections\/v9\.html'/);
- assert.match(source,/for \(const version of \[10,11,12\]\)/);
+ assert.match(source,/for \(const version of \[10,11,12,13\]\)/);
  assert.match(source,/CONNECTIONS_PANEL_URI,html:CONNECTIONS_PANEL_HTML/);
  assert.match(source,/CONNECTIONS_HOME_URI,html:CONNECTIONS_HOME_HTML/);
  assert.match(source,/oldUri=item\.uri\.replace\(/);
  assert.match(source,/server\.registerResource\(item\.label\+' \(compatibility v'/);
  assert.match(source,/uri:oldUri,mimeType:'text\/html;profile=mcp-app',text:item\.html/);
  assert.match(source,/connectDomains:\[\]/);
- assert.match(source,/resourceDomains:CONNECTIONS_PANEL_BRAND_ORIGIN/);
+ assert.match(source,/https:\/\/lh3\.googleusercontent\.com/);
  assert.doesNotMatch(source,/\bregisterResource\([^;]*global\.rcloneConfig/s);
 });

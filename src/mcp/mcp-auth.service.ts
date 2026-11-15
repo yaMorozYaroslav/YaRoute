@@ -48,6 +48,18 @@ function isTemporaryJwksFailure(error: Error): boolean {
   return false;
 }
 
+// A trusted issuer-signed profile claim may contain a Google avatar URL.
+// Never accept a caller-provided URL or arbitrary third-party image host.
+export function verifiedGooglePictureUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 1600) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'lh3.googleusercontent.com' &&
+      !url.port && !url.username && !url.password && !url.search && !url.hash
+      ? url.href : null;
+  } catch { return null; }
+}
+
 @Injectable()
 export class McpAuthService {
   private client?: ReturnType<typeof jwksClient>;
@@ -148,15 +160,32 @@ export class McpAuthService {
       // Display claims are trusted ONLY when signed by the configured issuer.
       // An account's Google email may be absent from an OAuth access token.
       // Never accept a client-supplied email, and never treat it as the owner key.
-      const verifiedEmail = payload.email_verified === true &&
-        typeof payload.email === 'string' &&
-        /^[^\s@\x00-\x1f]{1,100}@[^\s@\x00-\x1f]{1,150}$/.test(payload.email)
-          ? payload.email : null;
-      res.locals.nyxVerifiedEmail = verifiedEmail;
-      res.locals.nyxDisplayName = verifiedEmail &&
-        typeof payload.name === 'string' &&
-        payload.name.length <= 120 && !/[\x00-\x1f\x7f]/.test(payload.name)
-          ? payload.name : null;
+      // Auth0 access tokens target the NestNyx API. Social OIDC display claims
+      // are commonly omitted unless a Post-Login Action provides an optional,
+      // namespaced signed profile object. The claim key is configured by the
+      // operator, never by model/user-supplied tool arguments.
+      const profileClaimKey=process.env.NYX_OAUTH_PROFILE_CLAIM?.trim();
+      const profileClaim=profileClaimKey &&
+        /^https:\/\/[a-z0-9.-]+\/[a-z0-9_/-]+$/i.test(profileClaimKey)
+          ? payload[profileClaimKey] : undefined;
+      const profile=profileClaim && typeof profileClaim==='object' &&
+        !Array.isArray(profileClaim) ? profileClaim as Record<string,unknown> : null;
+      const displayEmail=payload.email_verified===true ? payload.email
+        : profile?.email_verified===true ? profile?.email : null;
+      const verifiedEmail=typeof displayEmail==='string' &&
+        /^[^\s@\x00-\x1f]{1,100}@[^\s@\x00-\x1f]{1,150}$/.test(displayEmail)
+        ? displayEmail : null;
+      const displayName=typeof payload.name==='string' ? payload.name : profile?.name;
+      res.locals.nyxVerifiedEmail=verifiedEmail;
+      res.locals.nyxDisplayName=verifiedEmail && typeof displayName==='string' &&
+        displayName.length<=120 && !/[\x00-\x1f\x7f]/.test(displayName)
+          ? displayName : null;
+      // Only a Google-social signed identity can provide its Google photo.
+      // No uploaded URL, remote API credential, or client-selected tenant may
+      // override these trusted, display-only claims.
+      res.locals.nyxProfilePicture = payload.sub.startsWith('google-oauth2|')
+        ? verifiedGooglePictureUrl(payload.picture) ||
+          verifiedGooglePictureUrl(profile?.picture) : null;
       res.locals.nyxSubject = payload.sub;
       return true;
     } catch (error) {
