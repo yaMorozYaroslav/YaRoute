@@ -7,11 +7,16 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import { assertPublicTenantGoogleOwnerId, assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorsService } from './connectors.service';
+import { verifyImportedGoogleIdentity } from './imported-google-identity';
+import { refreshedGoogleFromIsolatedConfig } from './rclone-google-token-refresh';
 
 export type TenantRcloneProvider = 'google-drive' | 'mega';
 export type TenantRcloneProfile =
   | { provider: 'google-drive'; token: string; clientId?: string;
-      clientSecret?: string; rootFolderId?: string; scope?: 'drive.readonly' | 'drive.file' | 'drive' }
+      clientSecret?: string; rootFolderId?: string; teamDriveId?: string;
+      /** Legacy account root: omit root_folder_id option without relaxing the logical root grant. */
+      accountRoot?: boolean;
+      scope?: 'drive.readonly' | 'drive.file' | 'drive' }
   | { provider: 'mega'; user: string; obscuredPassword: string;
       sessionId?: string; masterKey?: string;
       /** Assigned only after successfully probing this exact root. */
@@ -40,7 +45,19 @@ export function tenantRcloneConfig(profile: TenantRcloneProfile): string {
     const lines = ['[tenant]', 'type = drive', 'token = ' + token];
     if (profile.clientId) lines.push('client_id = ' + safeLine(profile.clientId, 2048));
     if (profile.clientSecret) lines.push('client_secret = ' + safeLine(profile.clientSecret, 2048));
-    if (profile.rootFolderId) lines.push('root_folder_id = ' + safeLine(profile.rootFolderId, 2048));
+    if (profile.accountRoot !== undefined &&
+        (profile.accountRoot !== true || profile.rootFolderId !== 'root')) {
+      throw new Error('TENANT_RCLONE_ACCOUNT_ROOT_INVALID');
+    }
+    if (!profile.accountRoot && profile.rootFolderId)
+      lines.push('root_folder_id = ' + safeLine(profile.rootFolderId, 2048));
+    if (profile.teamDriveId !== undefined) {
+      if (typeof profile.teamDriveId !== 'string' ||
+          !/^[A-Za-z0-9_-]{1,256}$/.test(profile.teamDriveId)) {
+        throw new Error('TENANT_RCLONE_TEAM_DRIVE_INVALID');
+      }
+      lines.push('team_drive = ' + profile.teamDriveId);
+    }
     if (profile.scope) {
       if (!['drive', 'drive.file', 'drive.readonly'].includes(profile.scope)) {
         throw new Error('TENANT_RCLONE_PROFILE_INVALID');
@@ -291,16 +308,48 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
           ? candidate.profile.obscuredPassword : '',sessionId,masterKey};
         tenantRcloneConfig(refreshedProfile);
         return true;
+      } : candidate.profile.provider==='google-drive' ? async configPath => {
+        // Token refresh is captured from the exact successful isolated Rclone
+        // config, not from the provider/API response or untrusted user input.
+        const contents=await fs.readFile(configPath,'utf8');
+        const updated=refreshedGoogleFromIsolatedConfig(
+          candidate.profile as Extract<TenantRcloneProfile,{provider:'google-drive'}>,contents);
+        if(updated)refreshedProfile=updated;
+        return true;
       } : undefined);
     if (status === 'verified' && oneTimeMegaCode && !refreshedProfile)
       return 'failed';
     if (status === 'verified') {
+      // Import uses exactly the same server-attested, owner-scoped namespace
+      // dedupe as OAuth sign-in. Never infer an identity from the import
+      // manifest or merely from the local remote display name.
+      // For MEGA, a successful authenticated login to an exact root verifies
+      // the account email the MEGA client used. For Google, ask the provider
+      // directly for its stable user/Drive identity.
+      if(item.externalAccountId==='pending'){
+        try{
+          if(candidate.profile.provider==='google-drive'){
+            const profileForIdentity=refreshedProfile?.provider==='google-drive'
+              ? refreshedProfile : candidate.profile;
+            const proof=await verifyImportedGoogleIdentity(profileForIdentity);
+            await this.connectors.attestImportedPendingStorageIdentity(
+              ownerId,connectionId,'google-drive',proof.accountId,proof.driveId);
+          }else if(candidate.profile.provider==='mega'){
+            await this.connectors.attestImportedPendingStorageIdentity(
+              ownerId,connectionId,'mega',candidate.profile.user);
+          }
+        }catch{
+          // No verification receipt or read_verified_at for an unproven
+          // namespace. Preserve the pending encrypted credentials for retry.
+          return 'failed';
+        }
+      }
       // Replace a one-time 2FA code with reusable, encrypted session keys.
       // Never retain the OTP in a pending or active credential row.
       const durableProfile = refreshedProfile || candidate.profile;
       const verifiedProfile: TenantRcloneProfile = durableProfile.provider === 'mega'
         ? {...durableProfile, verifiedRoot: relativePath || 'MEGA_ROOT'} : durableProfile;
-      const packed = verifiedProfile.provider === 'mega'
+      const packed = verifiedProfile.provider === 'mega' || refreshedProfile
         ? this.seal(ownerId, connectionId, verifiedProfile) : candidate.packed;
       const updated = await this.db().query(`UPDATE nyx_rclone_tenant_credentials_v2 SET
           encrypted_profile=$4, read_verified_at=now()
@@ -392,6 +441,9 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       await client.query(
         'DELETE FROM nyx_rclone_google_oauth_states_v2 WHERE owner_id=$1 AND connection_id=$2',
         [ownerId, connectionId]);
+      await client.query(
+        'DELETE FROM nyx_storage_verified_identity_v1 WHERE owner_id=$1 AND connection_id=$2',
+        [ownerId, connectionId]);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -418,21 +470,51 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     if (provider === 'google-drive') {
       if (active.profile.provider !== 'google-drive' ||
           active.profile.rootFolderId !== resourceId) throw new Error('TENANT_RCLONE_ROOT_FORBIDDEN');
-      return {profile:active.profile, path:clean};
+      return {profile:active.profile, packed:active.packed, path:clean};
     }
     const root = resourceId === 'MEGA_ROOT' ? '' : tenantRclonePath(resourceId);
     if (active.profile.provider !== 'mega' ||
         active.profile.verifiedRoot !== (root || 'MEGA_ROOT')) {
       throw new Error('TENANT_MEGA_VERIFIED_ROOT_CHANGED');
     }
-    return {profile:active.profile, path:tenantRclonePath([root,clean].filter(Boolean).join('/'))};
+    return {profile:active.profile, packed:active.packed,
+      path:tenantRclonePath([root,clean].filter(Boolean).join('/'))};
+  }
+
+  /**
+   * Rotate Google OAuth credentials in the same owner+connection+state row,
+   * compare-and-swap only: never overwrite a newer profile or alter grants.
+   * Runs ONLY after an isolated, successful Rclone operation.
+   */
+  private async persistActiveGoogleRefresh(
+    ownerId:string,connectionId:string,
+    profile:TenantRcloneProfile,packed:string,configPath:string,
+  ):Promise<boolean> {
+    if(profile.provider!=='google-drive')return true;
+    const contents=await fs.readFile(configPath,'utf8');
+    const next=refreshedGoogleFromIsolatedConfig(profile,contents);
+    if(!next)return true;
+    const sealed=this.seal(ownerId,connectionId,next);
+    const changed=await this.db().query(
+      'UPDATE nyx_rclone_tenant_credentials_v2 SET '+
+      'encrypted_profile=$4, updated_at=now() '+
+      "WHERE owner_id=$1 AND connection_id=$2 AND provider='google-drive' "+
+      "AND state='active' AND encrypted_profile=$3 RETURNING connection_id",
+      [ownerId,connectionId,packed,sealed]);
+    if(changed.rowCount!==1)
+      throw new Error('TENANT_GOOGLE_REFRESH_CONCURRENT_CHANGE');
+    return true;
   }
 
   /** Read-only status; neither returns names nor touches private/global remotes. */
   async probeAuthorizedRoot(ownerId: string, connectionId: string, provider: TenantRcloneProvider,
                             resourceId: string, relativePath = ''): Promise<ReadProbeResult> {
     const target = await this.authorizedTarget(ownerId,connectionId,provider,resourceId,relativePath);
-    return this.probe(target.profile,target.path);
+    return this.probe(target.profile,target.path,
+      target.profile.provider==='google-drive'
+        ? configPath=>this.persistActiveGoogleRefresh(
+          ownerId,connectionId,target.profile,target.packed,configPath)
+        : undefined);
   }
 
   /**
@@ -443,7 +525,11 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
   async listAuthorizedRoot(ownerId:string, connectionId:string, provider:TenantRcloneProvider,
                            resourceId:string, relativePath='') {
     const target=await this.authorizedTarget(ownerId,connectionId,provider,resourceId,relativePath);
-    return this.listIsolated(target.profile,target.path);
+    return this.listIsolated(target.profile,target.path,
+      target.profile.provider==='google-drive'
+        ? configPath=>this.persistActiveGoogleRefresh(
+          ownerId,connectionId,target.profile,target.packed,configPath)
+        : undefined);
   }
 
 
@@ -584,7 +670,8 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async listIsolated(profile:TenantRcloneProfile, relativePath:string) {
+  private async listIsolated(profile:TenantRcloneProfile, relativePath:string,
+    afterSuccess?: (configPath:string)=>Promise<boolean>) {
     const directory=await fs.mkdtemp(path.join(os.tmpdir(),'nyx-tenant-rclone-'));
     const config=path.join(directory,'rclone.conf');
     try {
@@ -635,6 +722,8 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
           size:typeof item.Size==='number' && Number.isSafeInteger(item.Size)
             && item.Size>=0 ? item.Size:null};
       });
+      if(afterSuccess && !(await afterSuccess(config)))
+        throw new Error('TENANT_GOOGLE_REFRESH_NOT_SAVED');
       return {items:items.slice(0,100),truncated:items.length>100,readOnly:true};
     }finally{
       await fs.rm(directory,{recursive:true,force:true});

@@ -5,6 +5,8 @@ import { PrivateLegacyBrokerController } from './private-legacy-broker.controlle
 import { PrivateLegacyBrokerClient } from './private-legacy-broker.client';
 import { ConnectorsService } from './connectors.service';
 import { TenantRcloneService } from './tenant-rclone.service';
+import { TenantRcloneUploadService } from './tenant-rclone-upload.service';
+import { RcloneUploadController } from './rclone-upload.controller';
 import { TenantGoogleOAuthService } from './tenant-google-oauth.service';
 import { TenantMegaEnrollmentService } from './tenant-mega-enrollment.service';
 import { MegaEnrollmentController } from './mega-enrollment.controller';
@@ -19,9 +21,9 @@ import { GithubOAuthController } from './github-oauth.controller';
 
 @Module({
   imports:[StorageModule],
-  controllers:[GithubOAuthController,GoogleOAuthController,MegaEnrollmentController,PrivateLegacyOwnerLinkController,PrivateLegacyBrokerController],
+  controllers:[GithubOAuthController,GoogleOAuthController,MegaEnrollmentController,RcloneUploadController,PrivateLegacyOwnerLinkController,PrivateLegacyBrokerController],
   providers:[
-    ConnectorsService, GithubAppService, HerokuBrokerClient, PrivateLegacyBrokerService, PrivateLegacyBrokerClient, TenantRcloneService, TenantGoogleOAuthService, TenantMegaEnrollmentService, PrivateLegacyOwnerLinkService,
+    ConnectorsService, GithubAppService, HerokuBrokerClient, PrivateLegacyBrokerService, PrivateLegacyBrokerClient, TenantRcloneService, TenantRcloneUploadService, TenantGoogleOAuthService, TenantMegaEnrollmentService, PrivateLegacyOwnerLinkService,
     {provide: GithubReadonlyConnector,
       useFactory:(connections:ConnectorsService,credentials:GithubAppService)=>
         new GithubReadonlyConnector(connections.registryPolicy(),credentials),
@@ -32,6 +34,6 @@ import { GithubOAuthController } from './github-oauth.controller';
         new GithubWriteConnector(connections.registryPolicy(),credentials),
       inject:[ConnectorsService,GithubAppService]},
   ],
-  exports:[HerokuBrokerClient,PrivateLegacyBrokerClient,ConnectorsService,GithubAppService,GithubReadonlyConnector,GithubWriteConnector,TenantRcloneService,TenantGoogleOAuthService,TenantMegaEnrollmentService,PrivateLegacyOwnerLinkService],
+  exports:[HerokuBrokerClient,PrivateLegacyBrokerClient,ConnectorsService,GithubAppService,GithubReadonlyConnector,GithubWriteConnector,TenantRcloneService,TenantRcloneUploadService,TenantGoogleOAuthService,TenantMegaEnrollmentService,PrivateLegacyOwnerLinkService],
 })
 export class ConnectorsModule {}
