@@ -150,6 +150,7 @@ export class McpService {
            ...(process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
                process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
             ['nyx_storage_connections_list','nyx_storage_connection_create',
+             'nyx_storage_connection_rename',
              'nyx_storage_connection_permissions','nyx_storage_connection_roots',
              'nyx_storage_connection_begin_google','nyx_storage_connection_begin_mega',
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
@@ -781,6 +782,14 @@ export class McpService {
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false},
       }, async ({provider,name}) => this.safeTool(() =>
         this.connections.createStorage(this.connectorOwner(),provider,name)));
+
+      server.registerTool('nyx_storage_connection_rename', {
+        title:'Rename my own Google Drive or MEGA connection',
+        description:'Change this connection label only. Imported and OAuth connections behave identically. Credentials, provider identity, roots, and grants remain untouched.',
+        inputSchema:z.object({id:z.string().uuid(),name:z.string().min(1).max(80)}).strict(),
+        annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async({id,name})=>this.safeTool(()=>
+        this.connections.renameStorage(this.connectorOwner(),id,name)));
 
       server.registerTool('nyx_storage_connection_permissions', {
         title: 'Select storage connection capabilities',
