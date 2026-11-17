@@ -16,6 +16,9 @@ function fixture(roots=['TeamDocs']) {
  const connectors={getOwned:async(o,k)=> {
    if(o!==owner||k!==id)throw Error('FOREIGN_TENANT_DENIED');
    return item;
+ },attestImportedPendingStorageIdentity:async(o,k,provider,email)=>{
+   assert.equal(o,owner);assert.equal(k,id);
+   assert.equal(provider,'mega');assert.equal(email,TEST_EMAIL);
  }};
  const svc=new TenantRcloneService(connectors);
  svc.encryptionKey=Buffer.alloc(32,7);

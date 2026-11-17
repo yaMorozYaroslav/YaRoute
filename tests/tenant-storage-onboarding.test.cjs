@@ -100,6 +100,12 @@ test('Google callback consumes state and stages provider-bound credential withou
  let calls=0;
  global.fetch=async(url)=> {
    calls++;
+   if(String(url).includes('/drive/v3/about?'))return {
+     ok:true,text:async()=>JSON.stringify({user:{permissionId:'verified_drive_permission_42'}})};
+   if(String(url).includes('/drive/v3/files/'))return {
+     ok:true,text:async()=>JSON.stringify({id:'folder123',
+       mimeType:'application/vnd.google-apps.folder',trashed:false,
+       driveId:'0A_SHARED_DRIVE_VERIFIED'})};
    if(String(url).includes('/token'))return {
      ok:true,text:async()=>JSON.stringify({
       access_token:'private_access_token',refresh_token:'private_refresh_token',
@@ -110,7 +116,7 @@ test('Google callback consumes state and stages provider-bound credential withou
  };
  const outcome=await svc.complete(oauthState,'google-oauth-code');
  assert.equal(outcome.status,'pending_read_probe');
- assert.equal(calls,2);
+ assert.equal(calls,4);
  assert.equal(staged.length,1);
  assert.equal(staged[0][0],owner);
  assert.equal(staged[0][1],id);
@@ -118,6 +124,8 @@ test('Google callback consumes state and stages provider-bound credential withou
  assert.equal(staged[0][2].provider,'google-drive');
  assert.equal(confirmed.length,1);
  assert.equal(confirmed[0][3],'provider-account-42');
+ assert.equal(confirmed[0][4],'0A_SHARED_DRIVE_VERIFIED');
+ assert.equal(confirmed[0][5],'verified_drive_permission_42');
  assert.equal(JSON.stringify(outcome).includes('private_'),false);
 });
 

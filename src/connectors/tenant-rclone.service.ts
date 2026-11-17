@@ -7,11 +7,16 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import { assertPublicTenantGoogleOwnerId, assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorsService } from './connectors.service';
+import { verifyImportedGoogleIdentity } from './imported-google-identity';
+import { refreshedGoogleFromIsolatedConfig } from './rclone-google-token-refresh';
 
 export type TenantRcloneProvider = 'google-drive' | 'mega';
 export type TenantRcloneProfile =
   | { provider: 'google-drive'; token: string; clientId?: string;
-      clientSecret?: string; rootFolderId?: string; scope?: 'drive.readonly' | 'drive.file' | 'drive' }
+      clientSecret?: string; rootFolderId?: string; teamDriveId?: string;
+      /** Legacy account root: omit root_folder_id option without relaxing the logical root grant. */
+      accountRoot?: boolean;
+      scope?: 'drive.readonly' | 'drive.file' | 'drive' }
   | { provider: 'mega'; user: string; obscuredPassword: string;
       sessionId?: string; masterKey?: string;
       /** Assigned only after successfully probing this exact root. */
@@ -40,7 +45,19 @@ export function tenantRcloneConfig(profile: TenantRcloneProfile): string {
     const lines = ['[tenant]', 'type = drive', 'token = ' + token];
     if (profile.clientId) lines.push('client_id = ' + safeLine(profile.clientId, 2048));
     if (profile.clientSecret) lines.push('client_secret = ' + safeLine(profile.clientSecret, 2048));
-    if (profile.rootFolderId) lines.push('root_folder_id = ' + safeLine(profile.rootFolderId, 2048));
+    if (profile.accountRoot !== undefined &&
+        (profile.accountRoot !== true || profile.rootFolderId !== 'root')) {
+      throw new Error('TENANT_RCLONE_ACCOUNT_ROOT_INVALID');
+    }
+    if (!profile.accountRoot && profile.rootFolderId)
+      lines.push('root_folder_id = ' + safeLine(profile.rootFolderId, 2048));
+    if (profile.teamDriveId !== undefined) {
+      if (typeof profile.teamDriveId !== 'string' ||
+          !/^[A-Za-z0-9_-]{1,256}$/.test(profile.teamDriveId)) {
+        throw new Error('TENANT_RCLONE_TEAM_DRIVE_INVALID');
+      }
+      lines.push('team_drive = ' + profile.teamDriveId);
+    }
     if (profile.scope) {
       if (!['drive', 'drive.file', 'drive.readonly'].includes(profile.scope)) {
         throw new Error('TENANT_RCLONE_PROFILE_INVALID');
@@ -205,6 +222,35 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
    * Never expose this method directly through MCP/HTTP and never accept ownerId
    * or raw credentials from model-generated arguments.
    */
+  /**
+   * Safe batch retry: stage only when no pending ciphertext and no provider
+   * identity proof exist. Never replace a pending OAuth/MEGA enrollment.
+   */
+  async stageImportedCredentialIfAbsent(ownerId:string,connectionId:string,
+                                         profile:TenantRcloneProfile) {
+    const item=await this.owned(ownerId,connectionId,profile.provider);
+    if(item.status!=='pending'||item.externalAccountId!=='pending')
+      throw new Error('TENANT_IMPORT_PENDING_CONNECTION_REQUIRED');
+    if(profile.provider==='mega' &&
+       (profile.transientTwoFactorCode!==undefined||
+        profile.verifiedRoot!==undefined))
+      throw new Error('TENANT_IMPORT_TRANSIENT_MEGA_FIELD_FORBIDDEN');
+    tenantRcloneConfig(profile);
+    const packed=this.seal(ownerId,connectionId,profile);
+    const saved=await this.db().query(
+      'INSERT INTO nyx_rclone_tenant_credentials_v2 '+
+      '(owner_id,connection_id,provider,encrypted_profile,state) '+
+      "SELECT $1,$2,$3,$4,'pending' "+
+      'WHERE NOT EXISTS (SELECT 1 FROM nyx_storage_verified_identity_v1 '+
+      'WHERE owner_id=$1 AND connection_id=$2) '+
+      'AND NOT EXISTS (SELECT 1 FROM nyx_rclone_tenant_credentials_v2 ' +
+      'WHERE owner_id=$1 AND connection_id=$2) ' +
+      'ON CONFLICT (owner_id,connection_id,state) DO NOTHING '+
+      'RETURNING connection_id',
+      [ownerId,connectionId,profile.provider,packed]);
+    return {staged:saved.rowCount===1};
+  }
+
   async stageCredential(ownerId: string, connectionId: string, profile: TenantRcloneProfile) {
     const item = await this.owned(ownerId, connectionId, profile.provider);
     if (item.status === 'revoked') throw new Error('TENANT_RCLONE_CONNECTION_FORBIDDEN');
@@ -291,16 +337,48 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
           ? candidate.profile.obscuredPassword : '',sessionId,masterKey};
         tenantRcloneConfig(refreshedProfile);
         return true;
+      } : candidate.profile.provider==='google-drive' ? async configPath => {
+        // Token refresh is captured from the exact successful isolated Rclone
+        // config, not from the provider/API response or untrusted user input.
+        const contents=await fs.readFile(configPath,'utf8');
+        const updated=refreshedGoogleFromIsolatedConfig(
+          candidate.profile as Extract<TenantRcloneProfile,{provider:'google-drive'}>,contents);
+        if(updated)refreshedProfile=updated;
+        return true;
       } : undefined);
     if (status === 'verified' && oneTimeMegaCode && !refreshedProfile)
       return 'failed';
     if (status === 'verified') {
+      // Import uses exactly the same server-attested, owner-scoped namespace
+      // dedupe as OAuth sign-in. Never infer an identity from the import
+      // manifest or merely from the local remote display name.
+      // For MEGA, a successful authenticated login to an exact root verifies
+      // the account email the MEGA client used. For Google, ask the provider
+      // directly for its stable user/Drive identity.
+      if(item.externalAccountId==='pending'){
+        try{
+          if(candidate.profile.provider==='google-drive'){
+            const profileForIdentity=refreshedProfile?.provider==='google-drive'
+              ? refreshedProfile : candidate.profile;
+            const proof=await verifyImportedGoogleIdentity(profileForIdentity);
+            await this.connectors.attestImportedPendingStorageIdentity(
+              ownerId,connectionId,'google-drive',proof.accountId,proof.driveId);
+          }else if(candidate.profile.provider==='mega'){
+            await this.connectors.attestImportedPendingStorageIdentity(
+              ownerId,connectionId,'mega',candidate.profile.user);
+          }
+        }catch{
+          // No verification receipt or read_verified_at for an unproven
+          // namespace. Preserve the pending encrypted credentials for retry.
+          return 'failed';
+        }
+      }
       // Replace a one-time 2FA code with reusable, encrypted session keys.
       // Never retain the OTP in a pending or active credential row.
       const durableProfile = refreshedProfile || candidate.profile;
       const verifiedProfile: TenantRcloneProfile = durableProfile.provider === 'mega'
         ? {...durableProfile, verifiedRoot: relativePath || 'MEGA_ROOT'} : durableProfile;
-      const packed = verifiedProfile.provider === 'mega'
+      const packed = verifiedProfile.provider === 'mega' || refreshedProfile
         ? this.seal(ownerId, connectionId, verifiedProfile) : candidate.packed;
       const updated = await this.db().query(`UPDATE nyx_rclone_tenant_credentials_v2 SET
           encrypted_profile=$4, read_verified_at=now()
@@ -310,6 +388,97 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       if (updated.rowCount!==1) return 'failed';
     }
     return status;
+  }
+
+  /**
+   * Complete a newly imported, server-attested, freshly read-verified profile.
+   * This grants storage:list only; no operator-owned secrets or write grants.
+   * Metadata and ciphertext promotion commit together in one transaction.
+   */
+  async activateImportedReadOnly(ownerId:string, connectionId:string) {
+    const owned=await this.owned(ownerId,connectionId);
+    if(owned.provider!=='mega' && owned.provider!=='google-drive')
+      throw new Error('TENANT_IMPORT_PROVIDER_FORBIDDEN');
+    if(owned.status!=='pending')throw new Error('TENANT_IMPORT_NOT_PENDING');
+    const client=await this.db().connect();
+    let begun=false;
+    try {
+      await client.query('BEGIN');begun=true;
+      const m=await client.query(
+        'SELECT provider,status,external_account_id,capabilities,'+
+        'provider_capabilities,resources FROM nyx_connector_connections '+
+        'WHERE owner_id=$1 AND id=$2 FOR UPDATE',[ownerId,connectionId]);
+      if(m.rowCount!==1||m.rows[0].status!=='pending'||
+         m.rows[0].external_account_id!=='pending'||
+         m.rows[0].provider!==owned.provider)
+        throw new Error('TENANT_IMPORT_METADATA_CHANGED');
+      const meta=m.rows[0];
+      const caps=typeof meta.capabilities==='string'?
+        JSON.parse(meta.capabilities):meta.capabilities;
+      const providerCaps=typeof meta.provider_capabilities==='string'?
+        JSON.parse(meta.provider_capabilities):meta.provider_capabilities;
+      const roots=typeof meta.resources==='string'?JSON.parse(meta.resources):meta.resources;
+      if(!Array.isArray(caps)||caps.length!==1||caps[0]!=='storage:list'||
+         !Array.isArray(providerCaps)||providerCaps.length!==0||
+         !Array.isArray(roots)||roots.length!==1||
+         roots[0].kind!==(owned.provider==='mega'?'mega-root':'drive')||
+         !Array.isArray(roots[0].capabilities)||
+         roots[0].capabilities.length!==1||
+         roots[0].capabilities[0]!=='storage:list')
+        throw new Error('TENANT_IMPORT_READ_GRANTS_CHANGED');
+      const proof=await client.query(
+        'SELECT provider,namespace,external_id FROM nyx_storage_verified_identity_v1 '+
+        'WHERE owner_id=$1 AND connection_id=$2 FOR UPDATE',[ownerId,connectionId]);
+      if(proof.rowCount!==1||proof.rows[0].provider!==owned.provider||
+         typeof proof.rows[0].namespace!=='string'||
+         typeof proof.rows[0].external_id!=='string'||
+         !proof.rows[0].namespace||!proof.rows[0].external_id)
+        throw new Error('TENANT_IMPORT_PROVIDER_ATTESTATION_REQUIRED');
+      const pending=await client.query(
+        'SELECT provider,encrypted_profile FROM nyx_rclone_tenant_credentials_v2 '+
+        'WHERE owner_id=$1 AND connection_id=$2 AND state=$3 '+
+        "AND read_verified_at>now()-interval '15 minutes' FOR UPDATE",
+        [ownerId,connectionId,'pending']);
+      if(pending.rowCount!==1||pending.rows[0].provider!==owned.provider)
+        throw new Error('TENANT_IMPORT_FRESH_READ_REQUIRED');
+      const profile=this.open(ownerId,connectionId,owned.provider,
+        pending.rows[0].encrypted_profile as string);
+      if(profile.provider==='google-drive') {
+        if(roots[0].id!==profile.rootFolderId||
+           !(proof.rows[0].namespace.startsWith('my-drive:')||
+             proof.rows[0].namespace.startsWith('shared-drive:')))
+          throw new Error('TENANT_IMPORT_GOOGLE_ROOT_CHANGED');
+      } else if(profile.provider==='mega') {
+        if(roots[0].id!==profile.verifiedRoot||
+           (roots[0].id!=='MEGA_ROOT' &&
+            roots[0].id!==tenantRclonePath(roots[0].id)))
+          throw new Error('TENANT_IMPORT_MEGA_ROOT_CHANGED');
+      }
+      const active=await client.query(
+        "SELECT connection_id FROM nyx_rclone_tenant_credentials_v2 "+
+        "WHERE owner_id=$1 AND connection_id=$2 AND state='active' FOR UPDATE",
+        [ownerId,connectionId]);
+      if(active.rowCount!==0)throw new Error('TENANT_IMPORT_ACTIVE_ALREADY_PRESENT');
+      const metadata=await client.query(
+        "UPDATE nyx_connector_connections SET status='active',"+
+        "external_account_id=$3,provider_capabilities='[\"storage:list\"]'::jsonb,"+
+        "updated_at=now() WHERE owner_id=$1 AND id=$2 AND status='pending' "+
+        "AND external_account_id='pending' RETURNING id",
+        [ownerId,connectionId,proof.rows[0].external_id]);
+      if(metadata.rowCount!==1)throw new Error('TENANT_IMPORT_METADATA_RACE');
+      const promoted=await client.query(
+        "UPDATE nyx_rclone_tenant_credentials_v2 SET state='active',updated_at=now() "+
+        "WHERE owner_id=$1 AND connection_id=$2 AND state='pending' "+
+        "AND read_verified_at>now()-interval '15 minutes' RETURNING connection_id",
+        [ownerId,connectionId]);
+      if(promoted.rowCount!==1)throw new Error('TENANT_IMPORT_CREDENTIAL_RACE');
+      await client.query('COMMIT');begun=false;
+      return {status:'active' as const,connectionId,provider:owned.provider,
+        capabilities:['storage:list'] as const};
+    }catch(error) {
+      if(begun)await client.query('ROLLBACK').catch(()=>{});
+      throw error;
+    }finally{client.release();}
   }
 
   /** Requires independent provider grant AND successful recent read probe. */
@@ -392,6 +561,9 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       await client.query(
         'DELETE FROM nyx_rclone_google_oauth_states_v2 WHERE owner_id=$1 AND connection_id=$2',
         [ownerId, connectionId]);
+      await client.query(
+        'DELETE FROM nyx_storage_verified_identity_v1 WHERE owner_id=$1 AND connection_id=$2',
+        [ownerId, connectionId]);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -418,21 +590,51 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     if (provider === 'google-drive') {
       if (active.profile.provider !== 'google-drive' ||
           active.profile.rootFolderId !== resourceId) throw new Error('TENANT_RCLONE_ROOT_FORBIDDEN');
-      return {profile:active.profile, path:clean};
+      return {profile:active.profile, packed:active.packed, path:clean};
     }
     const root = resourceId === 'MEGA_ROOT' ? '' : tenantRclonePath(resourceId);
     if (active.profile.provider !== 'mega' ||
         active.profile.verifiedRoot !== (root || 'MEGA_ROOT')) {
       throw new Error('TENANT_MEGA_VERIFIED_ROOT_CHANGED');
     }
-    return {profile:active.profile, path:tenantRclonePath([root,clean].filter(Boolean).join('/'))};
+    return {profile:active.profile, packed:active.packed,
+      path:tenantRclonePath([root,clean].filter(Boolean).join('/'))};
+  }
+
+  /**
+   * Rotate Google OAuth credentials in the same owner+connection+state row,
+   * compare-and-swap only: never overwrite a newer profile or alter grants.
+   * Runs ONLY after an isolated, successful Rclone operation.
+   */
+  private async persistActiveGoogleRefresh(
+    ownerId:string,connectionId:string,
+    profile:TenantRcloneProfile,packed:string,configPath:string,
+  ):Promise<boolean> {
+    if(profile.provider!=='google-drive')return true;
+    const contents=await fs.readFile(configPath,'utf8');
+    const next=refreshedGoogleFromIsolatedConfig(profile,contents);
+    if(!next)return true;
+    const sealed=this.seal(ownerId,connectionId,next);
+    const changed=await this.db().query(
+      'UPDATE nyx_rclone_tenant_credentials_v2 SET '+
+      'encrypted_profile=$4, updated_at=now() '+
+      "WHERE owner_id=$1 AND connection_id=$2 AND provider='google-drive' "+
+      "AND state='active' AND encrypted_profile=$3 RETURNING connection_id",
+      [ownerId,connectionId,packed,sealed]);
+    if(changed.rowCount!==1)
+      throw new Error('TENANT_GOOGLE_REFRESH_CONCURRENT_CHANGE');
+    return true;
   }
 
   /** Read-only status; neither returns names nor touches private/global remotes. */
   async probeAuthorizedRoot(ownerId: string, connectionId: string, provider: TenantRcloneProvider,
                             resourceId: string, relativePath = ''): Promise<ReadProbeResult> {
     const target = await this.authorizedTarget(ownerId,connectionId,provider,resourceId,relativePath);
-    return this.probe(target.profile,target.path);
+    return this.probe(target.profile,target.path,
+      target.profile.provider==='google-drive'
+        ? configPath=>this.persistActiveGoogleRefresh(
+          ownerId,connectionId,target.profile,target.packed,configPath)
+        : undefined);
   }
 
   /**
@@ -443,7 +645,11 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
   async listAuthorizedRoot(ownerId:string, connectionId:string, provider:TenantRcloneProvider,
                            resourceId:string, relativePath='') {
     const target=await this.authorizedTarget(ownerId,connectionId,provider,resourceId,relativePath);
-    return this.listIsolated(target.profile,target.path);
+    return this.listIsolated(target.profile,target.path,
+      target.profile.provider==='google-drive'
+        ? configPath=>this.persistActiveGoogleRefresh(
+          ownerId,connectionId,target.profile,target.packed,configPath)
+        : undefined);
   }
 
 
@@ -584,7 +790,8 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async listIsolated(profile:TenantRcloneProfile, relativePath:string) {
+  private async listIsolated(profile:TenantRcloneProfile, relativePath:string,
+    afterSuccess?: (configPath:string)=>Promise<boolean>) {
     const directory=await fs.mkdtemp(path.join(os.tmpdir(),'nyx-tenant-rclone-'));
     const config=path.join(directory,'rclone.conf');
     try {
@@ -635,6 +842,8 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
           size:typeof item.Size==='number' && Number.isSafeInteger(item.Size)
             && item.Size>=0 ? item.Size:null};
       });
+      if(afterSuccess && !(await afterSuccess(config)))
+        throw new Error('TENANT_GOOGLE_REFRESH_NOT_SAVED');
       return {items:items.slice(0,100),truncated:items.length>100,readOnly:true};
     }finally{
       await fs.rm(directory,{recursive:true,force:true});
