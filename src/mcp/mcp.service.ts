@@ -133,11 +133,16 @@ export class McpService {
         routing: 'head_resolve_then_mcp_capability_then_mcp_or_gpt',
         unsupportedOnlyFallback: true,
         executionFailureFallback: false,
-        commandEntrypoints: {
+        // Public tenants deliberately cannot access the private MAIN bootstrap.
+        // Advertise only tools that are registered for this deployment mode.
+        initialization: process.env.NYX_DEPLOYMENT_MODE === 'public'
+          ? { available: false, reason: 'PRIVATE_BOOTSTRAP_NOT_EXPOSED_TO_PUBLIC_TENANTS' }
+          : { available: true, status: 'registered-requires-verified-bootstrap' },
+        commandEntrypoints: process.env.NYX_DEPLOYMENT_MODE === 'public' ? {} : {
           execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
           help: { tool: 'nyx_help', command: 'hel', mode: 'read-only' },
-          ini: { tool: 'nyx_ini', status: 'registered' },
-          sum: { tool: 'nyx_sum', status: 'registered' },
+          ini: { tool: 'nyx_ini', status: 'registered-requires-verified-bootstrap' },
+          sum: { tool: 'nyx_sum', status: 'registered-requires-verified-bootstrap' },
         },
         auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ?
           ['get_profile','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview',
