@@ -20,6 +20,7 @@ import { CopyJobPayload } from '../storage/storage.types';
 import { assessPotentialFinancialLoss } from '../connectors/financial-risk-preflight';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { TenantRcloneService } from '../connectors/tenant-rclone.service';
+import { TenantRcloneUploadService } from '../connectors/tenant-rclone-upload.service';
 import { TenantGoogleOAuthService } from '../connectors/tenant-google-oauth.service';
 import { TenantMegaEnrollmentService } from '../connectors/tenant-mega-enrollment.service';
 import { publicTenantMegaOnly } from '../connectors/public-tenant-provider.policy';
@@ -57,6 +58,7 @@ export class McpService {
     private readonly tenantKeys: NyxTenantKeyService,
     private readonly connections: ConnectorsService,
     private readonly tenantRclone: TenantRcloneService,
+    private readonly tenantRcloneUpload: TenantRcloneUploadService,
     private readonly tenantGoogle: TenantGoogleOAuthService,
     private readonly tenantMega: TenantMegaEnrollmentService,
     private readonly github: GithubReadonlyConnector,
@@ -150,10 +152,12 @@ export class McpService {
            ...(process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
                process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
             ['nyx_storage_connections_list','nyx_storage_connection_create',
+             'nyx_storage_connection_rename',
              'nyx_storage_connection_permissions','nyx_storage_connection_roots',
              'nyx_storage_connection_begin_google','nyx_storage_connection_begin_mega',
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
              'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
+              ...(process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true' ? ['nyx_storage_connection_begin_import','nyx_storage_connection_begin_import_all'] : []),
               'nyx_storage_connection_revoke',
               ...(process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true' ?
                 ['nyx_storage_mega_file_mutate'] : [])] : []),
@@ -782,6 +786,14 @@ export class McpService {
       }, async ({provider,name}) => this.safeTool(() =>
         this.connections.createStorage(this.connectorOwner(),provider,name)));
 
+      server.registerTool('nyx_storage_connection_rename', {
+        title:'Rename my own Google Drive or MEGA connection',
+        description:'Change this connection label only. Imported and OAuth connections behave identically. Credentials, provider identity, roots, and grants remain untouched.',
+        inputSchema:z.object({id:z.string().uuid(),name:z.string().min(1).max(80)}).strict(),
+        annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async({id,name})=>this.safeTool(()=>
+        this.connections.renameStorage(this.connectorOwner(),id,name)));
+
       server.registerTool('nyx_storage_connection_permissions', {
         title: 'Select storage connection capabilities',
         description: 'Select read and, where explicitly enabled by server policy, MEGA move/trash permissions. Provider permissions remain independently enforced.',
@@ -818,6 +830,28 @@ export class McpService {
         annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
       },async({id,rootPath})=>this.safeTool(()=>
         this.tenantMega.begin(this.connectorOwner(),id,rootPath)));
+
+      // Only a signed owner can obtain a short-lived first-party upload link.
+      // Never accept local Rclone credential bytes in MCP arguments.
+      if (process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true') {
+        server.registerTool('nyx_storage_connection_begin_import', {
+          title:'Import my local Rclone file via secure HTTPS',
+          description:'Owner-bound one-time HTTPS link for selecting one remote from a local Rclone file. Do not send file contents or secrets to ChatGPT.',
+          inputSchema:z.object({id:z.string().uuid()}).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+        },async({id})=>this.safeTool(()=>
+          this.tenantRcloneUpload.begin(this.connectorOwner(),id)));
+      }
+
+      if (process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true') {
+        server.registerTool('nyx_storage_connection_begin_import_all', {
+          title:'Import all my local Rclone connections',
+          description:'One-time owner-bound HTTPS file upload. Automatically import all supported Google Drive and MEGA remotes; no file contents or credentials in MCP. Existing connections are preserved.',
+          inputSchema:z.object({}).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+        },async()=>this.safeTool(()=>
+          this.tenantRcloneUpload.beginAll(this.connectorOwner())));
+      }
 
       server.registerTool('nyx_storage_connection_test_pending', {
         title: 'Check pending connection connectivity',
