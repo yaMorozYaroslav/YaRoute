@@ -44,7 +44,7 @@ test('invalid profile returns bounded diagnostics and execution remains fail-clo
  const {service,files,locator}=fixture();
  files.set('profile','not JSON');
  assert.equal((await service.inspect(locator,cliHash)).error,'EXECUTION_PROFILE_INVALID_OR_UNAVAILABLE');
- await assert.rejects(()=>service.apply(locator,cli,cliHash),/EXECUTION_PROFILE_INVALID_OR_UNAVAILABLE/);
+ await assert.rejects(()=>service.apply(locator,cli,cliHash),/EXECUTION_PROFILE_SCHEMA_INVALID/);
 });
 
 test('mutable draft changes are visible warnings, not a global init lockout',async()=>{
@@ -88,7 +88,7 @@ test('non-staging and arbitrary key pins cannot opt out of enforcement',async()=
   files.set('profile',JSON.stringify(profile));
   assert.equal((await service.inspect(locator,cliHash)).ready,false);
   await assert.rejects(()=>service.apply(locator,cli,cliHash),
-   /EXECUTION_PROFILE_INVALID_OR_UNAVAILABLE/);
+   /EXECUTION_PROFILE_SCHEMA_INVALID/);
  }
 });
 test('repository config keeps only two designated drafts in observe mode',()=>{

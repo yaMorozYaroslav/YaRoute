@@ -45,7 +45,12 @@ export class NyxExecutionProfileService {
   }
   private async profileText(locator: Locator): Promise<string | undefined> {
     const deployedPath = process.env.NYX_RUNTIME_PROFILE_PATH ?? (process.env.DYNO ? 'config/nyx-runtime-profile.json' : undefined);
-    if (deployedPath) return readFile(deployedPath, 'utf8');
+    if (deployedPath) {
+      // Do not silently skip a configured profile: initialization requires
+      // verified bindings. Avoid leaking local paths or OS error details.
+      try { return await readFile(deployedPath, 'utf8'); }
+      catch { throw new Error('EXECUTION_PROFILE_FILE_UNAVAILABLE'); }
+    }
     if (locator.executionProfile) return this.store.read(locator.executionProfile, 128 * 1024);
     return undefined;
   }
@@ -62,14 +67,22 @@ export class NyxExecutionProfileService {
     if (error instanceof Error && (
       error.message.startsWith('KEY_PREFLIGHT_') ||
       error.message === 'PROFILE_AUTHORITY_CHANGED' ||
-      error.message === 'PROFILE_COMMAND_NOT_CANONICAL'
+      error.message === 'PROFILE_COMMAND_NOT_CANONICAL' ||
+      error.message === 'EXECUTION_PROFILE_FILE_UNAVAILABLE' ||
+      error.message === 'EXECUTION_PROFILE_SCHEMA_INVALID'
     )) throw error;
     throw new Error('EXECUTION_PROFILE_INVALID_OR_UNAVAILABLE');
   }
   private async applyText(text: string, cli: Cli, cliHash: string) {
     // Operational execution bindings are explicit runtime configuration, not new canonical command definitions.
     // The canonical CLI is checked first; profile bindings cannot add commands or aliases.
-    const profile = profileSchema.parse(parseJson(text));
+    // Invalid structure must fail closed, but report a stable diagnostic code
+    // instead of indistinguishably looking like a missing runtime file.
+    const parsed = (() => {
+      try { return profileSchema.parse(parseJson(text)); }
+      catch { throw new Error('EXECUTION_PROFILE_SCHEMA_INVALID'); }
+    })();
+    const profile = parsed;
     if (profile.cliSha256 !== cliHash) throw new Error('PROFILE_AUTHORITY_CHANGED');
     // Enforce trusted pins fail-closed. Mutable, non-executable staging overlays are
     // diagnostic-only: they cannot change canonical CLI authority or execution routes.
