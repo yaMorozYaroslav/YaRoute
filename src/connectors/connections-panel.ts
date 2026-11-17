@@ -440,6 +440,19 @@ function renderTenant(connections){
    heading.append(el('strong',item.displayName));
    const state=el('span',item.status==='active'?'● Connected':'○ Pending');
    state.className='badge';heading.append(state);box.append(heading);
+   // Both local Rclone imports and OAuth enrollments use the same metadata controls.
+   const naming=el('div');naming.className='row';
+   const labelInput=input(item.displayName);labelInput.maxLength=80;
+   labelInput.setAttribute('aria-label','Connection display name');
+   naming.append(el('span','Display name'),labelInput,button('Save name',async()=>{
+     const updated=await call('nyx_storage_connection_rename',{
+       id:item.id,name:labelInput.value.trim()});
+     if(updated?.id!==item.id)throw Error('Connection rename was not verified');
+     show('Connection renamed; existing credentials and permissions unchanged.');
+     await refreshTenantStorage();
+   }));
+   box.append(naming);
+
    const detail=el('p',item.provider==='mega'&&item.status==='active'?
      'Verified MEGA identity: '+item.externalAccountId:
      item.provider==='google-drive'&&item.status==='active'?
@@ -648,6 +661,26 @@ function renderTenant(connections){
       'Browse and manage MEGA files' : 'Browse selected folder (read only)',browse));
     box.append(filePanel);
    }
+   // Explicit typed confirmation revokes only this NestNyx connection.
+   // It does not delete provider files, purge any provider trash, or revoke
+   // an OAuth session in the external provider.
+   const close=el('details');close.className='nyx-connection-revoke';
+   close.append(el('summary','Remove connection and encrypted credentials'));
+   close.append(el('p','This disconnects only this account entry in NestNyx. All cloud files remain untouched. For complete provider-side revocation, use the provider security page separately.'));
+   const exact='REMOVE CONNECTION '+item.displayName;
+   close.append(el('p','Type exactly: '+exact));
+   const typed=input('');typed.maxLength=128;
+   typed.setAttribute('aria-label','Confirm removal of '+item.displayName);
+   close.append(typed,button('Disconnect and erase saved credentials',async()=>{
+     if(typed.value!==exact)throw Error('Exact typed confirmation required; nothing removed');
+     const outcome=await call('nyx_storage_connection_revoke',{id:item.id});
+     if(outcome?.id!==item.id||outcome.status!=='revoked'||
+        outcome.localCredentialsDeleted!==true)
+       throw Error('Revocation not verified; check server audit status');
+     show('Connection revoked; stored NestNyx credentials erased. Provider files were not modified.');
+     await refreshTenantStorage();
+   }));
+   box.append(close);
    host.append(box);
   }
  }

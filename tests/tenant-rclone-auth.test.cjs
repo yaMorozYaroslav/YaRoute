@@ -130,3 +130,28 @@ test('authorized probes honor Google folder ID and MEGA relative root',async()=>
   b.probe=async (_profile,relative)=>relative==='root-1/docs'?'verified':'failed';
   assert.equal(await b.probeAuthorizedRoot('oauth:alice',id,'mega','root-1','docs'),'verified');
 });
+
+
+test('Google team_drive is reproduced in isolated Rclone config only when selected',()=>{
+  const selected=tenantRcloneConfig({...drive,teamDriveId:'0A_shared_fixture_01'});
+  assert.match(selected,/^team_drive = 0A_shared_fixture_01$/m);
+  assert.match(selected,/^root_folder_id = root-1$/m);
+  const plain=tenantRcloneConfig(drive);
+  assert.doesNotMatch(plain,/^team_drive = /m);
+  for(const invalid of ['','../escape','abc\n[evil]','a:b']){
+    assert.throws(()=>tenantRcloneConfig({...drive,teamDriveId:invalid}),
+      /TENANT_RCLONE_TEAM_DRIVE_INVALID/);
+  }
+});
+
+
+test('imported account-root Google config omits explicit root folder selector',()=>{
+  const accountRoot=tenantRcloneConfig({
+    ...drive,rootFolderId:'root',accountRoot:true,teamDriveId:'0A_shared_fixture_01'});
+  assert.doesNotMatch(accountRoot,/^root_folder_id = /m);
+  assert.match(accountRoot,/^team_drive = 0A_shared_fixture_01$/m);
+  assert.throws(()=>tenantRcloneConfig({...drive,accountRoot:true}),
+    /ACCOUNT_ROOT_INVALID/);
+  assert.throws(()=>tenantRcloneConfig({...drive,rootFolderId:'root',accountRoot:false}),
+    /ACCOUNT_ROOT_INVALID/);
+});
