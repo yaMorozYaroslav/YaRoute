@@ -117,7 +117,7 @@ test('Issue tool honors GitHub App issues:write and exact repository',async()=>{
   /CONNECTOR_NOT_FOUND/);
 });
 
-test('GitHub MCP tool contracts accept short working branches and describe protection',()=>{
+test('GitHub MCP staging remains SHA-guarded and blocks default branch mutations',()=>{
  const {readFileSync}=require('node:fs');
  const {join}=require('node:path');
  const src=readFileSync(join(__dirname,'../src/mcp/mcp.service.ts'),'utf8');
@@ -125,7 +125,9 @@ test('GitHub MCP tool contracts accept short working branches and describe prote
  const end=src.indexOf("server.registerTool('nyx_connection_github_issue_create'",start);
  assert.ok(start>=0 && end>start);
  const commands=src.slice(start,end);
- assert.equal((commands.match(/branch:z\.string\(\)\.min\(1\)\.max\(100\)/g)||[]).length,3);
- assert.doesNotMatch(commands,/nyx\/\*/);
- assert.match(commands,/main\/master\/default/);
+ assert.match(commands,/branch:z\\.string\\(\\)\\.min\\(5\\)\\.max\\(100\\)/);
+ assert.match(commands,/expectedTesterSha:z\\.string\\(\\)\\.regex/);
+ assert.match(commands,/expectedHeadSha:z\\.string\\(\\)\\.regex/);
+ assert.match(commands,/never modifies the source branch/i);
+ assert.match(commands,/master\\/main\\/default/);
 });
