@@ -20,6 +20,7 @@ import { CopyJobPayload } from '../storage/storage.types';
 import { assessPotentialFinancialLoss } from '../connectors/financial-risk-preflight';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { TenantRcloneService } from '../connectors/tenant-rclone.service';
+import { TenantRcloneUploadService } from '../connectors/tenant-rclone-upload.service';
 import { TenantGoogleOAuthService } from '../connectors/tenant-google-oauth.service';
 import { TenantMegaEnrollmentService } from '../connectors/tenant-mega-enrollment.service';
 import { publicTenantMegaOnly } from '../connectors/public-tenant-provider.policy';
@@ -33,6 +34,7 @@ import { githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_HOME_URI, CONNECTIONS_HOME_HTML, CONNECTIONS_PANEL_LABEL, CONNECTIONS_HOME_LABEL, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 import { ACCOUNT_VIEW_URI, ACCOUNT_VIEW_HTML, signStorageView, verifyStorageView } from '../connectors/multi-account-view';
+import { compatibilityResourceUri } from './mcp-ui-version';
 import { PRIVATE_REMOTE_ROOT, findPrivateRemote, privateRemoteView,
   type ApprovedPrivateRemote } from '../connectors/private-pro-virtual-connections';
 
@@ -57,6 +59,7 @@ export class McpService {
     private readonly tenantKeys: NyxTenantKeyService,
     private readonly connections: ConnectorsService,
     private readonly tenantRclone: TenantRcloneService,
+    private readonly tenantRcloneUpload: TenantRcloneUploadService,
     private readonly tenantGoogle: TenantGoogleOAuthService,
     private readonly tenantMega: TenantMegaEnrollmentService,
     private readonly github: GithubReadonlyConnector,
@@ -136,8 +139,20 @@ export class McpService {
         // Public tenants deliberately cannot access the private MAIN bootstrap.
         // Advertise only tools that are registered for this deployment mode.
         initialization: process.env.NYX_DEPLOYMENT_MODE === 'public'
-          ? { available: false, reason: 'PRIVATE_BOOTSTRAP_NOT_EXPOSED_TO_PUBLIC_TENANTS' }
+          ? {
+            available: false,
+            reason: 'PRIVATE_BOOTSTRAP_NOT_EXPOSED_TO_PUBLIC_TENANTS',
+            // This is an authorization boundary, not proof of a broken CLI.
+            // A separate ChatGPT/Drive read is possible only with its own grants.
+            alternative: 'separate-authorized-ChatGPT-source-resolution',
+          }
           : { available: true, status: 'registered-requires-verified-bootstrap' },
+        sourceRecovery: {
+          inaccessibleDriveId: 'Resolve the source owner and use that authorized Drive account for the exact read. A 404 under a different connected account is an access mismatch, not proof of deletion. Re-discover in the verified source owner account; never silently switch owners or change access.',
+          authorityOrder: 'current-valid-Footer -> referenced-Head-and-Body -> owning-Area-sources',
+          completionGate: 'No canonical-initialization COMPLETE or FIF verification without those live receipts.',
+          privateBoundary: 'Never route public MCP tenants into the private MAIN bootstrap.',
+        },
         commandEntrypoints: process.env.NYX_DEPLOYMENT_MODE === 'public' ? {} : {
           execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
           help: { tool: 'nyx_help', command: 'hel', mode: 'read-only' },
@@ -150,10 +165,12 @@ export class McpService {
            ...(process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
                process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
             ['nyx_storage_connections_list','nyx_storage_connection_create',
+             'nyx_storage_connection_rename',
              'nyx_storage_connection_permissions','nyx_storage_connection_roots',
              'nyx_storage_connection_begin_google','nyx_storage_connection_begin_mega',
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
              'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
+              ...(process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true' ? ['nyx_storage_connection_begin_import','nyx_storage_connection_begin_import_all','nyx_storage_connection_finish_import'] : []),
               'nyx_storage_connection_revoke',
               ...(process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true' ?
                 ['nyx_storage_mega_file_mutate'] : [])] : []),
@@ -218,13 +235,12 @@ export class McpService {
     // after deployment. Keep v10-v12 URIs fetchable so ChatGPT doesn't display
     // "App unavailable" when it has cached an old Connections/Home template.
     // Each alias serves the current UI, with the requested URI in the response.
-    for (const version of [10,11,12,13]) {
+    for (const version of [10,11,12,13,14]) {
       for (const item of [
         {label:CONNECTIONS_PANEL_LABEL,uri:CONNECTIONS_PANEL_URI,html:CONNECTIONS_PANEL_HTML},
         {label:CONNECTIONS_HOME_LABEL,uri:CONNECTIONS_HOME_URI,html:CONNECTIONS_HOME_HTML},
       ]) {
-        const oldUri=item.uri.replace(/\/v14\.html$/, '/v'+version+'.html');
-        if (oldUri===item.uri)throw new Error('NYX_MCP_UI_ALIAS_URI_INVALID');
+        const oldUri=compatibilityResourceUri(item.uri,version);
         server.registerResource(item.label+' (compatibility v'+version+')',oldUri,
           {mimeType:'text/html;profile=mcp-app'},
           async()=>({contents:[{
@@ -633,19 +649,19 @@ export class McpService {
     // GitHub API writes are restricted to owner-selected repositories and
     // review-only nyx/* branches. No workflow dispatch, merges or hosting API.
     server.registerTool('nyx_connection_github_branch_create',{
-      title:'Create a non-default GitHub working branch (not main/master/default)',
-      description:'Create a nyx-prefixed branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
+      title:'Create a NYX GitHub review branch',
+      description:'Create a nyx/* branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(1).max(100)}),
+        branch:z.string().min(5).max(100)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.githubWrites.createBranch(this.connectorOwner(),id,repo,branch))));
 
-    // SHA-guarded staging workflow: changes only a fresh nyx-prefixed review branch.
+    // SHA-guarded staging workflow: changes only a fresh nyx/* review branch.
     // Both base and target refuse master/main/default. No direct protected writes.
     server.registerTool('nyx_connection_github_branch_from_ref',{
       title:'Create a SHA-guarded review branch from tester or another non-default branch',
-      description:'Create a nyx-prefixed branch from the exact verified tip of a non-protected, non-default branch. Requires expectedBaseSha; never modifies the source branch.',
+      description:'Create a nyx/* branch from the exact verified tip of a non-protected, non-default branch. Requires expectedBaseSha; never modifies the source branch.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         expectedBaseSha:z.string().regex(/^[a-f0-9]{40}$/)}),
@@ -656,7 +672,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_stage_tester_from_dev',{
       title:'Stage reviewed Dev source files as a draft-ready tester review branch',
-      description:'Copy up to 40 exact reviewed src/docs/tests files from a selected YaRoute-Dev commit into a NEW nyx-prefixed review branch based on a verified YaRoute tester SHA. Uses two owner-scoped GitHub App connections. Never updates tester/master, creates deployment files, merges, or deploys. Call draft_pr_to_ref separately after inspecting staged changes.',
+      description:'Copy up to 40 exact reviewed src/docs/tests files from a selected YaRoute-Dev commit into a NEW nyx/* review branch based on a verified YaRoute tester SHA. Uses two owner-scoped GitHub App connections. Never updates tester/master, creates deployment files, merges, or deploys. Call draft_pr_to_ref separately after inspecting staged changes.',
       inputSchema:z.object({
         sourceConnectionId:z.string().uuid(),destinationConnectionId:z.string().uuid(),
         sourceRepo:z.string().min(3).max(200),destinationRepo:z.string().min(3).max(200),
@@ -676,7 +692,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_reviewed_pr_to_ref',{
       title:'Open an exact-SHA reviewed PR into tester or another unprotected non-default branch',
-      description:'Creates a non-draft PR for a nyx-prefixed source with verified source/target SHAs. No protected master/main, no automatic merge or deployment. Use the separately gated merge_reviewed_nondefault tool after CI.',
+      description:'Creates a non-draft PR for a nyx/* source with verified source/target SHAs. No protected master/main, no automatic merge or deployment. Use the separately gated merge_reviewed_nondefault tool after CI.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         title:z.string().min(1).max(200),body:z.string().max(10000).optional(),
@@ -690,7 +706,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_draft_pr_to_ref',{
       title:'Open an unmerged draft PR to tester or another non-default branch',
-      description:'Open a DRAFT PR from a nyx-prefixed review branch to a non-default branch. Never merges, deploys, dispatches workflows or targets protected main/master.',
+      description:'Open a DRAFT PR from a nyx/* review branch to a non-default branch. Never merges, deploys, dispatches workflows or targets protected main/master.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         title:z.string().min(1).max(200),body:z.string().max(10000).optional()}),
@@ -701,7 +717,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_merge_reviewed_nondefault',{
       title:'Merge a CI-verified NYX review PR into an unprotected non-default branch',
-      description:'Explicit merge only of same-repo nyx-prefixed review PR. Checks precise head and base SHAs, protected status and completed successful CI. Cannot merge master/main/default and never invokes Heroku.',
+      description:'Explicit merge only of same-repo nyx/* review PR. Checks precise head and base SHAs, protected status and completed successful CI. Cannot merge master/main/default and never invokes Heroku.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         prNumber:z.number().int().min(1).max(1000000),
         expectedHeadSha:z.string().regex(/^[a-f0-9]{40}$/),
@@ -725,9 +741,9 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_commit_file',{
       title:'Commit one file on a NYX review branch',
-      description:'Create or update one UTF-8 file on an existing nyx-prefixed branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
+      description:'Create or update one UTF-8 file on an existing nyx/* branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(1).max(100),path:z.string().min(1).max(400),
+        branch:z.string().min(5).max(100),path:z.string().min(1).max(400),
         content:z.string().max(65536),message:z.string().min(1).max(160),
         sha:z.string().regex(/^[a-f0-9]{40}$/).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
@@ -736,9 +752,9 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_draft_pr',{
       title:'Open a draft PR for a NYX branch',
-      description:'Open a draft pull request from a nyx-prefixed branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
+      description:'Open a draft pull request from a nyx/* branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(1).max(100),title:z.string().min(1).max(200),
+        branch:z.string().min(5).max(100),title:z.string().min(1).max(200),
         body:z.string().max(10000).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch,title,body})=>this.safeTool(()=>
@@ -782,11 +798,19 @@ export class McpService {
       }, async ({provider,name}) => this.safeTool(() =>
         this.connections.createStorage(this.connectorOwner(),provider,name)));
 
+      server.registerTool('nyx_storage_connection_rename', {
+        title:'Rename my own Google Drive or MEGA connection',
+        description:'Change this connection label only. Imported and OAuth connections behave identically. Credentials, provider identity, roots, and grants remain untouched.',
+        inputSchema:z.object({id:z.string().uuid(),name:z.string().min(1).max(80)}).strict(),
+        annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async({id,name})=>this.safeTool(()=>
+        this.connections.renameStorage(this.connectorOwner(),id,name)));
+
       server.registerTool('nyx_storage_connection_permissions', {
         title: 'Select storage connection capabilities',
-        description: 'Select read and, where explicitly enabled by server policy, MEGA move/trash permissions. Provider permissions remain independently enforced.',
+        description: 'Select separately authorized Google Drive write/move/trash or MEGA move/trash grants. Actual provider permissions and per-root grants are enforced.',
         inputSchema: z.object({id: z.string().uuid(),
-           capabilities: z.array(z.enum(['storage:list','storage:move','storage:delete'])).max(3)}),
+           capabilities: z.array(z.enum(['storage:list','storage:write','storage:move','storage:delete'])).max(4)}),
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
       }, async ({id,capabilities}) => this.safeTool(() =>
         this.connections.storagePermissions(this.connectorOwner(),id,capabilities)));
@@ -797,7 +821,7 @@ export class McpService {
         inputSchema: z.object({id:z.string().uuid(),resources:z.array(z.object({
           kind:z.enum(['drive','mega-root']),
           id:z.string().min(1).max(256),
-          capabilities:z.array(z.enum(['storage:list','storage:move','storage:delete'])).min(1).max(3),
+          capabilities:z.array(z.enum(['storage:list','storage:write','storage:move','storage:delete'])).min(1).max(4),
         }).strict()).max(10)}),
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
       }, async ({id,resources}) => this.safeTool(() =>
@@ -805,11 +829,11 @@ export class McpService {
 
       server.registerTool('nyx_storage_connection_begin_google', {
         title:'Authorize Google Drive for one NestNyx connection',
-        description:'Generate a ten-minute, owner-bound Google OAuth URL using PKCE and read-only Drive scope. Requires selected Drive folder ID. Sign in using Google; do not send tokens in chat.',
-        inputSchema:z.object({id:z.string().uuid(),folderId:z.string().regex(/^[A-Za-z0-9_-]{1,256}$/)}),
+        description:'Generate an owner-bound Google OAuth PKCE URL with explicit read or full-drive consent. Full access still requires per-root grants.',
+        inputSchema:z.object({id:z.string().uuid(),folderId:z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),access:z.enum(['read','read-write']).optional()}),
         annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
-      },async({id,folderId})=>this.safeTool(()=>
-        this.tenantGoogle.begin(this.connectorOwner(),id,folderId)));
+      },async({id,folderId,access})=>this.safeTool(()=>
+        this.tenantGoogle.begin(this.connectorOwner(),id,folderId,access||'read')));
 
       server.registerTool('nyx_storage_connection_begin_mega', {
         title:'Open a secure MEGA account sign-in form',
@@ -818,6 +842,38 @@ export class McpService {
         annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
       },async({id,rootPath})=>this.safeTool(()=>
         this.tenantMega.begin(this.connectorOwner(),id,rootPath)));
+
+      // Only a signed owner can obtain a short-lived first-party upload link.
+      // Never accept local Rclone credential bytes in MCP arguments.
+      if (process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true') {
+        server.registerTool('nyx_storage_connection_begin_import', {
+          title:'Import my local Rclone file via secure HTTPS',
+          description:'Owner-bound one-time HTTPS link for selecting one remote from a local Rclone file. Do not send file contents or secrets to ChatGPT.',
+          inputSchema:z.object({id:z.string().uuid()}).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+        },async({id})=>this.safeTool(()=>
+          this.tenantRcloneUpload.begin(this.connectorOwner(),id)));
+      }
+
+      if (process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true') {
+        server.registerTool('nyx_storage_connection_begin_import_all', {
+          title:'Import all my local Rclone connections',
+          description:'One-time owner-bound HTTPS file upload. Automatically import all supported Google Drive and MEGA remotes; no file contents or credentials in MCP. Existing connections are preserved.',
+          inputSchema:z.object({}).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+        },async()=>this.safeTool(()=>
+          this.tenantRcloneUpload.beginAll(this.connectorOwner())));
+      }
+
+      if (process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true') {
+        server.registerTool('nyx_storage_connection_finish_import', {
+          title:'Activate an already read-verified imported Rclone connection (read-only)',
+          description:'Only for a pending connection owned by the current OAuth identity after a successful, fresh and independently attested provider read. Atomically activates storage:list only.',
+          inputSchema:z.object({id:z.string().uuid()}).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+        },async({id})=>this.safeTool(()=>
+          this.tenantRclone.activateImportedReadOnly(this.connectorOwner(),id)));
+      }
 
       server.registerTool('nyx_storage_connection_test_pending', {
         title: 'Check pending connection connectivity',
@@ -878,6 +934,61 @@ export class McpService {
           this.tenantRclone.mutateMegaFile(this.connectorOwner(),id,rootId,
             operation,sourcePath,destinationPath)));
       }
+
+      if(process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true') {
+        server.registerTool('nyx_storage_google_verify_rw', {
+          title:'Verify existing imported Google Drive credentials for RW',
+          description:'Provider-side read-only tokeninfo and Drive account check. Upgrades provider-verified capabilities only when the stored active token really has full Drive scope. User-selected permissions are unchanged.',
+          inputSchema:z.object({id:z.string().uuid(),rootId:z.string().min(1).max(256)}).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+        },async({id,rootId})=>this.safeTool(()=>
+          this.tenantRclone.verifyExistingGoogleWriteGrant(this.connectorOwner(),id,rootId)));
+      }
+
+      if (process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED === 'true') {
+        server.registerTool('nyx_storage_google_file_mutate', {
+          title:'Rename, move, or trash one file in my verified Google Drive root',
+          description:'Owner-bound single-file rename, move or recoverable Trash. Requires verified full Drive OAuth scope and per-root grants. No permanent deletion.',
+          inputSchema:z.object({
+            id:z.string().uuid(),rootId:z.string().min(1).max(256),
+            operation:z.enum(['rename','move','trash']),
+            sourcePath:z.string().min(1).max(2048),
+            destinationPath:z.string().max(2048).optional(),
+          }).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+        },async({id,rootId,operation,sourcePath,destinationPath})=>this.safeTool(()=>
+          this.tenantRclone.mutateGoogleFile(this.connectorOwner(),id,rootId,
+            operation,sourcePath,destinationPath)));
+      }
+
+      if(process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true' ||
+         process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true') {
+        server.registerTool('nyx_storage_text_file_create', {
+          title:'Create a new UTF-8 text file in my verified cloud root',
+          description:'One bounded text file, without overwriting. Requires owner, verified provider, selected storage:write grant, root authorization, and provider RW permission. Does not provide binary uploads.',
+          inputSchema:z.object({
+            id:z.string().uuid(),provider:z.enum(['google-drive','mega']),
+            rootId:z.string().min(1).max(256),
+            path:z.string().min(1).max(2048),
+            content:z.string().max(65536),
+          }).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+        },async({id,provider,rootId,path,content})=>this.safeTool(()=>
+          this.tenantRclone.createTenantTextFile(this.connectorOwner(),id,provider,rootId,path,content)));
+      }
+
+      server.registerTool('nyx_storage_connection_select_best', {
+        title:'Select my strongest verified cloud connection for an operation',
+        description:'Read-only choice among active connections within the same verified OAuth owner, physical provider identity and exact authorized root. Does not transfer credentials or execute the operation.',
+        inputSchema:z.object({
+          id:z.string().uuid(),rootId:z.string().min(1).max(256),
+          operation:z.enum(['storage:list','storage:write','storage:move','storage:delete']),
+          path:z.string().max(2048).optional(),
+        }).strict(),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async({id,rootId,operation,path})=>this.safeTool(()=>
+        this.tenantRclone.selectBestAuthorizedConnection(
+          this.connectorOwner(),id,rootId,operation,path)));
 
       server.registerTool('nyx_storage_connection_revoke', {
         title:'Revoke my MEGA or Google Drive connection',

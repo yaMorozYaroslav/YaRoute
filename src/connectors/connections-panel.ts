@@ -9,8 +9,8 @@ const connectionsIsDev = process.env.NYX_DEPLOYMENT_MODE === 'public' ||
   process.env.NYX_SERVICE_NAME === 'DevProNestNyx' ||
   process.env.NYX_PUBLIC_URL === 'https://dev-nest-nyx-0df80c227630.herokuapp.com';
 const connectionsKind = connectionsIsDev ? 'dev' : 'pro';
-export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v14.html';
-export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v14.html';
+export const CONNECTIONS_PANEL_URI = 'ui://nestnyx/' + connectionsKind + '/connections/v15.html';
+export const CONNECTIONS_HOME_URI = 'ui://nestnyx/' + connectionsKind + '/home/v15.html';
 export const CONNECTIONS_PANEL_LABEL = connectionsIsDev ? '🔵 NestNyx Dev · Connections' : '🟣 NestNyx Pro · Connections';
 export const CONNECTIONS_HOME_LABEL = connectionsIsDev ? '🏠 NestNyx Dev · Home' : '🏠 NestNyx Pro · Home';
 // Public users connect only their own storage; never show the operator's
@@ -19,7 +19,9 @@ const publicTenantStorage = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
   process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
   process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true';
 const publicMegaOnly = publicTenantStorage && process.env.NYX_PUBLIC_TENANT_MEGA_ONLY === 'true';
+const rcloneFileImportEnabled = publicTenantStorage && process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true';
 const megaMutationEnabled = publicTenantStorage && process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true';
+const googleMutationEnabled = publicTenantStorage && process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED === 'true';
 const ownerLinkEnabled = publicTenantStorage && process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true';
 const privateBrokerEnabled = ownerLinkEnabled && process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true';
 const iconOrigin = process.env.NYX_PUBLIC_URL?.startsWith('https://')
@@ -114,6 +116,11 @@ body{max-width:900px;padding:clamp(10px,2.8vw,22px);line-height:1.45}
 #nyx-account-bar label{font-size:12px}
 #nyx-account-bar select,#nyx-google-shortcut{width:100%;box-sizing:border-box;border-radius:9px;min-height:38px}
 #nyx-google-shortcut{border-color:var(--nyx-accent)}
+#nyx-import-launch{border:2px solid var(--nyx-accent);font-weight:750;min-height:46px;flex:none}
+#nyx-import-banner[hidden]{display:none}
+#nyx-import-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+#nyx-import-banner p{margin:0;max-width:550px}
+#nyx-import-banner strong{display:block;margin-bottom:4px}
 .nyx-provider-group{background:var(--nyx-surface);border-color:var(--nyx-border);overflow:hidden}
 .nyx-provider-group[open]>summary{border-bottom:1px solid var(--nyx-border)}
 .nyx-provider-list .card{border:1px solid var(--nyx-border);border-radius:11px;padding:12px;margin:9px 0;background:var(--nyx-surface)}
@@ -135,7 +142,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
  <div class="session-person-main"><div class="session-label" id="nyx-session-user">Checking signed-in account…</div>
  <div class="session-reference" id="nyx-session-reference">OAuth verification pending</div></div></div>
  <div class="session-actions"><button class="session-switch" id="nyx-add-google-login" type="button" aria-expanded="false" aria-controls="nyx-login-add-help">+ Add Google account</button>
- <button class="session-switch" id="nyx-view-both-google" type="button">View both Google accounts</button>
+ <button class="session-switch" id="nyx-view-both-google" type="button">Switch Primary / Personal view</button>
  <button class="session-switch" id="nyx-switch-login" type="button" aria-expanded="false" aria-controls="nyx-switch-help">About account views</button></div>
  <div id="nyx-login-add-help" hidden role="region" aria-label="Add a Google login">
  <strong>Keep your existing account connected.</strong>
@@ -151,17 +158,23 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
  <p class="account-detail" id="nyx-active-identity">No active cloud account selected.</p>
  </div>
  <div class="account-picker">
- <label for="nyx-account-select">Selected cloud account</label>
+ <label for="nyx-account-select">Storage connection within this Google login</label>
  <select id="nyx-account-select" aria-label="Switch between your authorized storage accounts"><option value="">No active account</option></select>
+ <p class="muted">This selector is not an OAuth account switch. Use the Primary / Personal view above to compare both connected Google profiles.</p>
  <button id="nyx-google-shortcut" type="button" ${publicMegaOnly ? 'disabled title="Google Drive is disabled in MEGA-only mode"' : ''}>Connect Google Drive</button>
  </div>
 </div>
+<section id="nyx-import-banner" ${rcloneFileImportEnabled ? '' : 'hidden'} aria-label="Import local Rclone configuration">
+ <div><strong>📂 Import all my Rclone remotes</strong><p class="muted">Choose one local rclone.conf file. NestNyx stages supported Google Drive and MEGA connections for the Google login shown above. No credentials go through ChatGPT messages.</p></div>
+ <button id="nyx-import-launch" type="button">Choose rclone.conf</button>
+</section>
 <section id="nyx-add-menu" hidden aria-label="Add a connection">
 <h2>Add a connection</h2>
 <div id="nyx-provider-choices" role="group" aria-label="Choose a provider">
 <button type="button" data-open="nyx-google-group" ${publicMegaOnly ? 'hidden' : ''}>🌈 Google Drive<small>Connect your own Google Drive</small></button>
 <button type="button" data-open="nyx-mega-group">🗄️ MEGA<small>Connect your own MEGA account</small></button>
 <button type="button" data-open="nyx-rclone-group" ${publicTenantStorage ? 'hidden' : ''}>🧰 Existing Rclone<small>View private configuration metadata</small></button>
+<button type="button" id="nyx-import-all" ${rcloneFileImportEnabled ? '' : 'hidden'}>📂 Import Rclone file<small>Automatically connect all supported remotes</small></button>
 <button type="button" data-open="nyx-other-group" data-github="true">🐙 GitHub<small>Create a named GitHub connection</small></button>
 </div>
 <p class="muted">${publicTenantStorage ? (publicMegaOnly ? (megaMutationEnabled ? 'Sign in with Google to NestNyx first. Your MEGA starts with listing access; you can separately request move/rename and delete-to-trash permissions and reauthorize credentials. Live writes require a disposable-file test.' : 'Sign in with Google to NestNyx first, then connect your own read-only MEGA account.') + ' The operator\'s private Rclone is inaccessible to public tenants.' : (megaMutationEnabled ? 'Connect your own Google Drive (read-only pilot) or MEGA (read-only initially, with separately gated move/trash permissions).' : 'Connect your own read-only Google Drive or MEGA storage.') + ' Other users and private legacy remotes remain inaccessible.') : 'Multi-user storage onboarding requires a separate isolated public deployment.'} Never enter credentials in ChatGPT.</p>
@@ -197,7 +210,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 'use strict';
 const publicTenantStorage=${JSON.stringify(publicTenantStorage)};
 const publicMegaOnly=${JSON.stringify(publicMegaOnly)};
+const rcloneFileImportEnabled=${JSON.stringify(rcloneFileImportEnabled)};
 const megaMutationEnabled=${JSON.stringify(megaMutationEnabled)};
+const googleMutationEnabled=${JSON.stringify(googleMutationEnabled)};
 const ownerLinkEnabled=${JSON.stringify(ownerLinkEnabled)};
 const privateBrokerEnabled=${JSON.stringify(privateBrokerEnabled)};
 const root=document.getElementById('connection-list');
@@ -440,11 +455,35 @@ function renderTenant(connections){
    heading.append(el('strong',item.displayName));
    const state=el('span',item.status==='active'?'● Connected':'○ Pending');
    state.className='badge';heading.append(state);box.append(heading);
+   // Both local Rclone imports and OAuth enrollments use the same metadata controls.
+   const naming=el('div');naming.className='row';
+   const labelInput=input(item.displayName);labelInput.maxLength=80;
+   labelInput.setAttribute('aria-label','Connection display name');
+   naming.append(el('span','Display name'),labelInput,button('Save name',async()=>{
+     const updated=await call('nyx_storage_connection_rename',{
+       id:item.id,name:labelInput.value.trim()});
+     if(updated?.id!==item.id)throw Error('Connection rename was not verified');
+     show('Connection renamed; existing credentials and permissions unchanged.');
+     await refreshTenantStorage();
+   }));
+   box.append(naming);
+
    const detail=el('p',item.provider==='mega'&&item.status==='active'?
      'Verified MEGA identity: '+item.externalAccountId:
      item.provider==='google-drive'&&item.status==='active'?
      'Verified Google account (private subject identifier)':'Authorization required');
    detail.className='nyx-connection-detail';box.append(detail);
+   if(item.status==='pending' && rcloneFileImportEnabled){
+     box.append(button('Verify & activate imported connection (read-only)',async()=>{
+       const proof=await call('nyx_storage_connection_test_pending',{id:item.id});
+       if(proof!=='verified')throw Error('Read-only provider verification failed. Keep this connection pending and retry when authorization works.');
+       const result=await call('nyx_storage_connection_finish_import',{id:item.id});
+       if(result?.status!=='active'||result?.connectionId!==item.id)
+         throw Error('No activation receipt. Leave connection pending.');
+       show('Verified and activated '+item.displayName+' with storage:list only.');
+       await refreshTenantStorage();
+     }));
+   }
    if(item.status==='active')box.append(button(
      item.id===selectedTenantAccount?'✓ Selected account':'Use this account',async()=>{
        selectedTenantAccount=item.id;renderTenant(connections);
@@ -458,6 +497,20 @@ function renderTenant(connections){
    root.readOnly=item.status==='active';
    const line=el('div');line.className='row';
    line.append(el('span','Allowed root'),root);box.append(line);
+   if(item.status==='active')box.append(button('Use fullest authorized connection',async()=>{
+     const selectedRoot=(item.resources||[]).find(x=>x.kind===kind)?.id;
+     if(!selectedRoot)throw Error('No verified storage root selected');
+     const result=await call('nyx_storage_connection_select_best',{
+       id:item.id,rootId:selectedRoot,operation:'storage:list',
+     });
+     if(!result?.connectionId || !connections.some(x=>
+       x.id===result.connectionId&&x.status==='active'))
+       throw Error('No verified same-owner selection returned');
+     selectedTenantAccount=result.connectionId;
+     renderTenant(connections);
+     show('Selected strongest eligible '+result.displayName+
+       ' for browsing. Mutations still require their own explicit grants.');
+   }));
    const activeRoot=(item.resources||[]).find(x=>x.kind===kind);
    const hasReadList=item.status==='active' &&
      (item.capabilities||[]).includes('storage:list') &&
@@ -470,26 +523,47 @@ function renderTenant(connections){
    listCheck.checked=hasReadList;listCheck.disabled=true;
    scope.append(listCheck,el('span','Browse names (storage:list) — '+(hasReadList?'enabled':'not verified')));
    permissions.append(scope);
-   if(provider==='mega' && megaMutationEnabled && item.status==='active'){
+   if(((provider==='mega' && megaMutationEnabled) || (provider==='google-drive' && googleMutationEnabled)) && item.status==='active'){
      const toggles=[];
-     for(const [label,cap] of [['Move/rename files','storage:move'],
-       ['Delete files to MEGA rubbish bin','storage:delete']]){
+     for(const [label,cap] of [['Create new text files (no overwrite)','storage:write'],['Move/rename files','storage:move'],
+       [provider==='mega'?'Delete files to MEGA rubbish bin':'Delete to Google Drive Trash (recoverable)','storage:delete']]){
        const row=el('label');const check=el('input');check.type='checkbox';
        check.checked=(item.capabilities||[]).includes(cap) &&
          (activeRoot?.capabilities||[]).includes(cap);
        row.append(check,el('span',label));permissions.append(row);
        toggles.push({cap,check});
      }
-     permissions.append(el('p','These checkboxes store your requested MEGA permissions; the provider authorization and a real disposable-file write test are separate.'));
+     permissions.append(el('p','These controls select permissions for this exact root. The provider authorization and a real disposable-file write test are separate. Permanent deletion and binary uploads are not implemented.'));
      permissions.append(button('Save file permissions',async()=>{
        const caps=['storage:list',...toggles.filter(x=>x.check.checked).map(x=>x.cap)];
        await call('nyx_storage_connection_permissions',{id:item.id,capabilities:caps});
        await call('nyx_storage_connection_roots',{id:item.id,resources:[
-         {kind:'mega-root',id:root.value.trim(),capabilities:caps}]});
-       show('File permissions saved. Write access also requires MEGA reauthorization.');
+         {kind,id:root.value.trim(),capabilities:caps}]});
+       show('Requested permissions saved; provider reauthorization and a disposable-file test are still required.');
        await refreshTenantStorage();
      }));
-     if(!['storage:move','storage:delete'].every(cap=>
+     if(provider==='google-drive'){
+      permissions.append(button('Verify existing Drive RW token (no new consent)',async()=>{
+        const result=await call('nyx_storage_google_verify_rw',
+          {id:item.id,rootId:root.value.trim()});
+        if(result?.status!=='provider_scope_verified' || result?.connectionId!==item.id)
+          throw Error('Google Drive RW provider grant not independently verified');
+        show('Provider RW scope and Drive identity verified. Configure selected permissions separately; no file writes were attempted.');
+        await refreshTenantStorage();
+      }));
+    }
+    if(provider==='google-drive'){
+      permissions.append(button('Authorize Google Drive full access (RW)',async()=>{
+        const result=await call('nyx_storage_connection_begin_google',
+          {id:item.id,folderId:root.value.trim(),access:'read-write'});
+        const link=new URL(result.url);
+        if(link.protocol!=='https:' || link.origin!=='https://accounts.google.com')
+          throw Error('Untrusted Google OAuth URL');
+        await request('ui/open-link',{url:result.url});
+        show('Grant full Drive scope through Google. Then verify and activate the pending credential.');
+      }));
+    }
+    if(provider==='mega' && !['storage:move','storage:delete'].every(cap=>
          (item.providerCapabilities||[]).includes(cap))){
        permissions.append(button('Reauthorize MEGA for writes',async()=>{
          const result=await call('nyx_storage_connection_begin_mega',
@@ -501,12 +575,12 @@ function renderTenant(connections){
          show('Reauthorize securely, then finish activation here.');
        }));
      }
-     permissions.append(button('Finish pending MEGA reauthorization',async()=>{
+     permissions.append(button('Finish storage RW reauthorization',async()=>{
        const result=await call('nyx_storage_connection_test_pending',{id:item.id});
-       if(result!=='verified')throw Error('Pending MEGA credentials have not passed read probe');
+       if(result!=='verified')throw Error('Pending credentials have not passed read probe');
        const activated=await call('nyx_storage_connection_activate',{id:item.id});
-       if(activated.status!=='active')throw Error('MEGA activation failed');
-       show('MEGA login and read connectivity verified; requested permissions recorded. Rename/move/trash are not proven until tested on a disposable file.');
+       if(activated.status!=='active')throw Error('Storage activation failed');
+       show('Provider login and read connectivity verified; requested permissions recorded. Test on a disposable file before relying on writes.');
        await refreshTenantStorage();
      }));
    }else if(provider==='mega'){
@@ -559,6 +633,20 @@ function renderTenant(connections){
     await request('ui/open-link',{url:result.url});
     show(provider==='mega' ? 'Complete secure MEGA login, then return to verify read connectivity and activate. Write operations require a later disposable-file test.' : 'Complete Google Drive authorization and return for a read-only test.');
    }));
+   if(rcloneFileImportEnabled){
+     box.append(button('Import from local Rclone file',async()=>{
+       await configure();
+       const result=await call('nyx_storage_connection_begin_import',{id:item.id});
+       if(typeof result?.url!=='string')throw Error('Import link unavailable');
+       const link=new URL(result.url);
+       const base=${JSON.stringify(iconOrigin)};
+       if(!base||link.protocol!=='https:'||link.origin!==base||
+         link.pathname!=='/connect/rclone/import')
+         throw Error('Untrusted Rclone import link');
+       await request('ui/open-link',{url:result.url});
+       show('Select your local rclone.conf on the secure NestNyx HTTPS page. Import one remote only, then return to activate.');
+     }));
+   }
    box.append(button('Test new connection',async()=>{
     const result=await call('nyx_storage_connection_test_pending',{id:item.id});
     show('Read-only test: '+String(result));
@@ -648,6 +736,26 @@ function renderTenant(connections){
       'Browse and manage MEGA files' : 'Browse selected folder (read only)',browse));
     box.append(filePanel);
    }
+   // Explicit typed confirmation revokes only this NestNyx connection.
+   // It does not delete provider files, purge any provider trash, or revoke
+   // an OAuth session in the external provider.
+   const close=el('details');close.className='nyx-connection-revoke';
+   close.append(el('summary','Remove connection and encrypted credentials'));
+   close.append(el('p','This disconnects only this account entry in NestNyx. All cloud files remain untouched. For complete provider-side revocation, use the provider security page separately.'));
+   const exact='REMOVE CONNECTION '+item.displayName;
+   close.append(el('p','Type exactly: '+exact));
+   const typed=input('');typed.maxLength=128;
+   typed.setAttribute('aria-label','Confirm removal of '+item.displayName);
+   close.append(typed,button('Disconnect and erase saved credentials',async()=>{
+     if(typed.value!==exact)throw Error('Exact typed confirmation required; nothing removed');
+     const outcome=await call('nyx_storage_connection_revoke',{id:item.id});
+     if(outcome?.id!==item.id||outcome.status!=='revoked'||
+        outcome.localCredentialsDeleted!==true)
+       throw Error('Revocation not verified; check server audit status');
+     show('Connection revoked; stored NestNyx credentials erased. Provider files were not modified.');
+     await refreshTenantStorage();
+   }));
+   box.append(close);
    host.append(box);
   }
  }
@@ -900,6 +1008,26 @@ document.getElementById('nyx-google-shortcut').addEventListener('click',()=>{
  show('Create a Google Drive connection, enter its folder ID, and press Google OAuth sign-in. Consent opens securely in your browser.');
 });
 document.getElementById('refresh').addEventListener('click',()=>refresh().catch(e=>show(e.message,true)));
+async function beginRcloneImportAll(){
+ if(!rcloneFileImportEnabled)
+   return show('The Rclone import feature is not enabled on this deployment.',true);
+ const controls=['nyx-import-all','nyx-import-launch'].map(id=>document.getElementById(id));
+ controls.forEach(control=>{control.disabled=true;});
+ try{
+  const result=await call('nyx_storage_connection_begin_import_all',{});
+  if(typeof result?.url!=='string')throw Error('Batch import link unavailable. Reopen the Personal OAuth connection and refresh plugin tools.');
+  const link=new URL(result.url);
+  const base=${JSON.stringify(iconOrigin)};
+  if(!base||link.protocol!=='https:'||link.origin!==base||
+     link.pathname!=='/connect/rclone/import/batch')
+    throw Error('Untrusted Rclone batch import link');
+  await request('ui/open-link',{url:result.url});
+  show('Select your rclone.conf once. NestNyx will stage and test each supported Drive/MEGA remote for THIS authenticated Google owner.');
+ }catch(e){show(e.message||'Cannot begin batch import',true);}
+ finally{controls.forEach(control=>{control.disabled=false;});}
+}
+document.getElementById('nyx-import-all').addEventListener('click',beginRcloneImportAll);
+document.getElementById('nyx-import-launch').addEventListener('click',beginRcloneImportAll);
 document.getElementById('rclone-refresh').addEventListener('click',()=>refreshRclone());
 for(const [provider,label] of [['google-drive','google'],['mega','mega']]){
  document.getElementById('tenant-'+label+'-add').addEventListener('click',async()=>{

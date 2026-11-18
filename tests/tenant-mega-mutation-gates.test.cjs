@@ -41,7 +41,7 @@ test('Move/rename is confined to one exact root and does not overwrite',()=>{
 });
 test('Write grants require separate flag, user-selected capability, and provider reauthorization',()=>{
  assert.match(grant,/connection\.provider==='mega' &&\s*process\.env\.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'/);
- assert.match(grant,/\['storage:list','storage:move','storage:delete'\]/);
+ assert.match(grant,/\['storage:list','storage:write','storage:move','storage:delete'\]/);
  assert.match(ui,/Reauthorize MEGA for writes/);
  assert.match(ui,/Save file permissions/);
  assert.match(api,/process\.env\.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true'/);

@@ -6,6 +6,7 @@ import { ConnectorsService } from './connectors.service';
 import { TenantRcloneService } from './tenant-rclone.service';
 
 const DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+const DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const OPENID_SCOPES = 'openid email';
 type GoogleTokenResponse = {
   access_token?: string; refresh_token?: string; token_type?: string;
@@ -52,8 +53,9 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     this.pool = new Pool({connectionString: process.env.DATABASE_URL, max: 3});
     await this.pool.query('CREATE TABLE IF NOT EXISTS nyx_rclone_google_oauth_states_v2 (' +
       'digest text PRIMARY KEY, owner_id text NOT NULL, connection_id text NOT NULL,' +
-      'folder_id text NOT NULL, encrypted_verifier text NOT NULL,' +
+      'folder_id text NOT NULL, requested_access text NOT NULL DEFAULT \'read\', encrypted_verifier text NOT NULL,' +
       'expires_at timestamptz NOT NULL)');
+    await this.pool.query("ALTER TABLE nyx_rclone_google_oauth_states_v2 ADD COLUMN IF NOT EXISTS requested_access text NOT NULL DEFAULT 'read'");
   }
   async onModuleDestroy() { await this.pool?.end(); }
   private db() {
@@ -76,7 +78,7 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     return Buffer.concat([decipher.update(data.subarray(28)),decipher.final()]).toString('utf8');
   }
 
-  async begin(ownerId: string, connectionId: string, folderId: string) {
+  async begin(ownerId: string, connectionId: string, folderId: string, access: 'read'|'read-write' = 'read') {
     assertPublicTenantStorageProvider('google-drive');
     const {id} = oauthClient();
     const origin = oauthBase();
@@ -84,6 +86,7 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(folderId)) {
       throw new Error('TENANT_GOOGLE_ROOT_INVALID');
     }
+    if (access !== 'read' && access !== 'read-write') throw new Error('TENANT_GOOGLE_ACCESS_INVALID');
     const item = await this.connectors.getOwned(ownerId, connectionId);
     if (item.provider !== 'google-drive' || item.status === 'revoked' ||
         !(item.resources || []).some(r => r.kind === 'drive' && r.id === folderId &&
@@ -97,14 +100,14 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     await this.db().query('DELETE FROM nyx_rclone_google_oauth_states_v2 ' +
       'WHERE owner_id=$1 AND connection_id=$2', [ownerId,connectionId]);
     await this.db().query('INSERT INTO nyx_rclone_google_oauth_states_v2 ' +
-      '(digest,owner_id,connection_id,folder_id,encrypted_verifier,expires_at) ' +
-      "VALUES ($1,$2,$3,$4,$5,now()+interval '10 minutes')",
-      [digest,ownerId,connectionId,folderId,this.encryptVerifier(digest,verifier)]);
+      '(digest,owner_id,connection_id,folder_id,requested_access,encrypted_verifier,expires_at) ' +
+      "VALUES ($1,$2,$3,$4,$5,$6,now()+interval '10 minutes')",
+      [digest,ownerId,connectionId,folderId,access,this.encryptVerifier(digest,verifier)]);
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', id);
     url.searchParams.set('redirect_uri', origin + '/connect/google/callback');
-    url.searchParams.set('scope', DRIVE_READ_SCOPE + ' ' + OPENID_SCOPES);
+    url.searchParams.set('scope', (access === 'read-write' ? DRIVE_WRITE_SCOPE : DRIVE_READ_SCOPE) + ' ' + OPENID_SCOPES);
     url.searchParams.set('state', state);
     url.searchParams.set('access_type', 'offline');
     url.searchParams.set('prompt', 'consent');
@@ -112,7 +115,7 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     url.searchParams.set('code_challenge', challenge);
     url.searchParams.set('include_granted_scopes', 'false');
     return {url:url.toString(),expiresInSeconds:600,
-      message:'Open the Google authorization URL yourself. Only read-only Drive consent is requested; existing remotes are not changed.'};
+      message:access === 'read-write' ? 'Google will request full Drive access for this one isolated connection. The API still enforces selected per-root grants.' : 'Read-only Drive consent requested; existing remotes are not changed.'};
   }
 
   private async readSmallJson<T>(response: Response): Promise<T> {
@@ -133,11 +136,11 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     const {id,secret} = oauthClient();
     const digest = createHash('sha256').update(state).digest('hex');
     const row = await this.db().query('DELETE FROM nyx_rclone_google_oauth_states_v2 ' +
-      'WHERE digest=$1 AND expires_at>now() RETURNING owner_id,connection_id,folder_id,encrypted_verifier',
+      'WHERE digest=$1 AND expires_at>now() RETURNING owner_id,connection_id,folder_id,requested_access,encrypted_verifier',
       [digest]);
     if (row.rowCount !== 1) throw new Error('TENANT_GOOGLE_AUTH_STATE_EXPIRED');
     const {owner_id:ownerId,connection_id:connectionId,folder_id:folderId,
-      encrypted_verifier:encryptedVerifier} = row.rows[0];
+      requested_access:requestedAccess,encrypted_verifier:encryptedVerifier} = row.rows[0];
     const verifier = this.decryptVerifier(digest, encryptedVerifier);
     const item = await this.connectors.getOwned(ownerId, connectionId);
     if (item.provider !== 'google-drive' || item.status === 'revoked' ||
@@ -159,7 +162,7 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     const granted = new Set((token.scope || '').split(/\s+/));
     if (!token.access_token || !token.refresh_token || token.token_type?.toLowerCase() !== 'bearer' ||
         !token.expires_in || !Number.isFinite(token.expires_in) ||
-        !granted.has(DRIVE_READ_SCOPE) || !granted.has('openid')) {
+        !granted.has(requestedAccess === 'read-write' ? DRIVE_WRITE_SCOPE : DRIVE_READ_SCOPE) || !granted.has('openid')) {
       throw new Error('TENANT_GOOGLE_SCOPE_OR_REFRESH_TOKEN_REQUIRED');
     }
     const identityResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
@@ -169,12 +172,43 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     if (!account.sub || !/^[0-9A-Za-z_-]{1,256}$/.test(account.sub)) {
       throw new Error('TENANT_GOOGLE_ACCOUNT_UNVERIFIED');
     }
+    // Derive a physical Drive namespace from Google's live file metadata.
+    // Selecting another folder within the same Drive must not bypass dedupe.
+    const metadataResponse=await fetch(
+      'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(folderId)+
+      '?fields=id%2CdriveId%2CmimeType%2Ctrashed&supportsAllDrives=true', {
+      headers:{authorization:'Bearer '+token.access_token},
+      signal:AbortSignal.timeout(15000),
+    });
+    const folder=await this.readSmallJson<{
+      id?:string; driveId?:string; mimeType?:string; trashed?:boolean;
+    }>(metadataResponse);
+    if(!folder.id || typeof folder.id!=='string' || folder.trashed===true ||
+       folder.mimeType!=='application/vnd.google-apps.folder' ||
+       (folderId!=='root' && folder.id!==folderId) ||
+       (folder.driveId!==undefined &&
+         !/^[A-Za-z0-9_-]{1,256}$/.test(folder.driveId))) {
+      throw new Error('TENANT_GOOGLE_DRIVE_NAMESPACE_UNVERIFIED');
+    }
+    const verifiedDriveId=folder.driveId||null;
+    // Shared namespace identity between OAuth and local-Rclone imports.
+    // Both possess the Drive scope necessary to obtain permissionId.
+    const permissionResponse=await fetch(
+      'https://www.googleapis.com/drive/v3/about?fields=user(permissionId)',{
+      headers:{authorization:'Bearer '+token.access_token},
+      redirect:'error',signal:AbortSignal.timeout(15000),
+    });
+    const about=await this.readSmallJson<{user?:{permissionId?:string}}>(permissionResponse);
+    const permissionId=about.user?.permissionId;
+    if(!permissionId || !/^[A-Za-z0-9_-]{1,256}$/.test(permissionId))
+      throw new Error('TENANT_GOOGLE_PERMISSION_ID_UNVERIFIED');
+
     if (item.status === 'active' && item.externalAccountId !== account.sub) {
       throw new Error('TENANT_RCLONE_ACCOUNT_CHANGE_FORBIDDEN');
     }
     const expires = new Date(Date.now()+Math.floor(token.expires_in)*1000);
     const profile = {provider:'google-drive' as const,
-      rootFolderId:folderId,scope:'drive.readonly' as const, clientId:id,
+      rootFolderId:folderId,scope:(requestedAccess === 'read-write' ? 'drive' : 'drive.readonly') as 'drive'|'drive.readonly', clientId:id,
       clientSecret:secret,
       token:JSON.stringify({
         access_token:token.access_token,token_type:'Bearer',
@@ -183,7 +217,7 @@ export class TenantGoogleOAuthService implements OnModuleInit, OnModuleDestroy {
     };
     // Only callback-attested provider credentials reach the isolated pending V2 vault.
     await this.storage.stageCredential(ownerId,connectionId,profile);
-    await this.connectors.confirmStorageProvider(ownerId,connectionId,'google-drive',account.sub);
+    await this.connectors.confirmStorageProvider(ownerId,connectionId,'google-drive',account.sub,verifiedDriveId,permissionId,requestedAccess === 'read-write' && granted.has(DRIVE_WRITE_SCOPE));
     return {status:'pending_read_probe',provider:'google-drive'};
   }
 }
