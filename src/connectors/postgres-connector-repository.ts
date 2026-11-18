@@ -62,7 +62,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     return result.rows.map(row => this.parse(row));
   }
 
-  async save(connection: ConnectorConnection): Promise<void> {
+  async save(connection: ConnectorConnection, transaction?: Pick<Pool,'query'>): Promise<void> {
     const known = CONNECTOR_CAPABILITIES as readonly string[];
     if (!connection.id || !connection.ownerId || !connection.externalAccountId ||
       !['github','google-drive','gitlab','mega','heroku'].includes(connection.provider) ||
@@ -75,7 +75,7 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     }
     const displayName = validateConnectionName(connection.displayName);
     const resources = validateResourceRules(connection.provider,connection.resources ?? []);
-    const result = await this.pool.query(`INSERT INTO nyx_connector_connections
+    const result = await (transaction || this.pool).query(`INSERT INTO nyx_connector_connections
       (id,owner_id,display_name,provider,external_account_id,installation_id,capabilities,provider_capabilities,resources,status)
       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10)
       ON CONFLICT (id) DO UPDATE SET
