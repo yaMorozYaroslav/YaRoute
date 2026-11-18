@@ -125,9 +125,9 @@ test('GitHub MCP staging remains SHA-guarded and blocks default branch mutations
  const end=src.indexOf("server.registerTool('nyx_connection_github_issue_create'",start);
  assert.ok(start>=0 && end>start);
  const commands=src.slice(start,end);
- assert.match(commands,/branch:z\\.string\\(\\)\\.min\\(5\\)\\.max\\(100\\)/);
- assert.match(commands,/expectedTesterSha:z\\.string\\(\\)\\.regex/);
- assert.match(commands,/expectedHeadSha:z\\.string\\(\\)\\.regex/);
- assert.match(commands,/never modifies the source branch/i);
- assert.match(commands,/master\\/main\\/default/);
+ assert.ok(commands.includes('branch:z.string().min(5).max(100)'));
+ assert.ok(commands.includes('expectedTesterSha:z.string().regex'));
+ assert.ok(commands.includes('expectedHeadSha:z.string().regex'));
+ assert.ok(commands.includes('never modifies the source branch'));
+ assert.ok(commands.includes('master/main/default'));
 });
