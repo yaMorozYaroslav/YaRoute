@@ -585,6 +585,40 @@ function renderTenant(connections){
          show('Reauthorize securely, then finish activation here.');
        }));
      }
+     // Only test under this authenticated OAuth owner and the exact verified root.
+     // Never overwrite an existing object. The final step uses recoverable Trash.
+     const smokeCaps=['storage:list','storage:write','storage:move','storage:delete'];
+     const smokeReady=smokeCaps.every(cap=>
+       (item.capabilities||[]).includes(cap) &&
+       (item.providerCapabilities||[]).includes(cap) &&
+       (activeRoot?.capabilities||[]).includes(cap));
+     if(smokeReady)permissions.append(button('Run disposable RW test (create, rename, Trash)',async()=>{
+       const checkedRoot=root.value.trim();
+       if(!checkedRoot||checkedRoot!==activeRoot.id)
+         throw Error('Selected root changed; refresh this connection');
+       if(!confirm('Create one unique text file, rename it, then send only that file to recoverable Trash? No existing files will be modified.'))return;
+       const tag='nyx-rw-smoke-'+Date.now().toString(36)+'-'+Math.floor(Math.random()*1e9).toString(36);
+       const sourcePath=tag+'.txt',destinationPath=tag+'-renamed.txt';
+       const content='NestNyx disposable RW smoke test '+new Date().toISOString()+'\n';
+       const created=await call('nyx_storage_text_file_create',{
+         id:item.id,provider,rootId:checkedRoot,path:sourcePath,content});
+       if(created?.status!=='verified'||created?.path!==sourcePath||!created.id)
+         throw Error('RW create unverified; inspect '+sourcePath+' before retrying');
+       const mutation=provider==='mega'?'nyx_storage_mega_file_mutate':'nyx_storage_google_file_mutate';
+       const renamed=await call(mutation,{id:item.id,rootId:checkedRoot,
+         operation:'rename',sourcePath,destinationPath});
+       if(renamed?.status!=='verified'||!renamed.id)
+         throw Error('RW rename unverified; reconcile '+sourcePath+' and '+destinationPath);
+       const trashed=await call(mutation,{id:item.id,rootId:checkedRoot,
+         operation:'trash',sourcePath:destinationPath});
+       if(trashed?.status!=='verified'||!trashed.id)
+         throw Error('RW Trash unverified; inspect '+destinationPath);
+       show('RW PASS: '+item.displayName+' · create '+created.id+
+         ' · rename '+renamed.id+' · Trash '+trashed.id+
+         '. Only the disposable test file was trashed; Trash was not emptied.');
+     }));
+     else permissions.append(el('p',
+       'RW smoke test unavailable until storage:write, storage:move and storage:delete are selected for this root and independently provider-verified.'));
      permissions.append(button('Finish storage RW reauthorization',async()=>{
        const result=await call('nyx_storage_connection_test_pending',{id:item.id});
        if(result!=='verified')throw Error('Pending credentials have not passed read probe');

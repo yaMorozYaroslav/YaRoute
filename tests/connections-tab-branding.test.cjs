@@ -106,6 +106,24 @@ test('verified profile avatar and Google-account addition guide are usable and n
  assert.doesNotMatch(html,/localStorage|sessionStorage|document\.cookie/);
 });
 
+test('disposable RW smoke test requires selected root and provider authorization, and verifies receipts',()=>{
+ const html=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com').connectionsHtml;
+ assert.match(html,/Run disposable RW test \(create, rename, Trash\)/);
+ assert.match(html,/const smokeReady=smokeCaps\.every\(cap=>/);
+ assert.match(html,/\(item\.providerCapabilities\|\|\[\]\)\.includes\(cap\)/);
+ assert.match(html,/\(activeRoot\?\.capabilities\|\|\[\]\)\.includes\(cap\)/);
+ assert.match(html,/call\('nyx_storage_text_file_create'/);
+ assert.match(html,/nyx_storage_mega_file_mutate/);
+ assert.match(html,/nyx_storage_google_file_mutate/);
+ assert.match(html,/operation:'rename',sourcePath,destinationPath/);
+ assert.match(html,/operation:'trash',sourcePath:destinationPath/);
+ assert.match(html,/created\?\.status!=='verified'/);
+ assert.match(html,/renamed\?\.status!=='verified'/);
+ assert.match(html,/trashed\?\.status!=='verified'/);
+ assert.match(html,/No existing files will be modified/);
+ assert.doesNotMatch(html,/call\('nyx_storage_empty_trash'/);
+});
+
 test('combined account viewer is display-only and does not switch OAuth connections',()=>{
  const html=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com').connectionsHtml;
  assert.match(html,/Current Google login for this panel/);
