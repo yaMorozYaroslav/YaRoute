@@ -30,7 +30,7 @@ import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
-import { githubInstallationUrl } from '../connectors/github-app.service';
+import { GithubAppService, githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_HOME_URI, CONNECTIONS_HOME_HTML, CONNECTIONS_PANEL_LABEL, CONNECTIONS_HOME_LABEL, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 import { ACCOUNT_VIEW_URI, ACCOUNT_VIEW_HTML, signStorageView, verifyStorageView } from '../connectors/multi-account-view';
@@ -63,6 +63,7 @@ export class McpService {
     private readonly tenantGoogle: TenantGoogleOAuthService,
     private readonly tenantMega: TenantMegaEnrollmentService,
     private readonly github: GithubReadonlyConnector,
+    private readonly githubApp: GithubAppService,
     private readonly githubWrites: GithubWriteConnector,
     private readonly herokuBroker: HerokuBrokerClient,
     private readonly maintenance: RuntimeMaintenanceService,
@@ -624,6 +625,38 @@ export class McpService {
     },async({id,repo})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
 
+    server.registerTool('nyx_connection_github_grants_refresh',{
+      title:'Refresh verified GitHub App installation permissions',
+      description:'Recheck existing installation identity and actual GitHub provider grants. Does not change selected capabilities or repository boundaries.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubApp.refreshInstallationGrants(this.connectorOwner(),id))));
+
+    server.registerTool('nyx_connection_github_rulesets',{
+      title:'List GitHub repository protection rulesets',
+      description:'Read-only repository-scoped ruleset listing. Requires verified GitHub Administration read permission.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.rulesets(this.connectorOwner(),id,repo))));
+
+    server.registerTool('nyx_connection_github_ruleset',{
+      title:'Inspect an exact GitHub protection ruleset',
+      description:'Read-only ruleset detail by integer ID. No settings are changed.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),rulesetId:z.number().int().positive()}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,rulesetId})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.ruleset(this.connectorOwner(),id,repo,rulesetId))));
+
+    server.registerTool('nyx_connection_github_classic_protection',{
+      title:'Inspect classic protection for a GitHub branch',
+      description:'Read-only classic branch protection; an unprotected branch reports protected:false.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().min(1).max(120)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,branch})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.classicProtection(this.connectorOwner(),id,repo,branch))));
+
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
       description:'Read-only Actions API; owner, installation, selected repository and provider grants checked.',
@@ -649,19 +682,19 @@ export class McpService {
     // GitHub API writes are restricted to owner-selected repositories and
     // review-only nyx/* branches. No workflow dispatch, merges or hosting API.
     server.registerTool('nyx_connection_github_branch_create',{
-      title:'Create a NYX GitHub review branch',
-      description:'Create a nyx/* branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
+      title:'Create a non-default GitHub working branch (not main/master/default)',
+      description:'Create a nyx-prefixed branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100)}),
+        branch:z.string().min(1).max(100)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.githubWrites.createBranch(this.connectorOwner(),id,repo,branch))));
 
-    // SHA-guarded staging workflow: changes only a fresh nyx/* review branch.
+    // SHA-guarded staging workflow: changes only a fresh nyx-prefixed review branch.
     // Both base and target refuse master/main/default. No direct protected writes.
     server.registerTool('nyx_connection_github_branch_from_ref',{
       title:'Create a SHA-guarded review branch from tester or another non-default branch',
-      description:'Create a nyx/* branch from the exact verified tip of a non-protected, non-default branch. Requires expectedBaseSha; never modifies the source branch.',
+      description:'Create a nyx-prefixed branch from the exact verified tip of a non-protected, non-default branch. Requires expectedBaseSha; never modifies the source branch.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         expectedBaseSha:z.string().regex(/^[a-f0-9]{40}$/)}),
@@ -672,7 +705,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_stage_tester_from_dev',{
       title:'Stage reviewed Dev source files as a draft-ready tester review branch',
-      description:'Copy up to 40 exact reviewed src/docs/tests files from a selected YaRoute-Dev commit into a NEW nyx/* review branch based on a verified YaRoute tester SHA. Uses two owner-scoped GitHub App connections. Never updates tester/master, creates deployment files, merges, or deploys. Call draft_pr_to_ref separately after inspecting staged changes.',
+      description:'Copy up to 40 exact reviewed src/docs/tests files from a selected YaRoute-Dev commit into a NEW nyx-prefixed review branch based on a verified YaRoute tester SHA. Uses two owner-scoped GitHub App connections. Never updates tester/master, creates deployment files, merges, or deploys. Call draft_pr_to_ref separately after inspecting staged changes.',
       inputSchema:z.object({
         sourceConnectionId:z.string().uuid(),destinationConnectionId:z.string().uuid(),
         sourceRepo:z.string().min(3).max(200),destinationRepo:z.string().min(3).max(200),
@@ -692,7 +725,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_reviewed_pr_to_ref',{
       title:'Open an exact-SHA reviewed PR into tester or another unprotected non-default branch',
-      description:'Creates a non-draft PR for a nyx/* source with verified source/target SHAs. No protected master/main, no automatic merge or deployment. Use the separately gated merge_reviewed_nondefault tool after CI.',
+      description:'Creates a non-draft PR for a nyx-prefixed source with verified source/target SHAs. No protected master/main, no automatic merge or deployment. Use the separately gated merge_reviewed_nondefault tool after CI.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         title:z.string().min(1).max(200),body:z.string().max(10000).optional(),
@@ -706,7 +739,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_draft_pr_to_ref',{
       title:'Open an unmerged draft PR to tester or another non-default branch',
-      description:'Open a DRAFT PR from a nyx/* review branch to a non-default branch. Never merges, deploys, dispatches workflows or targets protected main/master.',
+      description:'Open a DRAFT PR from a nyx-prefixed review branch to a non-default branch. Never merges, deploys, dispatches workflows or targets protected main/master.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         title:z.string().min(1).max(200),body:z.string().max(10000).optional()}),
@@ -717,7 +750,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_merge_reviewed_nondefault',{
       title:'Merge a CI-verified NYX review PR into an unprotected non-default branch',
-      description:'Explicit merge only of same-repo nyx/* review PR. Checks precise head and base SHAs, protected status and completed successful CI. Cannot merge master/main/default and never invokes Heroku.',
+      description:'Explicit merge only of same-repo nyx-prefixed review PR. Checks precise head and base SHAs, protected status and completed successful CI. Cannot merge master/main/default and never invokes Heroku.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         prNumber:z.number().int().min(1).max(1000000),
         expectedHeadSha:z.string().regex(/^[a-f0-9]{40}$/),
@@ -741,9 +774,9 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_commit_file',{
       title:'Commit one file on a NYX review branch',
-      description:'Create or update one UTF-8 file on an existing nyx/* branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
+      description:'Create or update one UTF-8 file on an existing nyx-prefixed branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100),path:z.string().min(1).max(400),
+        branch:z.string().min(1).max(100),path:z.string().min(1).max(400),
         content:z.string().max(65536),message:z.string().min(1).max(160),
         sha:z.string().regex(/^[a-f0-9]{40}$/).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
@@ -752,9 +785,9 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_draft_pr',{
       title:'Open a draft PR for a NYX branch',
-      description:'Open a draft pull request from a nyx/* branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
+      description:'Open a draft pull request from a nyx-prefixed branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100),title:z.string().min(1).max(200),
+        branch:z.string().min(1).max(100),title:z.string().min(1).max(200),
         body:z.string().max(10000).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch,title,body})=>this.safeTool(()=>

@@ -2,9 +2,9 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 // A signed, short-lived, read-only summary lets ChatGPT collect snapshots
 // independently under each already-authenticated plugin connection and present
-// them in ONE tabbed UI. It is never a credential, delegation or mutation grant.
+// them in ONE account-dropdown UI. It is never a credential, delegation or mutation grant.
 export const ACCOUNT_VIEW_SCHEMA = 'nyx.account-view.snapshot.v1';
-export const ACCOUNT_VIEW_URI = 'ui://nestnyx/dev/connections/multi-v1.html';
+export const ACCOUNT_VIEW_URI = 'ui://nestnyx/dev/connections/multi-v3.html';
 export type StorageViewItem = {
   displayName: string;
   provider: 'mega' | 'google-drive';
@@ -98,9 +98,10 @@ export const ACCOUNT_VIEW_HTML=`<!doctype html><html lang="en"><head>
 *{box-sizing:border-box}body{margin:0;padding:16px;max-width:870px}
 h1{font-size:18px;margin:0 0 4px}.muted{opacity:.75;font-size:12px}
 header{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:16px}
-#tabs{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}
-button{font:inherit;min-height:42px;padding:9px 15px;border-radius:999px;border:1px solid #8888;background:transparent;color:inherit;cursor:pointer}
-button[aria-selected=true]{border:2px solid #008b79;background:#008b7922;font-weight:700}
+.account-switch{display:flex;flex-direction:column;gap:6px;margin:14px 0;max-width:420px}
+.account-switch label{font-weight:650}
+.account-switch select{font:inherit;min-height:44px;padding:9px 12px;border-radius:9px;border:1px solid #8888;background:Canvas;color:CanvasText;width:100%;cursor:pointer}
+.account-switch select:focus-visible{outline:2px solid #008b79;outline-offset:2px}
 .panel{border:1px solid #8887;border-radius:14px;padding:15px;min-height:130px}
 .row{border-bottom:1px solid #8884;padding:10px 0}.row:last-child{border:0}
 .row strong{font-size:14px;word-break:break-word}
@@ -108,22 +109,20 @@ button[aria-selected=true]{border:2px solid #008b79;background:#008b7922;font-we
 .note{margin-top:16px;font-size:12px;opacity:.78}
 </style></head><body>
 <header><div><h1>NestNyx Dev · Connections</h1>
-<div class="muted" id="summary">Primary and Personal · collecting authenticated connection summaries</div></div>🔐</header>
-<div id="tabs" role="tablist" aria-label="Choose which connected account to examine"></div>
+<div class="muted" id="summary">Collecting authenticated connection summaries</div></div>🔐</header>
+<div class="account-switch"><label for="nyx-account-switch">Switch account</label><select id="nyx-account-switch" aria-label="Switch account"><option value="">Loading connected accounts…</option></select></div>
 <section id="panel" class="panel" role="tabpanel" tabindex="0" aria-live="polite">
 Waiting for authenticated account summaries…</section>
-<p class="note">Switching tabs changes only what you see. It does not switch OAuth credentials, link accounts, grant access, or authorize file operations. Snapshots expire after 3 minutes. Use your authenticated account when requesting an action.</p>
+<p class="note">Switching the displayed account changes only what you see. It does not switch OAuth credentials, link accounts, grant access, or authorize file operations. Snapshots expire after 3 minutes. Use your authenticated account when requesting an action.</p>
 <script>
 (function(){
- const tabs=document.getElementById('tabs'),panel=document.getElementById('panel');
+ const picker=document.getElementById('nyx-account-switch'),panel=document.getElementById('panel');
  let records=[],current=0;
  const node=(tag,text,cls)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=String(text);return e;};
  function show(n){
    current=n;const v=records[n];if(!v)return;
-   for(const [i,button] of Array.from(tabs.children).entries()){
-     button.setAttribute('aria-selected',String(i===n));button.tabIndex=i===n?0:-1;
-   }
-   panel.replaceChildren(node('strong',v.label+' · '+v.display));
+   picker.value=String(n);
+   panel.replaceChildren(node('strong',v.display));
    panel.append(node('div','Verified OAuth owner reference: '+v.ownerHint,'meta'));
    if(!v.connections.length){panel.append(node('p','No storage connections enrolled for this Google identity.'));return;}
    for(const c of v.connections){
@@ -143,14 +142,18 @@ Waiting for authenticated account summaries…</section>
      typeof a.display==='string'&&a.display.length>0&&a.display.length<=120&&
      typeof a.ownerHint==='string'&&Array.isArray(a.connections));
    if(!safe)return;
-   records=payload.accounts;tabs.replaceChildren();
-   document.getElementById('summary').textContent=records.length+' authenticated accounts loaded together · view-only tabs';
+   records=payload.accounts;picker.replaceChildren();
+   document.getElementById('summary').textContent=records.length+' authenticated accounts · read-only display';
    records.forEach((v,i)=>{
-     const b=node('button',v.label+' ('+v.connections.length+')');b.type='button';b.setAttribute('role','tab');
-     b.addEventListener('click',()=>show(i));tabs.append(b);
+     const o=node('option',v.display+' ('+v.connections.length+')');o.value=String(i);picker.append(o);
    });
+   picker.disabled=false;
    show(0);
  }
+ picker.addEventListener('change',()=>{
+   const idx=Number(picker.value);
+   if(Number.isSafeInteger(idx) && idx>=0 && idx<records.length)show(idx);
+ });
  render(window.openai?.toolOutput);
  window.addEventListener('message',event=>{
   if(event.source!==window.parent || !event.data ||
