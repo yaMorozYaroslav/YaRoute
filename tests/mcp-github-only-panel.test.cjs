@@ -10,8 +10,8 @@ test('MCP Apps panel has versioned UI and ChatGPT metadata',()=>{
  assert.match(mcp,/server\.registerTool\('nyx_connections_panel'/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_PANEL_URI/);
  assert.match(panel,/ui:\/\/nestnyx\//);
- assert.match(panel,/\/connections\/v14\.html/);
- assert.match(panel,/\/home\/v14\.html/);
+ assert.match(panel,/\/connections\/v15\.html/);
+ assert.match(panel,/\/home\/v15\.html/);
  assert.match(mcp,/'openai\/outputTemplate':CONNECTIONS_HOME_URI/);
  assert.match(mcp,/text\/html;profile=mcp-app/);
 });
@@ -63,7 +63,7 @@ test('ChatGPT gets separate authenticated conversation-tab and global-sidebar la
  // The additional resource is a credential-free, read-only cross-profile snapshot viewer.
  assert.match(mcp,/registerResource\('NestNyx Multi-account Viewer',ACCOUNT_VIEW_URI/);
  // The fifth source registration is inside a loop covering v10-v13 Home/Connections aliases.
- assert.match(mcp,/for \(const version of \[10,11,12,13\]\)/);
+ assert.match(mcp,/for \(const version of \[10,11,12,13,14\]\)/);
  assert.match(mcp,/legacyConnectionsResourceUri='ui:\/\/nestnyx\/connections\/v9\.html'/);
  assert.match(mcp,/uri:legacyConnectionsResourceUri,mimeType:'text\/html;profile=mcp-app'/);
  assert.match(mcp,/text:CONNECTIONS_PANEL_HTML/);
