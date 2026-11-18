@@ -142,7 +142,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
  <div class="session-person-main"><div class="session-label" id="nyx-session-user">Checking signed-in account…</div>
  <div class="session-reference" id="nyx-session-reference">OAuth verification pending</div></div></div>
  <div class="session-actions"><button class="session-switch" id="nyx-add-google-login" type="button" aria-expanded="false" aria-controls="nyx-login-add-help">+ Add Google account</button>
- <button class="session-switch" id="nyx-view-both-google" type="button">Switch Primary / Personal view</button>
+ <label for="nyx-switch-account-select">Switch account</label>
+ <select class="session-switch" id="nyx-switch-account-select" aria-label="Switch account">
+ <option value="current">Current authenticated Google account</option>
+ <option value="all">View other connected Google accounts…</option>
+ </select>
  <button class="session-switch" id="nyx-switch-login" type="button" aria-expanded="false" aria-controls="nyx-switch-help">About account views</button></div>
  <div id="nyx-login-add-help" hidden role="region" aria-label="Add a Google login">
  <strong>Keep your existing account connected.</strong>
@@ -150,8 +154,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
  <p>ChatGPT owns the Google login picker. NestNyx cannot start that native picker inside an MCP Apps iframe. This panel's cloud-account selector only shows storage authorized to the current login.</p>
  </div>
  <div id="nyx-switch-help" hidden role="region" aria-label="How multi-account views work">
- <strong>Primary and Personal stay connected simultaneously.</strong>
- <p>View both Google accounts loads two separately authenticated, read-only connection summaries into ONE panel with Primary and Personal tabs. Selecting a tab changes the visible list only: no OAuth login switching and no reconnection.</p>
+ <strong>Both Google logins remain independently connected.</strong>
+ <p>Selecting another account opens one combined read-only viewer with an email dropdown populated from separately authenticated, signed account snapshots. This panel cannot silently switch Google OAuth identities; no reconnect is needed.</p>
  <p>ChatGPT requests a signed three-minute snapshot from each linked account. Every actual operation still uses the exact connection owner's OAuth credentials and server-enforced grants. No account inherits another account's private Rclone or MEGA credentials.</p>
  <p>Manage the two native logins under ChatGPT Settings → Plugins → DevNestNyx → Connected accounts.</p>
  </div>
@@ -160,7 +164,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
  <div class="account-picker">
  <label for="nyx-account-select">Storage connection within this Google login</label>
  <select id="nyx-account-select" aria-label="Switch between your authorized storage accounts"><option value="">No active account</option></select>
- <p class="muted">This selector is not an OAuth account switch. Use the Primary / Personal view above to compare both connected Google profiles.</p>
+ <p class="muted">This selector chooses one storage remote within the signed-in Google login. Use Switch account above to view all linked Google logins.</p>
  <button id="nyx-google-shortcut" type="button" ${publicMegaOnly ? 'disabled title="Google Drive is disabled in MEGA-only mode"' : ''}>Connect Google Drive</button>
  </div>
 </div>
@@ -382,6 +386,9 @@ async function refreshSessionIdentity(){
    const label=identity.email || identity.displayName ||
      (identity.provider+' · Account '+identity.accountHint);
    document.getElementById('nyx-session-user').textContent=label;
+   const loginPicker=document.getElementById('nyx-switch-account-select');
+   loginPicker.options[0].textContent=identity.email||label;
+   loginPicker.value='current';
    document.getElementById('nyx-session-account-state').textContent=
      (identity.email?'Verified Google login: ':'Google account reference: ')+
      (identity.email||identity.accountHint)+' · This login owns the connections below';
@@ -409,6 +416,9 @@ async function refreshSessionIdentity(){
    liveMegaWritesAvailable=identity.storageWriteAvailable===true;
  }catch{
    document.getElementById('nyx-session-user').textContent='Authenticated session';
+   const loginPicker=document.getElementById('nyx-switch-account-select');
+   loginPicker.options[0].textContent='Current authenticated Google account';
+   loginPicker.value='current';
    document.getElementById('nyx-session-account-state').textContent=
      'Google login information unavailable; this view remains owner-scoped';
    document.getElementById('nyx-session-reference').textContent=
@@ -985,17 +995,20 @@ document.getElementById('nyx-switch-login').addEventListener('click',()=>{
  const help=document.getElementById('nyx-switch-help');help.hidden=!help.hidden;
  document.getElementById('nyx-switch-login').setAttribute('aria-expanded',String(!help.hidden));
 });
-document.getElementById('nyx-view-both-google').addEventListener('click',async()=>{
- const prompt='Open ONE NestNyx Dev combined Connections panel showing BOTH of my already linked Google accounts, Primary and Personal. Use nyx_account_view_snapshot separately with each authenticated plugin connection, then call nyx_accounts_view with both signed snapshots. Render their storage connections as two selectable display-only tabs in the same viewer. Keep both sessions connected, never substitute or share credentials, and make NO file or permission changes.';
+document.getElementById('nyx-switch-account-select').addEventListener('change',async e=>{
+ if(e.target.value!=='all')return;
+ const prompt='Open ONE NestNyx Dev combined Connections viewer for both of my linked Google accounts. Call nyx_account_view_snapshot separately under each authenticated plugin connection, then nyx_accounts_view using both signed snapshots. Show one Switch account dropdown containing the authenticated Google email addresses, not Primary/Personal tabs. Keep both accounts connected and owner-isolated. Read-only view; no file, credential, or permission changes.';
  const send=window.openai?.sendFollowUpMessage;
- if(typeof send!=='function')
-   return show('Ask ChatGPT: '+prompt,true);
+ if(typeof send!=='function'){
+   show('Ask ChatGPT: '+prompt,true);
+   e.target.value='current';return;
+ }
  try{
    await send({prompt});
-   show('Requested ONE combined viewer with both connected Google accounts. File operations remain isolated by owner.');
+   show('Requested the combined Google-account email dropdown. This signed-in session remains unchanged.');
  }catch{
-   show('ChatGPT could not open the combined viewer from this panel. Ask in chat: '+prompt,true);
- }
+   show('Cannot open the combined viewer. Ask ChatGPT: '+prompt,true);
+ }finally{e.target.value='current';}
 });
 document.getElementById('nyx-account-select').addEventListener('change',e=>{
  selectedTenantAccount=e.target.value;refreshTenantStorage();
