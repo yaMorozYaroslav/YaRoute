@@ -35,3 +35,23 @@ test('Heroku planning separates read-only and approval-required actions',async()
  assert.equal((await planner.plan('oauth:u','h','app.deploy','example-app')).approvalRequired,true);
  await assert.rejects(()=>planner.plan('oauth:u','h','app.info','unrelated-app'),/CONNECTOR_RESOURCE_FORBIDDEN/);
 });
+
+test('owner wildcard grants only verified GitHub installation account repositories',async()=>{
+ const {validateResourceRules}=require('../dist/connectors/connector-registry');
+ const resources=validateResourceRules('github',[
+  {kind:'repository',id:'syntheticowner/*',capabilities:['contents:write']},
+ ]);
+ const r=registry({id:'wild',ownerId:'oauth:u',displayName:'GitHub',
+  provider:'github',externalAccountId:'syntheticowner',status:'active',
+  capabilities:['contents:write'],providerCapabilities:['contents:write'],resources});
+ const permitted=await r.requireResource('oauth:u','wild','contents:write',
+  {kind:'repository',id:'syntheticowner/future-project',branch:'tester'});
+ assert.equal(permitted.externalAccountId,'syntheticowner');
+ await assert.rejects(()=>r.requireResource('oauth:u','wild','contents:write',
+  {kind:'repository',id:'unrelatedowner/YaRoute',branch:'tester'}),/CONNECTOR_RESOURCE_FORBIDDEN/);
+ await assert.rejects(()=>r.requireResource('oauth:other','wild','contents:write',
+  {kind:'repository',id:'syntheticowner/future-project'}),/CONNECTOR_NOT_FOUND/);
+ assert.throws(()=>validateResourceRules('github',[
+  {kind:'repository',id:'*/*',capabilities:['contents:write']},
+ ]),/CONNECTOR_REPOSITORY_INVALID/);
+});

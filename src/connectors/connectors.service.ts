@@ -1,8 +1,10 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { assertPublicTenantGoogleOwnerId, assertPublicTenantStorageProvider } from './public-tenant-provider.policy';
 import { ConnectorRegistry } from './connector-registry';
 import { PostgresConnectorRepository } from './postgres-connector-repository';
+import { verifiedStorageNamespace } from './storage-identity.policy';
 
 /** Production connectors are intentionally read-only until risk-enforced writes exist. */
 export const ENABLED_PROVIDER_API_CAPABILITIES = {
@@ -37,6 +39,19 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       max: 5, connectionTimeoutMillis: 5000});
     this.repository = new PostgresConnectorRepository(this.pool);
     await this.repository.initialize();
+    // Independently verified provider identity is bound to each connection ID.
+    // Multiple connections for the same namespace are permitted by new schemas;
+    // existing Dev databases require the separately reviewed migration.
+    // Never infer identity from a display name or remote supplied by a caller.
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_storage_verified_identity_v1 (
+      connection_id text PRIMARY KEY,
+      owner_id text NOT NULL,
+      provider text NOT NULL CHECK (provider IN ('google-drive','mega')),
+      namespace text NOT NULL,
+      external_id text NOT NULL,
+      verified_at timestamptz NOT NULL DEFAULT now()
+    )`);
+    await this.pool.query('CREATE INDEX IF NOT EXISTS nyx_storage_verified_identity_owner_namespace_idx ON nyx_storage_verified_identity_v1 (owner_id, provider, namespace)');
     await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_connector_link_states (
       state_digest text PRIMARY KEY,
       owner_id text NOT NULL,
@@ -65,6 +80,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
   }
   private owner(value: string): string {
     if (!value || !/^oauth:[^\x00-\x1f]{1,500}$/.test(value)) throw new Error('CONNECTOR_OWNER_INVALID');
+    assertPublicTenantGoogleOwnerId(value);
     return value;
   }
   private async owned(ownerId: string, id: string): Promise<ConnectorConnection> {
@@ -175,6 +191,208 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       list: async owner => { this.db(); return this.repository!.list(owner); },
       save: async connection => { this.db(); return this.repository!.save(connection); },
     });
+  }
+
+
+  /** DEV opt-in storage metadata only: no raw credentials or provider grants. */
+  private assertTenantStorageMode() {
+    if (process.env.NYX_MULTIUSER_RCLONE_ENABLED !== 'true' ||
+        process.env.NYX_DEPLOYMENT_MODE !== 'public' ||
+        process.env.NYX_PUBLIC_CONNECTORS_ENABLED !== 'true') {
+      throw new Error('TENANT_RCLONE_NOT_ENABLED');
+    }
+  }
+
+  async listStorage(ownerId: string) {
+    this.assertTenantStorageMode();
+    return (await this.policy().list(this.owner(ownerId)))
+      .filter(c => c.provider === 'google-drive' || c.provider === 'mega')
+      .map(c => this.view(c));
+  }
+
+  async createStorage(ownerId: string, provider: 'google-drive' | 'mega', name: string) {
+    this.assertTenantStorageMode();
+    assertPublicTenantStorageProvider(provider);
+    this.owner(ownerId);
+    const existing = await this.policy().list(ownerId);
+    if (existing.filter(c => c.status !== 'revoked').length >= 12) {
+      throw new Error('CONNECTOR_ACCOUNT_LIMIT');
+    }
+    const connection: ConnectorConnection = {
+      id: randomUUID(), ownerId, provider, displayName: validateConnectionName(name),
+      externalAccountId: 'pending', capabilities: [], providerCapabilities: [],
+      resources: [], status: 'pending',
+    };
+    await this.repository!.save(connection);
+    return this.view(connection);
+  }
+
+  /** Rename either onboarding origin, never touch credentials, grants, or provider account. */
+  async renameStorage(ownerId: string, id: string, name: string) {
+    this.assertTenantStorageMode();
+    const connection=await this.owned(this.owner(ownerId),id);
+    assertPublicTenantStorageProvider(connection.provider);
+    if (!['google-drive','mega'].includes(connection.provider))
+      throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    const updated=await this.policy().rename(ownerId,id,name);
+    return this.view(updated);
+  }
+
+  async storagePermissions(ownerId: string, id: string, capabilities: ConnectorCapability[]) {
+    this.assertTenantStorageMode();
+    const connection = await this.owned(this.owner(ownerId), id);
+    assertPublicTenantStorageProvider(connection.provider);
+    if (!['google-drive','mega'].includes(connection.provider)) {
+      throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    }
+    const allowed=connection.provider==='mega' &&
+      process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
+      ? ['storage:list','storage:write','storage:move','storage:delete'] :
+      connection.provider==='google-drive' && process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true'
+      ? ['storage:list','storage:write','storage:move','storage:delete'] : ['storage:list'];
+    if (!Array.isArray(capabilities) ||
+        capabilities.some(c => !allowed.includes(c))) {
+      throw new Error('TENANT_RCLONE_READ_ONLY');
+    }
+    const updated = await this.policy().setPermissions(ownerId, id, capabilities);
+    return {...this.view(updated.connection), authorizationRequired: updated.authorizationRequired};
+  }
+
+  async storageResources(ownerId: string, id: string, resources: ConnectorResourceRule[]) {
+    this.assertTenantStorageMode();
+    const connection = await this.owned(this.owner(ownerId), id);
+    assertPublicTenantStorageProvider(connection.provider);
+    if (!['google-drive','mega'].includes(connection.provider)) {
+      throw new Error('CONNECTOR_PROVIDER_DISABLED');
+    }
+    // Initial MEGA pilot verifies one exact user-owned root per connection.
+    // Empty selection is permitted to revoke access, but not to enroll.
+    if (connection.provider === 'mega' && Array.isArray(resources) && resources.length > 1)
+      throw new Error('TENANT_MEGA_SINGLE_ROOT_REQUIRED');
+    const allowed=connection.provider==='mega' &&
+      process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
+      ? ['storage:list','storage:write','storage:move','storage:delete'] :
+      connection.provider==='google-drive' && process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true'
+      ? ['storage:list','storage:write','storage:move','storage:delete'] : ['storage:list'];
+    if (!Array.isArray(resources) || resources.length > 10 ||
+        resources.some(r => !r || r.kind !== (connection.provider === 'mega' ? 'mega-root' : 'drive') ||
+          !Array.isArray(r.capabilities) || r.capabilities.some(c => !allowed.includes(c)) ||
+          r.branches !== undefined || r.pathPrefix !== undefined ||
+          typeof r.id !== 'string' || r.id.length > 256 ||
+          !/^[A-Za-z0-9_.\\/-]+$/.test(r.id) || r.id.split('/').some(p => p === '..' || p === '.'))) {
+      throw new Error('TENANT_RCLONE_RESOURCE_INVALID');
+    }
+    const updated = await this.policy().setResources(ownerId, id, resources);
+    return this.view(updated);
+  }
+
+  /**
+   * Called ONLY by the isolated Rclone worker AFTER it successfully lists an
+   * imported pending connection and checks provider identity. Does NOT activate,
+   * grant permissions, overwrite a different namespace, or accept MCP claims.
+   */
+  async attestImportedPendingStorageIdentity(
+    ownerId:string,id:string,provider:'google-drive'|'mega',
+    verifiedAccountId:string,verifiedDriveId?:string|null,
+  ) {
+    this.assertTenantStorageMode();
+    const owner=this.owner(ownerId);
+    const connection=await this.owned(owner,id);
+    if(connection.status!=='pending'||connection.externalAccountId!=='pending'||
+       connection.provider!==provider)throw new Error('TENANT_IMPORT_NOT_PENDING');
+    if(provider==='google-drive' && verifiedDriveId===undefined)
+      throw new Error('TENANT_DRIVE_NAMESPACE_ATTESTATION_REQUIRED');
+    const namespace=verifiedStorageNamespace(provider,verifiedAccountId,verifiedDriveId);
+    const client=await this.db().connect();
+    try{
+      await client.query('BEGIN');
+      const claim=await client.query(
+        'INSERT INTO nyx_storage_verified_identity_v1 '+
+        '(connection_id,owner_id,provider,namespace,external_id) '+
+        'VALUES($1,$2,$3,$4,$5) '+
+        'ON CONFLICT(connection_id) DO UPDATE SET verified_at=now() '+
+        'WHERE nyx_storage_verified_identity_v1.owner_id=EXCLUDED.owner_id '+
+        'AND nyx_storage_verified_identity_v1.provider=EXCLUDED.provider '+
+        'AND nyx_storage_verified_identity_v1.namespace=EXCLUDED.namespace '+
+        'AND nyx_storage_verified_identity_v1.external_id=EXCLUDED.external_id '+
+        'RETURNING connection_id',
+        [id,owner,provider,namespace,verifiedAccountId]);
+      if(claim.rowCount!==1)throw new Error('TENANT_IMPORT_IDENTITY_CHANGED');
+      await client.query('COMMIT');
+      return {status:'provider_identity_attested' as const, connectionId:id,
+        provider,readGrantsAdded:false};
+    }catch(error){
+      await client.query('ROLLBACK').catch(()=>{});
+      if((error as {code?:string})?.code==='23505')
+        throw new Error('STORAGE_DUPLICATE_DRIVE_ALREADY_CONNECTED');
+      throw error;
+    }finally{client.release();}
+  }
+
+  /** Trusted server-side provider verification only; never an MCP input. */
+  async confirmStorageProvider(ownerId: string, id: string,
+                               provider: 'google-drive' | 'mega', verifiedAccountId: string,
+                               verifiedDriveId?: string | null, verifiedGooglePermissionId?:string,
+                               verifiedGoogleFullDrive = false) {
+    this.assertTenantStorageMode();
+    const connection = await this.owned(this.owner(ownerId), id);
+    assertPublicTenantStorageProvider(connection.provider);
+    if (connection.provider !== provider || connection.status === 'revoked' ||
+        !/^[A-Za-z0-9_.:@-]{1,256}$/.test(verifiedAccountId)) {
+      throw new Error('TENANT_RCLONE_PROVIDER_IDENTITY_INVALID');
+    }
+    if (connection.status === 'active' &&
+        connection.externalAccountId !== verifiedAccountId) {
+      throw new Error('TENANT_RCLONE_ACCOUNT_CHANGE_FORBIDDEN');
+    }
+    if (provider === 'google-drive' && verifiedDriveId === undefined)
+      throw new Error('TENANT_DRIVE_NAMESPACE_ATTESTATION_REQUIRED');
+    // Imported Rclone usually carries Drive scope but not OpenID identity.
+    // Drive about.user.permissionId is available to both OAuth and imported
+    // credentials, so the SAME Google Drive dedupe namespace is used.
+    if(provider==='google-drive' &&
+      (!verifiedGooglePermissionId ||
+       !/^[A-Za-z0-9_-]{1,256}$/.test(verifiedGooglePermissionId)))
+      throw new Error('TENANT_GOOGLE_PERMISSION_ID_REQUIRED');
+    const namespace=verifiedStorageNamespace(provider,
+      provider==='google-drive' ? verifiedGooglePermissionId! : verifiedAccountId,
+      verifiedDriveId);
+    const verified: ConnectorConnection = {
+      ...connection, externalAccountId: verifiedAccountId,
+      // Provider consent grants only metadata for read-only operations.
+      // User-enabled capabilities and chosen resources remain separate.
+      providerCapabilities: provider==='mega' &&
+        process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
+        ? ['storage:list','storage:write','storage:move','storage:delete'] :
+        provider==='google-drive' && verifiedGoogleFullDrive &&
+        process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true'
+        ? ['storage:list','storage:write','storage:move','storage:delete'] : ['storage:list'],
+      status: 'active',
+    };
+    const client=await this.db().connect();
+    try {
+      await client.query('BEGIN');
+      const claim=await client.query(
+        'INSERT INTO nyx_storage_verified_identity_v1 ' +
+        '(connection_id,owner_id,provider,namespace,external_id) ' +
+        'VALUES($1,$2,$3,$4,$5) ' +
+        'ON CONFLICT(connection_id) DO UPDATE SET ' +
+        'external_id=EXCLUDED.external_id,verified_at=now() ' +
+        'WHERE nyx_storage_verified_identity_v1.owner_id=EXCLUDED.owner_id ' +
+        'AND nyx_storage_verified_identity_v1.provider=EXCLUDED.provider ' +
+        'AND nyx_storage_verified_identity_v1.namespace=EXCLUDED.namespace ' +
+        'RETURNING connection_id',
+        [id,ownerId,provider,namespace,verifiedAccountId]);
+      if(claim.rowCount!==1)throw new Error('STORAGE_NAMESPACE_CHANGE_REQUIRES_NEW_CONNECTION');
+      await this.repository!.save(verified,client);
+      await client.query('COMMIT');
+    }catch(error) {
+      await client.query('ROLLBACK').catch(()=>{});
+      if((error as {code?:string})?.code==='23505')
+        throw new Error('STORAGE_DUPLICATE_DRIVE_ALREADY_CONNECTED');
+      throw error;
+    }finally{client.release();}
+    return this.view(verified);
   }
 
   async beginGithub(ownerId:string, id:string, installationId?:string) {

@@ -2,6 +2,63 @@ import { Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
+import { privateDevSingleGoogleOwnerAllowed, privateSingleGoogleOwnerAllowed } from './private-dev-google-login.policy';
+import { assertPublicTenantGoogleSubject } from '../connectors/public-tenant-provider.policy';
+
+/** A temporary issuer/JWKS failure is not evidence that the user's grant expired. */
+class SigningKeysTemporarilyUnavailable extends Error {
+  constructor() {
+    super('Signing keys temporarily unavailable');
+    this.name = 'SigningKeysTemporarilyUnavailable';
+  }
+}
+
+function isTemporaryJwksFailure(error: Error): boolean {
+  // jwks-rsa and Node HTTP clients can wrap the original network error in
+  // cause/response objects. Inspect only structured error metadata: matching
+  // arbitrary message text could misclassify an unknown signing key as an outage.
+  const temporaryCodes = new Set([
+    'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ECONNRESET', 'ECONNREFUSED',
+    'EAI_AGAIN', 'ENOTFOUND', 'ECONNABORTED',
+    'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET',
+  ]);
+  const seen = new Set<object>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth++) {
+    if (!current || typeof current !== 'object' || seen.has(current)) return false;
+    seen.add(current);
+    const candidate = current as {
+      name?: unknown; code?: unknown; statusCode?: unknown; status?: unknown;
+      response?: { status?: unknown }; cause?: unknown;
+    };
+    const status = typeof candidate.statusCode === 'number' ? candidate.statusCode
+      : typeof candidate.status === 'number' ? candidate.status
+      : candidate.response?.status;
+    if (typeof status === 'number' && (status === 429 ||
+        (status >= 500 && status <= 599))) return true;
+    if (candidate.name === 'JwksRateLimitError' ||
+        candidate.name === 'TimeoutError' || candidate.name === 'AbortError') {
+      return true;
+    }
+    if (typeof candidate.code === 'string' && temporaryCodes.has(candidate.code)) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+// A trusted issuer-signed profile claim may contain a Google avatar URL.
+// Never accept a caller-provided URL or arbitrary third-party image host.
+export function verifiedGooglePictureUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 1600) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'lh3.googleusercontent.com' &&
+      !url.port && !url.username && !url.password && !url.search && !url.hash
+      ? url.href : null;
+  } catch { return null; }
+}
 
 @Injectable()
 export class McpAuthService {
@@ -16,7 +73,7 @@ export class McpAuthService {
       authorization_servers: [issuer],
       scopes_supported: this.scopes(),
       bearer_methods_supported: ['header'],
-      resource_name: 'NestNyx MCP',
+      resource_name: `${process.env.NYX_SERVICE_NAME?.trim() || 'NestNyx'} MCP`,
     };
   }
 
@@ -56,13 +113,94 @@ export class McpAuthService {
       // Rclone, CLI, or private handoff tools. Keep strict allowlist in private mode.
       const connectorMode = process.env.NYX_DEPLOYMENT_MODE === 'public' &&
         process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true';
+      // Only trusted issuer-signed Google OAuth logins can reach public MEGA
+      // in the configured MEGA-only rollout. Do not accept a client-supplied
+      // email or subject argument as proof of the Google login.
+      if (connectorMode) {
+        try {
+          assertPublicTenantGoogleSubject(payload.sub);
+        } catch {
+          res.status(403).json({
+            error: 'access_denied',
+            error_description: 'Sign in with Google before connecting MEGA',
+          });
+          return false;
+        }
+      }
       if (!connectorMode && !allowedSubjects.has(payload.sub)) {
         res.status(403).json({ error: 'access_denied', error_description: 'Private NYX instance: user not authorized' });
         return false;
       }
+      // General private-instance hardening, separately opt-in on Pro. Reject
+      // missing, duplicate or non-Google owner subjects before any legacy tool
+      // can access process-wide Rclone credentials. Never infer email from sub.
+      if (!connectorMode &&
+          process.env.NYX_PRIVATE_SINGLE_GOOGLE_OWNER === 'true' &&
+          !privateSingleGoogleOwnerAllowed(payload, process.env)) {
+        res.status(403).json({
+          error: 'access_denied',
+          error_description: 'Private Google owner verification required',
+        });
+        return false;
+      }
+      // Opt-in Dev-only second gate: restrict the legacy private Rclone tools
+      // to ONE operator-approved Google-social OAuth subject. Identity claims
+      // are read only from the already signature-verified MCP JWT, never from
+      // request fields. The Dev operator must separately verify that this
+      // subject belongs to the intended Google account before enabling it.
+      if (!connectorMode &&
+          process.env.NYX_PRIVATE_DEV_SINGLE_GOOGLE_OWNER === 'true' &&
+          !privateDevSingleGoogleOwnerAllowed(payload, process.env)) {
+        res.status(403).json({
+          error: 'access_denied',
+          error_description: 'Private Dev Google owner verification required',
+        });
+        return false;
+      }
+      // Display claims are trusted ONLY when signed by the configured issuer.
+      // An account's Google email may be absent from an OAuth access token.
+      // Never accept a client-supplied email, and never treat it as the owner key.
+      // Auth0 access tokens target the NestNyx API. Social OIDC display claims
+      // are commonly omitted unless a Post-Login Action provides an optional,
+      // namespaced signed profile object. The claim key is configured by the
+      // operator, never by model/user-supplied tool arguments.
+      const profileClaimKey=process.env.NYX_OAUTH_PROFILE_CLAIM?.trim();
+      const profileClaim=profileClaimKey &&
+        /^https:\/\/[a-z0-9.-]+\/[a-z0-9_/-]+$/i.test(profileClaimKey)
+          ? payload[profileClaimKey] : undefined;
+      const profile=profileClaim && typeof profileClaim==='object' &&
+        !Array.isArray(profileClaim) ? profileClaim as Record<string,unknown> : null;
+      const displayEmail=payload.email_verified===true ? payload.email
+        : profile?.email_verified===true ? profile?.email : null;
+      const verifiedEmail=typeof displayEmail==='string' &&
+        /^[^\s@\x00-\x1f]{1,100}@[^\s@\x00-\x1f]{1,150}$/.test(displayEmail)
+        ? displayEmail : null;
+      const displayName=typeof payload.name==='string' ? payload.name : profile?.name;
+      res.locals.nyxVerifiedEmail=verifiedEmail;
+      res.locals.nyxDisplayName=verifiedEmail && typeof displayName==='string' &&
+        displayName.length<=120 && !/[\x00-\x1f\x7f]/.test(displayName)
+          ? displayName : null;
+      // Only a Google-social signed identity can provide its Google photo.
+      // No uploaded URL, remote API credential, or client-selected tenant may
+      // override these trusted, display-only claims.
+      res.locals.nyxProfilePicture = payload.sub.startsWith('google-oauth2|')
+        ? verifiedGooglePictureUrl(payload.picture) ||
+          verifiedGooglePictureUrl(profile?.picture) : null;
       res.locals.nyxSubject = payload.sub;
       return true;
     } catch (error) {
+      if (error instanceof SigningKeysTemporarilyUnavailable) {
+        // Do not issue WWW-Authenticate here: this is an issuer outage, not a
+        // revoked or invalid user grant. Fail closed and let the client retry.
+        console.warn('[MCP OAuth] temporary signing-key lookup failure');
+        res.setHeader('Retry-After', '15');
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(503).json({
+          error: 'temporarily_unavailable',
+          error_description: 'Authentication provider temporarily unavailable; retry later',
+        });
+        return false;
+      }
       console.error(
         '[MCP OAuth] verification failed:',
         error instanceof Error ? `${error.name}: ${error.message}` : String(error),
@@ -83,6 +221,7 @@ export class McpAuthService {
     const client = this.jwks(issuer);
 
     return new Promise((resolve, reject) => {
+      let temporaryKeyLookupFailure = false;
       jwt.verify(
         token,
         (header, callback) => {
@@ -92,6 +231,9 @@ export class McpAuthService {
           }
           client.getSigningKey(header.kid, (error, key) => {
             if (error || !key) {
+              // jsonwebtoken wraps key-provider errors as JsonWebTokenError.
+              // Record the original classification before that wrapping.
+              if (error && isTemporaryJwksFailure(error)) temporaryKeyLookupFailure = true;
               callback(error || new Error('Signing key not found'));
               return;
             }
@@ -100,6 +242,10 @@ export class McpAuthService {
         },
         { issuer, audience, algorithms },
         (error, decoded) => {
+          if (temporaryKeyLookupFailure) {
+            reject(new SigningKeysTemporarilyUnavailable());
+            return;
+          }
           if (error || !decoded || typeof decoded === 'string') {
             reject(error || new Error('Invalid JWT payload'));
             return;
