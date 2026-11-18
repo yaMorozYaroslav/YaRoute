@@ -4,6 +4,7 @@ const path=require('node:path');
 
 const modulePath=require.resolve('../dist/connectors/connections-panel');
 const keys=['NYX_DEPLOYMENT_MODE','NYX_SERVICE_NAME','NYX_PUBLIC_URL',
+  'NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED',
   'NYX_PUBLIC_CONNECTORS_ENABLED','NYX_MULTIUSER_RCLONE_ENABLED'];
 function view(mode,service,url){
  const saved=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
@@ -13,6 +14,7 @@ function view(mode,service,url){
   process.env.NYX_PUBLIC_URL=url;
   process.env.NYX_PUBLIC_CONNECTORS_ENABLED=mode==='public'?'true':'false';
   process.env.NYX_MULTIUSER_RCLONE_ENABLED=mode==='public'?'true':'false';
+  process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED=mode==='public'?'true':'false';
   delete require.cache[modulePath];
   const panel=require(modulePath);
   return {
@@ -34,10 +36,10 @@ function view(mode,service,url){
 test('blue Dev pilot and purple private Pro get distinct branded MCP Apps resource IDs',()=>{
  const dev=view('public','NestNyx','https://dev-nest-nyx-0df80c227630.herokuapp.com');
  const pro=view('private','NestNyx','https://example.com');
- assert.match(dev.connectionsUri,/\/dev\/connections\/v14\.html$/);
- assert.match(pro.connectionsUri,/\/pro\/connections\/v14\.html$/);
- assert.match(dev.homeUri,/\/dev\/home\/v14\.html$/);
- assert.match(pro.homeUri,/\/pro\/home\/v14\.html$/);
+ assert.match(dev.connectionsUri,/\/dev\/connections\/v15\.html$/);
+ assert.match(pro.connectionsUri,/\/pro\/connections\/v15\.html$/);
+ assert.match(dev.homeUri,/\/dev\/home\/v15\.html$/);
+ assert.match(pro.homeUri,/\/pro\/home\/v15\.html$/);
  assert.notEqual(dev.connectionsUri,pro.connectionsUri);
  assert.notEqual(dev.connectionsUri,dev.homeUri);
  assert.notEqual(pro.connectionsUri,pro.homeUri);
@@ -111,12 +113,18 @@ test('combined account viewer is display-only and does not switch OAuth connecti
  assert.match(html,/Google account reference:/);
  assert.match(html,/This login owns the connections below/);
  assert.match(html,/id="nyx-view-both-google"/);
- assert.match(html,/View both Google accounts/);
+ assert.match(html,/Switch Primary \/ Personal view/);
  assert.match(html,/id="nyx-switch-login" type="button" aria-expanded="false" aria-controls="nyx-switch-help"/);
  assert.match(html,/id="nyx-switch-help" hidden/);
  assert.match(html,/Primary and Personal stay connected simultaneously/);
  assert.match(html,/signed three-minute snapshot from each linked account/);
  assert.match(html,/ONE combined viewer/);
+ assert.match(html,/id="nyx-import-banner"/);
+ assert.match(html,/id="nyx-import-launch"/);
+ assert.match(html,/Choose rclone\.conf/);
+ assert.match(html,/function beginRcloneImportAll\(/);
+ assert.match(html,/nyx_storage_connection_finish_import/);
+ assert.match(html,/Storage connection within this Google login/);
  assert.match(html,/nyx_account_view_snapshot/);
  assert.match(html,/nyx_accounts_view/);
  assert.match(html,/sendFollowUpMessage/);
