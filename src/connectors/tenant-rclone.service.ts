@@ -173,6 +173,11 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
       created_at timestamptz NOT NULL DEFAULT now(),
       completed_at timestamptz
     )`);
+    await this.pool.query("CREATE TABLE IF NOT EXISTS nyx_rclone_trash_cleanup_v1 ("+
+      "id uuid PRIMARY KEY, owner_id text NOT NULL, connection_id text NOT NULL, "+
+      "provider text NOT NULL CHECK (provider IN ('google-drive','mega')), "+
+      "root_id text NOT NULL, state text NOT NULL CHECK (state IN ('running','accepted','uncertain')), "+
+      "created_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz)");
     // Durable receipts: an interrupted operation remains "running" for reconciliation.
     await this.pool.query(`CREATE TABLE IF NOT EXISTS nyx_rclone_mega_mutations_v1 (
       id uuid PRIMARY KEY,
@@ -933,6 +938,112 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
   /** Create one bounded UTF-8 text file; never overwrites an existing object.
    * Binary/large uploads require a separate first-party upload implementation.
    */
+
+  /**
+   * Irreversible account-wide cleanup, never a folder-scoped delete.
+   * A preview requires the same owner/provider/root permission as execution.
+   * Caller may pass confirmed=true for an explicit authorized request; the UI asks by default.
+   * Google may process cleanup asynchronously: "accepted" never means Trash is empty.
+   */
+  async cleanupTenantTrash(ownerId:string,connectionId:string,
+      provider:TenantRcloneProvider,rootId:string,confirmed=false) {
+    if(process.env.NYX_DEPLOYMENT_MODE!=='public' ||
+       process.env.NYX_PUBLIC_TRASH_CLEANUP_ENABLED!=='true' ||
+       (provider==='mega' && process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED!=='true') ||
+       (provider==='google-drive' && process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED!=='true'))
+      throw new Error('TENANT_TRASH_CLEANUP_DISABLED');
+    if(provider!=='mega' && provider!=='google-drive')
+      throw new Error('TENANT_TRASH_PROVIDER_INVALID');
+    // Cleanup removes rubbish across the entire provider account, not just a subfolder.
+    if(rootId!==(provider==='mega'?'MEGA_ROOT':'root'))
+      throw new Error('TENANT_TRASH_ACCOUNT_ROOT_REQUIRED');
+    const kind=provider==='mega'?'mega-root':'drive';
+    const owned=await this.connectors.registryPolicy().requireResource(
+      ownerId,connectionId,'storage:delete',{kind,id:rootId,path:''});
+    if(owned.provider!==provider)throw new Error('TENANT_TRASH_PROVIDER_MISMATCH');
+    const target=await this.authorizedTarget(ownerId,connectionId,provider,rootId,'');
+    if(provider==='google-drive' &&
+      (target.profile.provider!=='google-drive' ||
+       target.profile.scope!=='drive' || target.profile.teamDriveId))
+      throw new Error('TENANT_TRASH_GOOGLE_FULL_ACCOUNT_SCOPE_REQUIRED');
+    if(provider==='mega' &&
+      (target.profile.provider!=='mega'||target.profile.verifiedRoot!=='MEGA_ROOT'))
+      throw new Error('TENANT_TRASH_MEGA_FULL_ACCOUNT_REQUIRED');
+    if(confirmed!==true)return {
+      status:'confirmation_required' as const, provider,rootId,
+      scope:'entire-provider-account' as const,irreversible:true,
+      itemCount:null,confirmationRecommended:true,
+      note:'This permanently empties all Trash for the provider account, including files outside the selected folder.'
+    };
+    const client=await this.db().connect();
+    let locked=false;
+    try {
+      const lock=await client.query(
+        'SELECT pg_try_advisory_lock(hashtext($1),hashtext($2)) AS acquired',
+        [ownerId,connectionId]);
+      if(lock.rows[0]?.acquired!==true)throw new Error('TENANT_TRASH_CLEANUP_BUSY');
+      locked=true;
+      const receiptId=randomUUID();
+      await client.query(
+        "INSERT INTO nyx_rclone_trash_cleanup_v1 "+
+        "(id,owner_id,connection_id,provider,root_id,state) "+
+        "VALUES($1,$2,$3,$4,$5,'running')",
+        [receiptId,ownerId,connectionId,provider,rootId]);
+      const dir=await fs.mkdtemp(path.join(os.tmpdir(),'nyx-tenant-cleanup-'));
+      const configFile=path.join(dir,'rclone.conf');
+      try {
+        await fs.chmod(dir,0o700);
+        await fs.writeFile(configFile,tenantRcloneConfig(target.profile),
+          {mode:0o600,flag:'wx'});
+        await new Promise<void>((resolve,reject)=>{
+          const child=spawn(this.binary,['--config',configFile,'--retries=1',
+            'cleanup','tenant:'],{
+            env:{PATH:process.env.PATH||'',HOME:dir,TMPDIR:dir,XDG_CONFIG_HOME:dir},
+            stdio:['ignore','ignore','ignore']
+          });
+          let settled=false;
+          const finish=(error?:Error)=>{
+            if(settled)return;
+            settled=true;clearTimeout(timer);
+            if(error)reject(error);else resolve();
+          };
+          const timer=setTimeout(()=>{
+            child.kill('SIGKILL');
+            finish(new Error('TENANT_TRASH_CLEANUP_TIMEOUT'));
+          },180000);
+          child.once('error',()=>finish(new Error('TENANT_TRASH_CLEANUP_FAILED')));
+          child.once('close',code=>finish(code===0?undefined:
+            new Error('TENANT_TRASH_CLEANUP_FAILED')));
+        });
+        if(target.profile.provider==='google-drive')
+          await this.persistActiveGoogleRefresh(ownerId,connectionId,
+            target.profile,target.packed,configFile);
+        await client.query(
+          "UPDATE nyx_rclone_trash_cleanup_v1 "+
+          "SET state='accepted',completed_at=now() "+
+          "WHERE id=$1 AND owner_id=$2 AND connection_id=$3",
+          [receiptId,ownerId,connectionId]);
+        return {id:receiptId,status:'accepted' as const,provider,rootId,
+          scope:'entire-provider-account' as const,irreversible:true,
+          providerCompletionUnverified:true};
+      } catch {
+        await client.query(
+          "UPDATE nyx_rclone_trash_cleanup_v1 "+
+          "SET state='uncertain',completed_at=now() "+
+          "WHERE id=$1 AND owner_id=$2 AND connection_id=$3",
+          [receiptId,ownerId,connectionId]);
+        throw new Error('TENANT_TRASH_CLEANUP_UNCERTAIN_RECONCILE');
+      } finally {
+        await fs.rm(dir,{recursive:true,force:true});
+      }
+    } finally {
+      if(locked)await client.query(
+        'SELECT pg_advisory_unlock(hashtext($1),hashtext($2))',
+        [ownerId,connectionId]).catch(()=>{});
+      client.release();
+    }
+  }
+
   async createTenantTextFile(ownerId:string,connectionId:string,
     provider:TenantRcloneProvider,rootId:string,relativePath:string,content:string) {
     const enabled=provider==='google-drive'

@@ -46,7 +46,7 @@ test('panel distinguishes requested per-root capability from verified provider c
  assert.match(panel,/Finish storage RW reauthorization/);
  assert.match(panel,/nyx_storage_connection_permissions/);
  assert.match(panel,/nyx_storage_connection_roots/);
- assert.match(panel,/permanent deletion and binary uploads are not implemented/i);
+ assert.match(panel,/permanent account-wide Trash cleanup is disabled unless separately enabled and confirmed/i);
 });
 
 
