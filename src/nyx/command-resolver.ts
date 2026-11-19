@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Cli, CommandRequest, requestSchema } from './runtime.schema';
 
-const modifierPattern = /^o([lg])([bnd])$/i;
+// Both spellings are defined by the verified Head CLI: oGN is command-local;
+// GNo is the chain-inherited spelling. For a single backend invocation they
+// resolve to the same scope/depth but must never be mistaken for Area targets.
+const localModifierPattern = /^o([lg])([bnd])$/i;
+const inheritedModifierPattern = /^([lg])([bnd])o$/i;
 const depthByCode = { b: 'basic', n: 'normal', d: 'deep' } as const;
 const codeByDepth = { basic: 'B', normal: 'N', deep: 'D' } as const;
 
@@ -30,7 +34,7 @@ export class NyxCommandResolver {
         targetArgs.push(token);
         continue;
       }
-      const modifier = modifierPattern.exec(token);
+      const modifier = localModifierPattern.exec(token) ?? inheritedModifierPattern.exec(token);
       if (modifier) {
         modifiers.push({ scope: modifier[1].toLowerCase() === 'l' ? 'local' : 'global', depth: depthByCode[modifier[2].toLowerCase() as keyof typeof depthByCode] });
       } else if (token === '++' || token === '--') operations.push(token);

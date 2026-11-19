@@ -8,7 +8,7 @@ import { verifiedStorageNamespace } from './storage-identity.policy';
 
 /** Production connectors are intentionally read-only until risk-enforced writes exist. */
 export const ENABLED_PROVIDER_API_CAPABILITIES = {
-  github: ['repository:metadata','resources:read','contents:write','ci:read','issues:read','issues:write','pulls:read','pulls:write','releases:read'],
+  github: ['repository:metadata','github:protection:read','resources:read','contents:write','ci:read','issues:read','issues:write','pulls:read','pulls:write','releases:read'],
 } as const;
 
 import {
@@ -444,6 +444,22 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       installationId:String(result.rows[0].installation_id),
     };
   }
+  /**
+   * Update only provider-verified grants for an existing GitHub installation.
+   * The App service independently verifies identity and provider permissions.
+   * Caller-selected capabilities and selected repository boundaries stay unchanged.
+   */
+  async refreshGithubGrants(ownerId:string,id:string,installationId:string,account:string,
+    grants:ConnectorCapability[]) {
+    const c=await this.owned(this.owner(ownerId),id);
+    if(c.status!=='active'||c.provider!=='github'||
+       c.installationId!==installationId||c.externalAccountId!==account)
+      throw new Error('GITHUB_INSTALLATION_MISMATCH');
+    const next:ConnectorConnection={...c,providerCapabilities:[...new Set(grants)]};
+    await this.repository!.save(next);
+    return this.view(next);
+  }
+
   async activateGithub(ownerId:string,id:string,installationId:string,account:string,
     grants:ConnectorCapability[],repos:string[]) {
     const c=await this.owned(ownerId,id);
