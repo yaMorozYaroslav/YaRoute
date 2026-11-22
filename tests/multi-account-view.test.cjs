@@ -2,6 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const vm=require('node:vm');
 const {
  ACCOUNT_VIEW_URI,ACCOUNT_VIEW_HTML,signStorageView,verifyStorageView,
 }=require('../dist/connectors/multi-account-view');
@@ -9,8 +10,8 @@ const {
 const key=Buffer.alloc(32,19).toString('base64');
 const wrong=Buffer.alloc(32,20).toString('base64');
 const connections=[{displayName:'MEGA research',provider:'mega',status:'active',
- selected:['storage:list','storage:move','storage:delete'],
- providerVerified:['storage:list'],resourceCount:1}];
+ selected:['storage:list','storage:write','storage:move','storage:delete'],
+ providerVerified:['storage:list','storage:write','storage:move','storage:delete'],resourceCount:1}];
 
 test('separate OAuth principals yield distinct signed, read-only 3-minute views',()=>{
  const a=signStorageView('oauth:google-oauth2|primary','Google account A',connections,key,10000);
@@ -18,7 +19,7 @@ test('separate OAuth principals yield distinct signed, read-only 3-minute views'
  const va=verifyStorageView(a,key,10001),vb=verifyStorageView(b,key,10001);
  assert.notEqual(va.ownerHint,vb.ownerHint);
  assert.equal(va.connections[0].provider,'mega');
- assert.deepEqual(va.connections[0].providerVerified,['storage:list']);
+ assert.deepEqual(va.connections[0].providerVerified,['storage:list','storage:write','storage:move','storage:delete']);
  assert.deepEqual(vb.connections,[]);
  assert.equal(va.expiresAt-va.issuedAt,180);
  assert.deepEqual(Object.keys(va).sort(),['connections','display','expiresAt','issuedAt','ownerHint','schema'].sort());
@@ -48,7 +49,7 @@ test('viewer is display-only and requires signed, distinct, caller-included owne
  assert.match(source,/NYX_ACCOUNT_VIEW_CALLER_NOT_INCLUDED/);
  assert.match(source,/readOnly:true,noCrossTenantAuthorization:true/);
  assert.match(source,/ACCOUNT_VIEW_URI/);
- assert.equal(ACCOUNT_VIEW_URI,'ui://nestnyx/dev/connections/multi-v3.html');
+ assert.equal(ACCOUNT_VIEW_URI,'ui://nestnyx/dev/connections/multi-v4.html');
  assert.match(ACCOUNT_VIEW_HTML,/<label for="nyx-account-switch">Switch account<\/label>/);
  assert.match(ACCOUNT_VIEW_HTML,/<select id="nyx-account-switch"/);
  assert.match(ACCOUNT_VIEW_HTML,/picker.addEventListener\('change'/);
@@ -56,9 +57,37 @@ test('viewer is display-only and requires signed, distinct, caller-included owne
  assert.doesNotMatch(ACCOUNT_VIEW_HTML,/role="tablist"|role="tab"/);
  assert.match(ACCOUNT_VIEW_HTML,/authenticated accounts · read-only display/);
  assert.ok(ACCOUNT_VIEW_HTML.includes('envelope?.result??envelope'));
- assert.ok(ACCOUNT_VIEW_HTML.includes("v.display+' ('+v.connections.length+')'"));
+ assert.ok(ACCOUNT_VIEW_HTML.includes("node('option',v.display)"));
  assert.match(ACCOUNT_VIEW_HTML,/Switching the displayed account changes only what you see/);
+ assert.match(ACCOUNT_VIEW_HTML,/openai:set_globals/);
+ assert.match(ACCOUNT_VIEW_HTML,/setWidgetState/);
+ assert.match(ACCOUNT_VIEW_HTML,/RW grants/);
+ assert.match(ACCOUNT_VIEW_HTML,/Partial grants/);
+ assert.match(ACCOUNT_VIEW_HTML,/payload\.noCrossTenantAuthorization!==true/);
+ assert.match(ACCOUNT_VIEW_HTML,/role="region"/);
+ assert.match(source,/for\(const version of \[2,3\]\)/);
+ assert.match(source,/storage:write/);
  assert.match(ACCOUNT_VIEW_HTML,/does not switch OAuth credentials/);
  assert.doesNotMatch(ACCOUNT_VIEW_HTML,/localStorage|sessionStorage|document\.cookie|fetch\(/);
  assert.doesNotMatch(ACCOUNT_VIEW_HTML,/window\.openai\.callTool|tools\/call/);
+});
+
+test('native dropdown script parses and preserves authenticated read-only boundaries',()=>{
+ const code=ACCOUNT_VIEW_HTML.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+ assert.ok(code && code.length>1000);
+ assert.doesNotThrow(()=>new vm.Script(code,{filename:'nestnyx-combined-account-viewer.js'}));
+ assert.match(code,/selectedAccountView/);
+ assert.match(code,/new Set\(payload\.accounts\.map/);
+ assert.match(code,/payload\.readOnly!==true/);
+ assert.match(code,/payload\.noCrossTenantAuthorization!==true/);
+ assert.match(code,/node\('option',v\.display\)/);
+ assert.doesNotMatch(code,/window\.openai\.callTool|tools\/call|fetch\(|localStorage|sessionStorage|document\.cookie/);
+});
+test('four provider-selected caps survive signed storage snapshot verification',()=>{
+ const caps=['storage:list','storage:write','storage:move','storage:delete'];
+ const item={displayName:'Primary',provider:'mega',status:'active',selected:caps,providerVerified:caps,resourceCount:1};
+ const view=verifyStorageView(signStorageView('oauth:primary','Synthetic Primary account',[item],key,10000),key,10001);
+ assert.deepEqual(view.connections[0].selected,caps);
+ assert.deepEqual(view.connections[0].providerVerified,caps);
+ assert.throws(()=>signStorageView('oauth:primary','Synthetic Primary account',[{...item,selected:[...caps,'storage:permanent-delete']}],key,10000),/VIEW_INVALID/);
 });
