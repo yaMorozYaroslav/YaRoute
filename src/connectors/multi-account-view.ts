@@ -4,7 +4,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 // independently under each already-authenticated plugin connection and present
 // them in ONE account-dropdown UI. It is never a credential, delegation or mutation grant.
 export const ACCOUNT_VIEW_SCHEMA = 'nyx.account-view.snapshot.v1';
-export const ACCOUNT_VIEW_URI = 'ui://nestnyx/dev/connections/multi-v3.html';
+export const ACCOUNT_VIEW_URI = 'ui://nestnyx/dev/connections/multi-v4.html';
 export type StorageViewItem = {
   displayName: string;
   provider: 'mega' | 'google-drive';
@@ -43,10 +43,10 @@ function recordValid(s:StorageViewSnapshot):boolean {
       typeof c.displayName==='string' && c.displayName.length>0 && c.displayName.length<=80 &&
       (c.provider==='mega'||c.provider==='google-drive') &&
       ['pending','active','revoked'].includes(c.status) &&
-      Array.isArray(c.selected) && c.selected.length<=3 &&
-      c.selected.every(v=>['storage:list','storage:move','storage:delete'].includes(v)) &&
-      Array.isArray(c.providerVerified) && c.providerVerified.length<=3 &&
-      c.providerVerified.every(v=>['storage:list','storage:move','storage:delete'].includes(v)) &&
+      Array.isArray(c.selected) && c.selected.length<=4 &&
+      c.selected.every(v=>['storage:list','storage:write','storage:move','storage:delete'].includes(v)) &&
+      Array.isArray(c.providerVerified) && c.providerVerified.length<=4 &&
+      c.providerVerified.every(v=>['storage:list','storage:write','storage:move','storage:delete'].includes(v)) &&
       Number.isSafeInteger(c.resourceCount) && c.resourceCount>=0 && c.resourceCount<=10);
 }
 
@@ -111,50 +111,72 @@ header{display:flex;justify-content:space-between;gap:10px;align-items:center;ma
 <header><div><h1>NestNyx Dev · Connections</h1>
 <div class="muted" id="summary">Collecting authenticated connection summaries</div></div>🔐</header>
 <div class="account-switch"><label for="nyx-account-switch">Switch account</label><select id="nyx-account-switch" aria-label="Switch account"><option value="">Loading connected accounts…</option></select></div>
-<section id="panel" class="panel" role="tabpanel" tabindex="0" aria-live="polite">
+<section id="panel" class="panel" role="region" aria-label="Selected Google account storage" tabindex="0" aria-live="polite">
 Waiting for authenticated account summaries…</section>
 <p class="note">Switching the displayed account changes only what you see. It does not switch OAuth credentials, link accounts, grant access, or authorize file operations. Snapshots expire after 3 minutes. Use your authenticated account when requesting an action.</p>
 <script>
 (function(){
  const picker=document.getElementById('nyx-account-switch'),panel=document.getElementById('panel');
  let records=[],current=0;
+ let selectedEmail=typeof window.openai?.widgetState?.privateContent?.selectedAccountView==='string'
+   ? window.openai.widgetState.privateContent.selectedAccountView : '';
  const node=(tag,text,cls)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=String(text);return e;};
+ function access(c){
+   if(c.status==='pending')return 'PENDING';
+   if(c.status==='revoked')return 'REVOKED';
+   const grants=['storage:write','storage:move','storage:delete'];
+   const verified=grants.filter(cap=>c.selected.includes(cap)&&c.providerVerified.includes(cap));
+   return verified.length===3?'RW grants':verified.length?'Partial grants':'RO grants';
+ }
  function show(n){
-   current=n;const v=records[n];if(!v)return;
-   picker.value=String(n);
+   const v=records[n];if(!v)return;
+   current=n;selectedEmail=v.display;picker.value=String(n);
+   try{window.openai?.setWidgetState?.({privateContent:{selectedAccountView:selectedEmail}});}
+   catch{/* Host presentation state is optional and never affects OAuth. */}
+   const active=v.connections.filter(c=>c.status==='active').length;
    panel.replaceChildren(node('strong',v.display));
-   panel.append(node('div','Verified OAuth owner reference: '+v.ownerHint,'meta'));
+   panel.append(node('div',active+' active · '+(v.connections.length-active)+' pending/revoked · signed owner '+v.ownerHint,'meta'));
    if(!v.connections.length){panel.append(node('p','No storage connections enrolled for this Google identity.'));return;}
    for(const c of v.connections){
      const row=node('div',undefined,'row');
      row.append(node('strong',c.displayName+' · '+(c.provider==='mega'?'MEGA':'Google Drive')));
-     row.append(node('div','Connection: '+c.status+' · Selected: '+(c.selected.join(', ')||'none'),'meta'));
+     row.append(node('div','Connection: '+c.status+' · '+access(c),'meta'));
+     row.append(node('div','Selected: '+(c.selected.join(', ')||'none'),'meta'));
      row.append(node('div','Provider verified: '+(c.providerVerified.join(', ')||'none')+' · Allowed roots: '+c.resourceCount,'meta'));
      panel.append(row);
    }
+   panel.append(node('p','RW grants require matching permissions on the exact authorized root and an enabled server write tool. This viewer never executes operations.','note'));
  }
  function render(value){
    const envelope=value?.structuredContent??value;
    const payload=envelope?.result??envelope;
-   if(!payload || payload.schema!=='nyx.account-view.viewer.v1' || !Array.isArray(payload.accounts))return;
+   if(!payload || payload.schema!=='nyx.account-view.viewer.v1' ||
+     payload.readOnly!==true || payload.noCrossTenantAuthorization!==true ||
+     !Array.isArray(payload.accounts))return;
    if(payload.accounts.length<2||payload.accounts.length>4)return;
    const safe=payload.accounts.every(a=>a&&typeof a.label==='string'&&a.label.length>0&&a.label.length<=40&&
      typeof a.display==='string'&&a.display.length>0&&a.display.length<=120&&
-     typeof a.ownerHint==='string'&&Array.isArray(a.connections));
-   if(!safe)return;
+     typeof a.ownerHint==='string'&&/^[a-f0-9]{16}$/.test(a.ownerHint)&&
+     Array.isArray(a.connections)&&a.connections.length<=12);
+   if(!safe || new Set(payload.accounts.map(a=>a.ownerHint)).size!==payload.accounts.length)return;
    records=payload.accounts;picker.replaceChildren();
    document.getElementById('summary').textContent=records.length+' authenticated accounts · read-only display';
    records.forEach((v,i)=>{
-     const o=node('option',v.display+' ('+v.connections.length+')');o.value=String(i);picker.append(o);
+     const o=node('option',v.display);o.value=String(i);picker.append(o);
    });
    picker.disabled=false;
-   show(0);
+   const previous=records.findIndex(v=>v.display===selectedEmail);
+   show(previous>=0?previous:0);
  }
  picker.addEventListener('change',()=>{
    const idx=Number(picker.value);
    if(Number.isSafeInteger(idx) && idx>=0 && idx<records.length)show(idx);
  });
  render(window.openai?.toolOutput);
+ window.addEventListener('openai:set_globals',event=>{
+   const next=event.detail?.globals?.toolOutput;
+   if(next!==undefined)render(next);
+ },{passive:true});
  window.addEventListener('message',event=>{
   if(event.source!==window.parent || !event.data ||
     event.data.method!=='ui/notifications/tool-result')return;
