@@ -8,7 +8,7 @@ export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:r
   'git:commit', 'git:push', 'git:tag',
   'git:checkout', 'git:merge', 'git:rebase', 'git:cherry-pick', 'git:revert',
   'git:stash', 'git:reset', 'git:clean', 'git:worktree',
-  'repository:metadata', 'pulls:read', 'pulls:write', 'issues:read', 'issues:write',
+  'repository:metadata', 'github:protection:read', 'pulls:read', 'pulls:write', 'issues:read', 'issues:write',
   'releases:read', 'releases:write',
   'heroku:apps:read', 'heroku:config:names', 'heroku:releases:read', 'heroku:logs:read',
   'heroku:config:write', 'heroku:deploy', 'heroku:apps:create', 'heroku:apps:restart'] as const;
@@ -55,6 +55,7 @@ export function supportsCapability(provider: ConnectorProvider, capability: Conn
   if (isFinanciallyProhibited(capability)) return false;
   // Owner decision: GitHub/GitLab and Heroku are API-only; never grant Git CLI.
   if (capability.startsWith('git:')) return false;
+  if (capability.startsWith('github:')) return provider === 'github';
   if (/^(git:|repository:|pulls:|issues:|releases:|ci:)/.test(capability)) return gitProviders.has(provider);
   if (capability.startsWith('heroku:')) return provider === 'heroku';
   if (capability.startsWith('storage:')) return provider === 'google-drive' || provider === 'mega';

@@ -6,6 +6,7 @@ import { NyxCliRegistryService } from '../nyx/cli-registry.service';
 import { NyxHeadLibraryService } from '../nyx/head-library.service';
 import { NyxKeyService } from '../nyx/key.service';
 import { NyxTenantKeyService } from '../nyx/tenant-key.service';
+import { preparePublicIniPlan } from '../nyx/public-init-plan';
 import { extractKeySignals } from '../nyx/key-chat-extractor';
 import { RuntimeMaintenanceService } from './runtime-maintenance.service';
 import { Injectable, Logger } from '@nestjs/common';
@@ -30,7 +31,7 @@ import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
-import { githubInstallationUrl } from '../connectors/github-app.service';
+import { GithubAppService, githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_HOME_URI, CONNECTIONS_HOME_HTML, CONNECTIONS_PANEL_LABEL, CONNECTIONS_HOME_LABEL, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 import { ACCOUNT_VIEW_URI, ACCOUNT_VIEW_HTML, signStorageView, verifyStorageView } from '../connectors/multi-account-view';
@@ -63,6 +64,7 @@ export class McpService {
     private readonly tenantGoogle: TenantGoogleOAuthService,
     private readonly tenantMega: TenantMegaEnrollmentService,
     private readonly github: GithubReadonlyConnector,
+    private readonly githubApp: GithubAppService,
     private readonly githubWrites: GithubWriteConnector,
     private readonly herokuBroker: HerokuBrokerClient,
     private readonly maintenance: RuntimeMaintenanceService,
@@ -145,6 +147,7 @@ export class McpService {
             // This is an authorization boundary, not proof of a broken CLI.
             // A separate ChatGPT/Drive read is possible only with its own grants.
             alternative: 'separate-authorized-ChatGPT-source-resolution',
+            assisted: {tool:'nyx_ini_plan', mode:'read-only-external-source-preflight', status:'PARTIAL_DIAGNOSTIC', nativeFif:false},
           }
           : { available: true, status: 'registered-requires-verified-bootstrap' },
         sourceRecovery: {
@@ -160,7 +163,7 @@ export class McpService {
           sum: { tool: 'nyx_sum', status: 'registered-requires-verified-bootstrap' },
         },
         auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ?
-          ['get_profile','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview',
+          ['nyx_ini_plan','get_profile','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview',
             'nyx_account_view_snapshot','nyx_accounts_view',
            ...(process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' &&
                process.env.NYX_MULTIUSER_RCLONE_ENABLED === 'true' ?
@@ -171,7 +174,13 @@ export class McpService {
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
              'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
               ...(process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true' ? ['nyx_storage_connection_begin_import','nyx_storage_connection_begin_import_all','nyx_storage_connection_finish_import'] : []),
-              'nyx_storage_connection_revoke',
+              'nyx_storage_connection_revoke','nyx_storage_connection_select_best',
+              ...(process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED === 'true' ?
+                ['nyx_storage_google_verify_rw','nyx_storage_google_file_mutate'] : []),
+              ...(process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED === 'true' ||
+                  process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true' ?
+                ['nyx_storage_text_file_create'] : []),
+              ...(process.env.NYX_PUBLIC_TRASH_CLEANUP_ENABLED === 'true' ? ['nyx_storage_trash_cleanup'] : []),
               ...(process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true' ?
                 ['nyx_storage_mega_file_mutate'] : [])] : []),
            ...(process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true' ? ['nyx_private_owner_link_status','nyx_private_owner_link_begin'] : []),
@@ -235,7 +244,7 @@ export class McpService {
     // after deployment. Keep v10-v12 URIs fetchable so ChatGPT doesn't display
     // "App unavailable" when it has cached an old Connections/Home template.
     // Each alias serves the current UI, with the requested URI in the response.
-    for (const version of [10,11,12,13,14]) {
+    for (const version of [10,11,12,13,14,15]) {
       for (const item of [
         {label:CONNECTIONS_PANEL_LABEL,uri:CONNECTIONS_PANEL_URI,html:CONNECTIONS_PANEL_HTML},
         {label:CONNECTIONS_HOME_LABEL,uri:CONNECTIONS_HOME_URI,html:CONNECTIONS_HOME_HTML},
@@ -301,6 +310,22 @@ export class McpService {
         _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
           'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
       }]}));
+
+
+    // Cached ChatGPT tool metadata may still reference v2 or v3. Both old
+    // resource URIs serve the current display-only dropdown, never OAuth grants.
+    for(const version of [2,3]){
+      const legacy=ACCOUNT_VIEW_URI.replace(/\/multi-v4\.html$/, '/multi-v'+version+'.html');
+      if(legacy===ACCOUNT_VIEW_URI)throw new Error('NYX_ACCOUNT_VIEW_COMPAT_URI_INVALID');
+      server.registerResource('NestNyx Multi-account Viewer (compatibility v'+version+')',legacy,
+        {mimeType:'text/html;profile=mcp-app'},
+        async()=>({contents:[{
+          uri:legacy,mimeType:'text/html;profile=mcp-app',
+          text:ACCOUNT_VIEW_HTML,
+          _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
+            'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
+        }]}));
+    }
 
     // Separate global and thread entrypoints make each launcher independently
     // discoverable. Both reuse the SAME authenticated, read-only view payload.
@@ -403,7 +428,7 @@ export class McpService {
         const connections=[...publicConnections,
           ...linkedRemotes.map(remote=>privateRemoteView(owner,remote,key))];
         const filtered=(caps:string[])=>caps.filter(c=>
-          ['storage:list','storage:move','storage:delete'].includes(c));
+          ['storage:list','storage:write','storage:move','storage:delete'].includes(c));
         const token=signStorageView(owner,label,connections.map(c=>({
           displayName:c.displayName,provider:c.provider as 'mega'|'google-drive',
           status:c.status as 'pending'|'active'|'revoked',
@@ -417,8 +442,8 @@ export class McpService {
           warning:'Read-only, signed, temporary display metadata. Not a bearer grant to any storage provider.'};
       }));
       server.registerTool('nyx_accounts_view',{
-        title:'View two separately authenticated NestNyx accounts in one tabbed panel',
-        description:'Show a read-only tabbed comparison from separately signed and unexpired Google OAuth account snapshots. Never switches an OAuth identity, grants sharing or accepts credentials. First invoke nyx_account_view_snapshot once per connected ChatGPT account.',
+        title:'Switch between authenticated NestNyx Google accounts in one dropdown',
+        description:'Open one read-only Connections viewer with a Switch account email dropdown from separately signed, unexpired Google OAuth snapshots. Never switches OAuth identity, grants sharing or accepts credentials. First invoke nyx_account_view_snapshot separately under each authenticated ChatGPT account.',
         inputSchema:z.object({accounts:z.array(z.object({
           label:z.string().min(1).max(40),
           snapshot:z.string().min(100).max(10100),
@@ -462,7 +487,8 @@ export class McpService {
         storageWriteAvailable:process.env.NYX_DEPLOYMENT_MODE==='public' &&
           process.env.NYX_PUBLIC_CONNECTORS_ENABLED==='true' &&
           process.env.NYX_MULTIUSER_RCLONE_ENABLED==='true' &&
-          process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true',
+          (process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true' ||
+           process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true'),
         sessionSwitchRequiresReconnect:true,
       };
     }));
@@ -624,6 +650,38 @@ export class McpService {
     },async({id,repo})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
 
+    server.registerTool('nyx_connection_github_grants_refresh',{
+      title:'Refresh verified GitHub App installation permissions',
+      description:'Recheck existing installation identity and actual GitHub provider grants. Does not change selected capabilities or repository boundaries.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubApp.refreshInstallationGrants(this.connectorOwner(),id))));
+
+    server.registerTool('nyx_connection_github_rulesets',{
+      title:'List GitHub repository protection rulesets',
+      description:'Read-only repository-scoped ruleset listing. Requires verified GitHub Administration read permission.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.rulesets(this.connectorOwner(),id,repo))));
+
+    server.registerTool('nyx_connection_github_ruleset',{
+      title:'Inspect an exact GitHub protection ruleset',
+      description:'Read-only ruleset detail by integer ID. No settings are changed.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),rulesetId:z.number().int().positive()}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,rulesetId})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.ruleset(this.connectorOwner(),id,repo,rulesetId))));
+
+    server.registerTool('nyx_connection_github_classic_protection',{
+      title:'Inspect classic protection for a GitHub branch',
+      description:'Read-only classic branch protection; an unprotected branch reports protected:false.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().min(1).max(120)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,branch})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.classicProtection(this.connectorOwner(),id,repo,branch))));
+
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
       description:'Read-only Actions API; owner, installation, selected repository and provider grants checked.',
@@ -649,19 +707,19 @@ export class McpService {
     // GitHub API writes are restricted to owner-selected repositories and
     // review-only nyx/* branches. No workflow dispatch, merges or hosting API.
     server.registerTool('nyx_connection_github_branch_create',{
-      title:'Create a NYX GitHub review branch',
-      description:'Create a nyx/* branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
+      title:'Create a non-default GitHub working branch (not main/master/default)',
+      description:'Create a nyx-prefixed branch from the current default HEAD in one authorized repository. Never modifies the default branch.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100)}),
+        branch:z.string().min(1).max(100)}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.githubWrites.createBranch(this.connectorOwner(),id,repo,branch))));
 
-    // SHA-guarded staging workflow: changes only a fresh nyx/* review branch.
+    // SHA-guarded staging workflow: changes only a fresh nyx-prefixed review branch.
     // Both base and target refuse master/main/default. No direct protected writes.
     server.registerTool('nyx_connection_github_branch_from_ref',{
       title:'Create a SHA-guarded review branch from tester or another non-default branch',
-      description:'Create a nyx/* branch from the exact verified tip of a non-protected, non-default branch. Requires expectedBaseSha; never modifies the source branch.',
+      description:'Create a nyx-prefixed branch from the exact verified tip of a non-protected, non-default branch. Requires expectedBaseSha; never modifies the source branch.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         expectedBaseSha:z.string().regex(/^[a-f0-9]{40}$/)}),
@@ -672,7 +730,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_stage_tester_from_dev',{
       title:'Stage reviewed Dev source files as a draft-ready tester review branch',
-      description:'Copy up to 40 exact reviewed src/docs/tests files from a selected YaRoute-Dev commit into a NEW nyx/* review branch based on a verified YaRoute tester SHA. Uses two owner-scoped GitHub App connections. Never updates tester/master, creates deployment files, merges, or deploys. Call draft_pr_to_ref separately after inspecting staged changes.',
+      description:'Copy up to 40 exact reviewed src/docs/tests files from a selected YaRoute-Dev commit into a NEW nyx-prefixed review branch based on a verified YaRoute tester SHA. Uses two owner-scoped GitHub App connections. Never updates tester/master, creates deployment files, merges, or deploys. Call draft_pr_to_ref separately after inspecting staged changes.',
       inputSchema:z.object({
         sourceConnectionId:z.string().uuid(),destinationConnectionId:z.string().uuid(),
         sourceRepo:z.string().min(3).max(200),destinationRepo:z.string().min(3).max(200),
@@ -692,7 +750,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_reviewed_pr_to_ref',{
       title:'Open an exact-SHA reviewed PR into tester or another unprotected non-default branch',
-      description:'Creates a non-draft PR for a nyx/* source with verified source/target SHAs. No protected master/main, no automatic merge or deployment. Use the separately gated merge_reviewed_nondefault tool after CI.',
+      description:'Creates a non-draft PR for a nyx-prefixed source with verified source/target SHAs. No protected master/main, no automatic merge or deployment. Use the separately gated merge_reviewed_nondefault tool after CI.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         title:z.string().min(1).max(200),body:z.string().max(10000).optional(),
@@ -706,7 +764,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_draft_pr_to_ref',{
       title:'Open an unmerged draft PR to tester or another non-default branch',
-      description:'Open a DRAFT PR from a nyx/* review branch to a non-default branch. Never merges, deploys, dispatches workflows or targets protected main/master.',
+      description:'Open a DRAFT PR from a nyx-prefixed review branch to a non-default branch. Never merges, deploys, dispatches workflows or targets protected main/master.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         branch:z.string().min(5).max(100),baseBranch:z.string().min(1).max(100),
         title:z.string().min(1).max(200),body:z.string().max(10000).optional()}),
@@ -717,7 +775,7 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_merge_reviewed_nondefault',{
       title:'Merge a CI-verified NYX review PR into an unprotected non-default branch',
-      description:'Explicit merge only of same-repo nyx/* review PR. Checks precise head and base SHAs, protected status and completed successful CI. Cannot merge master/main/default and never invokes Heroku.',
+      description:'Explicit merge only of same-repo nyx-prefixed review PR. Checks precise head and base SHAs, protected status and completed successful CI. Cannot merge master/main/default and never invokes Heroku.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
         prNumber:z.number().int().min(1).max(1000000),
         expectedHeadSha:z.string().regex(/^[a-f0-9]{40}$/),
@@ -741,9 +799,9 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_commit_file',{
       title:'Commit one file on a NYX review branch',
-      description:'Create or update one UTF-8 file on an existing nyx/* branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
+      description:'Create or update one UTF-8 file on an existing nyx-prefixed branch; requires GitHub Contents write. Workflow, hosting, CI script, credential and deployment files are blocked.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100),path:z.string().min(1).max(400),
+        branch:z.string().min(1).max(100),path:z.string().min(1).max(400),
         content:z.string().max(65536),message:z.string().min(1).max(160),
         sha:z.string().regex(/^[a-f0-9]{40}$/).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
@@ -752,9 +810,9 @@ export class McpService {
 
     server.registerTool('nyx_connection_github_draft_pr',{
       title:'Open a draft PR for a NYX branch',
-      description:'Open a draft pull request from a nyx/* branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
+      description:'Open a draft pull request from a nyx-prefixed branch to the repository default branch. No merging, deployments or workflow runs are authorized.',
       inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
-        branch:z.string().min(5).max(100),title:z.string().min(1).max(200),
+        branch:z.string().min(1).max(100),title:z.string().min(1).max(200),
         body:z.string().max(10000).optional()}),
       annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     },async({id,repo,branch,title,body})=>this.safeTool(()=>
@@ -977,6 +1035,21 @@ export class McpService {
           this.tenantRclone.createTenantTextFile(this.connectorOwner(),id,provider,rootId,path,content)));
       }
 
+      if(process.env.NYX_PUBLIC_TRASH_CLEANUP_ENABLED==='true') {
+        server.registerTool('nyx_storage_trash_cleanup',{
+          title:'Preview or permanently empty my provider account Trash',
+          description:'Account-wide irreversible cleanup; not folder scoped. Omitting confirmed returns a no-write safety preview. Set confirmed=true only for an explicit authorized cleanup request. The provider may finish asynchronously.',
+          inputSchema:z.object({
+            id:z.string().uuid(),provider:z.enum(['google-drive','mega']),
+            rootId:z.string().min(1).max(256),confirmed:z.boolean().default(false),
+          }).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:true,
+            idempotentHint:false,openWorldHint:true},
+        },async({id,provider,rootId,confirmed})=>this.safeTool(()=>
+          this.tenantRclone.cleanupTenantTrash(
+            this.connectorOwner(),id,provider,rootId,confirmed)));
+      }
+
       server.registerTool('nyx_storage_connection_select_best', {
         title:'Select my strongest verified cloud connection for an operation',
         description:'Read-only choice among active connections within the same verified OAuth owner, physical provider identity and exact authorized root. Does not transfer credentials or execute the operation.',
@@ -1137,6 +1210,26 @@ export class McpService {
         canonicalChanged:false};
     }));
 
+
+    // Authenticated public tenants can preflight INI syntax without crossing
+    // the private MAIN bootstrap boundary. Separate authorized provider reads
+    // remain mandatory before anyone may claim source-verified initialization.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      server.registerTool('nyx_ini_plan',{
+        title:'Prepare NYX initialization for my connected sources',
+        description:'Tenant-authenticated read-only preparation for Nyx ini, including GNo. Does not read private Head/Body/Footer, access operator Rclone, create a FIF or claim initialization completed. Resolve required sources separately through the user-authorized Google Drive connector.',
+        inputSchema:z.object({
+          target:z.string().min(1).max(1024).optional(),
+          targets:z.array(z.string().min(1).max(80)).max(16).optional(),
+          scope:z.enum(['local','global']).optional(),
+          depth:z.enum(['basic','normal','deep']).optional(),
+        }).strict(),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async input=>this.safeTool(()=>{
+        this.connectorOwner();
+        return preparePublicIniPlan(input);
+      }));
+    }
 
     if (process.env.NYX_DEPLOYMENT_MODE==='public') return server;
 
