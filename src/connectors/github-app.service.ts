@@ -70,6 +70,7 @@ export async function githubInstallationUrl():Promise<{url:string;provider:'gith
 function verifiedGrants(permissions:Record<string,string>):ConnectorCapability[] {
   const values=new Set<ConnectorCapability>(['repository:metadata']);
   if(['read','write'].includes(permissions.actions)) values.add('ci:read');
+  if(['read','write'].includes(permissions.administration)) values.add('github:protection:read');
   if(['read','write'].includes(permissions.contents)) values.add('resources:read');
   if(['read','write'].includes(permissions.contents)) values.add('releases:read');
   if(['read','write'].includes(permissions.issues)) values.add('issues:read');
@@ -83,6 +84,7 @@ function verifiedGrants(permissions:Record<string,string>):ConnectorCapability[]
 const permissionsFor=(capability:ConnectorCapability):Record<string,'read'|'write'>=>{
   switch(capability) {
     case 'ci:read':return {metadata:'read',actions:'read'};
+    case 'github:protection:read':return {metadata:'read',administration:'read'};
     case 'contents:write':return {metadata:'read',contents:'write'};
     case 'issues:write':return {metadata:'read',issues:'write'};
     case 'pulls:write':return {metadata:'read',pull_requests:'write'};
@@ -177,6 +179,23 @@ export class GithubAppService {
     if(names.some(x=>typeof x!=='string'||!/(^[\w.-]+\/[\w.-]+$)/.test(x))) throw new Error('GITHUB_REPOSITORIES_INVALID');
     return this.connections.activateGithub(pending.ownerId,pending.connectionId,
       String(id),verified.account.login,verifiedGrants(verified.permissions??{}),names);
+  }
+
+  /** Reconcile existing connection grants using the App's trusted installation identity. */
+  async refreshInstallationGrants(ownerId:string,connectionId:string) {
+    const connection=await this.connections.getOwned(ownerId,connectionId);
+    if(connection.provider!=='github'||connection.status!=='active'||
+       !connection.installationId||!/^[1-9]\d{0,19}$/.test(connection.installationId))
+      throw new Error('GITHUB_INSTALLATION_REQUIRED');
+    const installation=await requestGitHub('/app/installations/'+connection.installationId,
+      'GET',appJwt()) as GitHubInstallation;
+    if(String(installation.id)!==connection.installationId||
+       installation.app_id!==githubAppConfig().appId||
+       installation.account?.login!==connection.externalAccountId)
+      throw new Error('GITHUB_INSTALLATION_MISMATCH');
+    return this.connections.refreshGithubGrants(ownerId,connectionId,
+      connection.installationId,connection.externalAccountId,
+      verifiedGrants(installation.permissions??{}));
   }
 
   /**

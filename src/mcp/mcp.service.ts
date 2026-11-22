@@ -30,7 +30,7 @@ import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
-import { githubInstallationUrl } from '../connectors/github-app.service';
+import { GithubAppService, githubInstallationUrl } from '../connectors/github-app.service';
 import { CONNECTIONS_PANEL_URI, CONNECTIONS_PANEL_HTML, CONNECTIONS_HOME_URI, CONNECTIONS_HOME_HTML, CONNECTIONS_PANEL_LABEL, CONNECTIONS_HOME_LABEL, CONNECTIONS_PANEL_BRAND_ORIGIN } from '../connectors/connections-panel';
 import type { ConnectorCapability, ConnectorResourceRule } from '../connectors/connector-registry';
 import { ACCOUNT_VIEW_URI, ACCOUNT_VIEW_HTML, signStorageView, verifyStorageView } from '../connectors/multi-account-view';
@@ -63,6 +63,7 @@ export class McpService {
     private readonly tenantGoogle: TenantGoogleOAuthService,
     private readonly tenantMega: TenantMegaEnrollmentService,
     private readonly github: GithubReadonlyConnector,
+    private readonly githubApp: GithubAppService,
     private readonly githubWrites: GithubWriteConnector,
     private readonly herokuBroker: HerokuBrokerClient,
     private readonly maintenance: RuntimeMaintenanceService,
@@ -171,7 +172,13 @@ export class McpService {
              'nyx_storage_connection_test_pending','nyx_storage_connection_activate',
              'nyx_storage_connection_test_active','nyx_storage_connection_list_files',
               ...(process.env.NYX_PUBLIC_RCLONE_FILE_IMPORT_ENABLED === 'true' ? ['nyx_storage_connection_begin_import','nyx_storage_connection_begin_import_all','nyx_storage_connection_finish_import'] : []),
-              'nyx_storage_connection_revoke',
+              'nyx_storage_connection_revoke','nyx_storage_connection_select_best',
+              ...(process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED === 'true' ?
+                ['nyx_storage_google_verify_rw','nyx_storage_google_file_mutate'] : []),
+              ...(process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED === 'true' ||
+                  process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true' ?
+                ['nyx_storage_text_file_create'] : []),
+              ...(process.env.NYX_PUBLIC_TRASH_CLEANUP_ENABLED === 'true' ? ['nyx_storage_trash_cleanup'] : []),
               ...(process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true' ?
                 ['nyx_storage_mega_file_mutate'] : [])] : []),
            ...(process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true' ? ['nyx_private_owner_link_status','nyx_private_owner_link_begin'] : []),
@@ -235,7 +242,7 @@ export class McpService {
     // after deployment. Keep v10-v12 URIs fetchable so ChatGPT doesn't display
     // "App unavailable" when it has cached an old Connections/Home template.
     // Each alias serves the current UI, with the requested URI in the response.
-    for (const version of [10,11,12,13,14]) {
+    for (const version of [10,11,12,13,14,15]) {
       for (const item of [
         {label:CONNECTIONS_PANEL_LABEL,uri:CONNECTIONS_PANEL_URI,html:CONNECTIONS_PANEL_HTML},
         {label:CONNECTIONS_HOME_LABEL,uri:CONNECTIONS_HOME_URI,html:CONNECTIONS_HOME_HTML},
@@ -301,6 +308,22 @@ export class McpService {
         _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
           'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
       }]}));
+
+
+    // Cached ChatGPT tool metadata may still reference v2 or v3. Both old
+    // resource URIs serve the current display-only dropdown, never OAuth grants.
+    for(const version of [2,3]){
+      const legacy=ACCOUNT_VIEW_URI.replace(/\/multi-v4\.html$/, '/multi-v'+version+'.html');
+      if(legacy===ACCOUNT_VIEW_URI)throw new Error('NYX_ACCOUNT_VIEW_COMPAT_URI_INVALID');
+      server.registerResource('NestNyx Multi-account Viewer (compatibility v'+version+')',legacy,
+        {mimeType:'text/html;profile=mcp-app'},
+        async()=>({contents:[{
+          uri:legacy,mimeType:'text/html;profile=mcp-app',
+          text:ACCOUNT_VIEW_HTML,
+          _meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},
+            'openai/ui':{availableDisplayModes:['inline','fullscreen']}},
+        }]}));
+    }
 
     // Separate global and thread entrypoints make each launcher independently
     // discoverable. Both reuse the SAME authenticated, read-only view payload.
@@ -403,7 +426,7 @@ export class McpService {
         const connections=[...publicConnections,
           ...linkedRemotes.map(remote=>privateRemoteView(owner,remote,key))];
         const filtered=(caps:string[])=>caps.filter(c=>
-          ['storage:list','storage:move','storage:delete'].includes(c));
+          ['storage:list','storage:write','storage:move','storage:delete'].includes(c));
         const token=signStorageView(owner,label,connections.map(c=>({
           displayName:c.displayName,provider:c.provider as 'mega'|'google-drive',
           status:c.status as 'pending'|'active'|'revoked',
@@ -417,8 +440,8 @@ export class McpService {
           warning:'Read-only, signed, temporary display metadata. Not a bearer grant to any storage provider.'};
       }));
       server.registerTool('nyx_accounts_view',{
-        title:'View two separately authenticated NestNyx accounts in one tabbed panel',
-        description:'Show a read-only tabbed comparison from separately signed and unexpired Google OAuth account snapshots. Never switches an OAuth identity, grants sharing or accepts credentials. First invoke nyx_account_view_snapshot once per connected ChatGPT account.',
+        title:'Switch between authenticated NestNyx Google accounts in one dropdown',
+        description:'Open one read-only Connections viewer with a Switch account email dropdown from separately signed, unexpired Google OAuth snapshots. Never switches OAuth identity, grants sharing or accepts credentials. First invoke nyx_account_view_snapshot separately under each authenticated ChatGPT account.',
         inputSchema:z.object({accounts:z.array(z.object({
           label:z.string().min(1).max(40),
           snapshot:z.string().min(100).max(10100),
@@ -462,7 +485,8 @@ export class McpService {
         storageWriteAvailable:process.env.NYX_DEPLOYMENT_MODE==='public' &&
           process.env.NYX_PUBLIC_CONNECTORS_ENABLED==='true' &&
           process.env.NYX_MULTIUSER_RCLONE_ENABLED==='true' &&
-          process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true',
+          (process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true' ||
+           process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true'),
         sessionSwitchRequiresReconnect:true,
       };
     }));
@@ -623,6 +647,38 @@ export class McpService {
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     },async({id,repo})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.github.releases(this.connectorOwner(),id,repo))));
+
+    server.registerTool('nyx_connection_github_grants_refresh',{
+      title:'Refresh verified GitHub App installation permissions',
+      description:'Recheck existing installation identity and actual GitHub provider grants. Does not change selected capabilities or repository boundaries.',
+      inputSchema:z.object({id:z.string().uuid()}),
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubApp.refreshInstallationGrants(this.connectorOwner(),id))));
+
+    server.registerTool('nyx_connection_github_rulesets',{
+      title:'List GitHub repository protection rulesets',
+      description:'Read-only repository-scoped ruleset listing. Requires verified GitHub Administration read permission.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.rulesets(this.connectorOwner(),id,repo))));
+
+    server.registerTool('nyx_connection_github_ruleset',{
+      title:'Inspect an exact GitHub protection ruleset',
+      description:'Read-only ruleset detail by integer ID. No settings are changed.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),rulesetId:z.number().int().positive()}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,rulesetId})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.ruleset(this.connectorOwner(),id,repo,rulesetId))));
+
+    server.registerTool('nyx_connection_github_classic_protection',{
+      title:'Inspect classic protection for a GitHub branch',
+      description:'Read-only classic branch protection; an unprotected branch reports protected:false.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),branch:z.string().min(1).max(120)}),
+      annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,branch})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.github.classicProtection(this.connectorOwner(),id,repo,branch))));
 
     server.registerTool('nyx_connection_github_workflows',{
       title:'Read workflows from my authorized GitHub repository',
@@ -975,6 +1031,21 @@ export class McpService {
           annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
         },async({id,provider,rootId,path,content})=>this.safeTool(()=>
           this.tenantRclone.createTenantTextFile(this.connectorOwner(),id,provider,rootId,path,content)));
+      }
+
+      if(process.env.NYX_PUBLIC_TRASH_CLEANUP_ENABLED==='true') {
+        server.registerTool('nyx_storage_trash_cleanup',{
+          title:'Preview or permanently empty my provider account Trash',
+          description:'Account-wide irreversible cleanup; not folder scoped. Omitting confirmed returns a no-write safety preview. Set confirmed=true only for an explicit authorized cleanup request. The provider may finish asynchronously.',
+          inputSchema:z.object({
+            id:z.string().uuid(),provider:z.enum(['google-drive','mega']),
+            rootId:z.string().min(1).max(256),confirmed:z.boolean().default(false),
+          }).strict(),
+          annotations:{readOnlyHint:false,destructiveHint:true,
+            idempotentHint:false,openWorldHint:true},
+        },async({id,provider,rootId,confirmed})=>this.safeTool(()=>
+          this.tenantRclone.cleanupTenantTrash(
+            this.connectorOwner(),id,provider,rootId,confirmed)));
       }
 
       server.registerTool('nyx_storage_connection_select_best', {
