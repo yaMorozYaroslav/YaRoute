@@ -66,3 +66,24 @@ test('MEGA mutation inventory matches the separately gated MCP tool registration
  assert.match(api,/if \(process\.env\.NYX_PUBLIC_MEGA_WRITE_ENABLED === 'true'\)/);
  assert.match(api,/server\.registerTool\('nyx_storage_mega_file_mutate'/);
 });
+
+test('permanent provider Trash cleanup is account-wide, gated and requires explicit confirmation',()=>{
+ const runtime=fs.readFileSync(path.join(root,'src/connectors/tenant-rclone.service.ts'),'utf8');
+ const api=fs.readFileSync(path.join(root,'src/mcp/mcp.service.ts'),'utf8');
+ const ui=fs.readFileSync(path.join(root,'src/connectors/connections-panel.ts'),'utf8');
+ assert.match(runtime,/NYX_PUBLIC_TRASH_CLEANUP_ENABLED!=='true'/);
+ assert.match(runtime,/TENANT_TRASH_ACCOUNT_ROOT_REQUIRED/);
+ assert.match(runtime,/requireResource\(\s*ownerId,connectionId,'storage:delete'/);
+ assert.match(runtime,/scope:'entire-provider-account'/);
+ assert.match(runtime,/if\(confirmed!==true\)return/);
+ assert.match(runtime,/pg_try_advisory_lock/);
+ assert.match(runtime,/cleanup','tenant:/);
+ assert.match(runtime,/nyx_rclone_trash_cleanup_v1/);
+ assert.match(runtime,/status:'accepted'/);
+ assert.match(runtime,/providerCompletionUnverified:true/);
+ assert.match(api,/registerTool\('nyx_storage_trash_cleanup'/);
+ assert.match(api,/confirmed:z\.boolean\(\)\.default\(false\)/);
+ assert.match(ui,/Empty entire provider Trash \(permanent\)/);
+ assert.match(ui,/Permanently EMPTY ALL Trash/);
+ assert.match(ui,/confirmed:true/);
+});
