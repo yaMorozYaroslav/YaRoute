@@ -70,7 +70,8 @@ export const sumPayloadSchema = z.object({
   summary: z.string().min(1).max(100000),
   messageCount: z.union([z.number().int().nonnegative(), z.literal('UNKNOWN')]).optional(),
   compactContext: z.string().max(20000).optional(),
-  urgentItems: z.array(z.string().min(1).max(2000)).max(64).default([]),
+  // Omitted means retain the existing session's urgent items; [] explicitly clears them.
+  urgentItems: z.array(z.string().min(1).max(2000)).max(64).optional(),
   nextAction: z.string().max(5000).optional(),
 }).strict();
 export const requestSchema = z.object({
