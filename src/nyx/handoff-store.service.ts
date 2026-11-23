@@ -1,5 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { Pool } from 'pg';
 import { ResourceRef, SumPayload } from './runtime.schema';
 import { NyxResourceStore, sha256 } from './resource-store.service';
@@ -42,6 +43,8 @@ export type Fif = {
   next_action?: string;
   continuity: { predecessor?: ResourceRef };
   message_count: number | 'UNKNOWN';
+  // Historical or caller-supplied counts are preserved as unverified hints, not exact telemetry.
+  unverified_message_count?: number;
 };
 type Checkpoint = { id: string; kind: 'FIF' | 'FIB'; ref: ResourceRef; sha256: string; fingerprint: string; promotionHash?: string; fif: Fif };
 type FibSummary = { markdown: string; data: unknown };
@@ -96,7 +99,7 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
         schema: 'nyx.fif.v1',
         id,
         created_at: old?.fif.created_at ?? now,
-        updated_at: old?.fif.updated_at ?? now,
+        updated_at: now, // A changed source manifest is a fresh immutable checkpoint.
         ...metadata,
         chat_config: old?.fif.chat_config ?? metadata.chat_config,
         compact_context: old?.fif.compact_context ?? '',
@@ -174,7 +177,7 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
   async summarize(owner: string, conversationId: string, handoffs: ResourceRef, payload: SumPayload) {
     assertNoSecrets(payload);
     const id = artifactId(owner, conversationId);
-    const checkpoint = await this.locked(id, async (old, save) => {
+    const result = await this.locked(id, async (old, save) => {
       if (!old) throw new Error('FIF_NOT_INITIALIZED');
       await this.verify(old);
       const semanticHash = sha256(JSON.stringify({
@@ -183,21 +186,32 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
         chat_config: old.fif.chat_config,
         canonical: old.fif.canonical,
       }));
-      if (old.kind === 'FIB' && old.promotionHash === semanticHash) return old;
+      if (old.kind === 'FIB' && old.promotionHash === semanticHash)
+        return { checkpoint: old, transition: 'UNCHANGED' as const };
       const now = new Date().toISOString();
       const fif: Fif = {
         ...old.fif,
         updated_at: now,
-        message_count: payload.messageCount ?? old.fif.message_count,
+        // The public/private caller may supply a number, but this service has no
+        // independent transcript receipt. Never promote it to an exact count.
+        message_count: 'UNKNOWN',
+        unverified_message_count: typeof payload.messageCount === 'number'
+          ? payload.messageCount
+          : old.fif.unverified_message_count ??
+            (typeof old.fif.message_count === 'number' ? old.fif.message_count : undefined),
         compact_context: payload.compactContext ?? payload.summary,
-        urgent_items: payload.urgentItems,
-        next_action: payload.nextAction,
+        // Omitted fields preserve continuity; an explicit [] clears urgent items.
+        urgent_items: payload.urgentItems ?? old.fif.urgent_items ?? [],
+        next_action: payload.nextAction ?? old.fif.next_action,
         continuity: { predecessor: old.ref },
       };
       const data = {
         title: payload.title,
         summary: payload.summary,
         message_count: fif.message_count,
+        message_count_provenance: 'UNVERIFIED_NO_TRANSCRIPT_RECEIPT',
+        ...(fif.unverified_message_count !== undefined ?
+          { unverified_message_count: fif.unverified_message_count } : {}),
         compact_context: fif.compact_context,
         urgent_items: fif.urgent_items,
         next_action: fif.next_action,
@@ -206,9 +220,10 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
       const summary: FibSummary = { markdown: `# ${payload.title}\n\n${payload.summary}\n`, data };
       const next = await this.writeFibRevision(handoffs, old, fif, summary, semanticHash);
       await save(next);
-      return next;
+      return { checkpoint: next, transition: old.kind === 'FIF'
+        ? 'FIF_TO_FIB' as const : 'FIB_REVISION' as const };
     }, handoffs);
-    return { ...checkpoint, conversationId, verified: true };
+    return { ...result.checkpoint, conversationId, verified: true, transition: result.transition };
   }
 
   private accessFor(config: ChatConfig, scope: ChatScope): ChatAccess {
@@ -235,14 +250,37 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
   }
 
   private async writeFibRevision(handoffs: ResourceRef, old: Checkpoint, fif: Fif, summary: FibSummary, promotionHash: string) {
-    const hash = sha256(JSON.stringify([promotionHash, old.sha256]));
+    // Domain-separate revisions with predecessor metadata from older v1 artifacts.
+    // An interrupted legacy upload must never collide with a new immutable layout.
+    const hash = sha256(JSON.stringify(['nyx.fib.revision.v2', promotionHash, old.sha256]));
     const root = `${handoffs.path}/FIB_${old.id}`;
+    // Crash recovery: the first immutable member fixes the timestamp used by
+    // every remaining member. Retrying after a partial upload must reproduce
+    // identical bytes, not collide on a newly computed updated_at value.
+    const firstRef = { ...handoffs, path: `${root}/revisions/${hash}/fif.json` };
+    const priorText = await this.resources.optionalRead(firstRef);
+    if (priorText !== undefined) {
+      let prior: Fif;
+      try { prior = JSON.parse(priorText); }
+      catch { throw new Error('FIB_RECOVERY_INVALID'); }
+      if (!prior || typeof prior.updated_at !== 'string' ||
+          !Number.isFinite(Date.parse(prior.updated_at)) ||
+          !isDeepStrictEqual(prior, JSON.parse(JSON.stringify({ ...fif, updated_at: prior.updated_at }))))
+        throw new Error('FIB_RECOVERY_CONFLICT');
+      const requestedUpdatedAt = fif.updated_at;
+      fif.updated_at = prior.updated_at;
+      if (summary.data && typeof summary.data === 'object' &&
+          !Array.isArray(summary.data) &&
+          (summary.data as Record<string, unknown>).updated_at === requestedUpdatedAt)
+        summary = { ...summary, data: { ...(summary.data as Record<string, unknown>),
+          updated_at: prior.updated_at } };
+    }
     const outputs: Record<string, string> = {
       'fif.json': JSON.stringify(fif, null, 2) + '\n',
       'summary.md': summary.markdown,
       'summary.json': JSON.stringify(summary.data, null, 2) + '\n',
       'sources.json': JSON.stringify(fif.source_refs, null, 2) + '\n',
-      'continuity.json': JSON.stringify({ id: old.id, predecessor: old.ref }, null, 2) + '\n',
+      'continuity.json': JSON.stringify({ id: old.id, predecessor: old.ref, predecessor_kind: old.kind, predecessor_sha256: old.sha256 }, null, 2) + '\n',
     };
     const refs = [];
     for (const [file, content] of Object.entries(outputs)) {
@@ -250,14 +288,18 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
       refs.push({ ref, ...(await this.resources.createVerified(ref, content)) });
     }
     const ref = { ...handoffs, path: `${root}/revisions/${hash}/manifest.json` };
-    const text = JSON.stringify({ schema: 'nyx.fib.v1', id: old.id, revision: hash, files: refs }, null, 2) + '\n';
+    const text = JSON.stringify({ schema: 'nyx.fib.v1', id: old.id, revision: hash, predecessor: { kind: old.kind, ref: old.ref, sha256: old.sha256 }, files: refs }, null, 2) + '\n';
     const receipt = await this.resources.createVerified(ref, text);
-    return { ...old, kind: 'FIB' as const, ref, sha256: receipt.sha256, promotionHash, fingerprint: sha256(JSON.stringify(fif)), fif };
+    const next = { ...old, kind: 'FIB' as const, ref, sha256: receipt.sha256,
+      promotionHash, fingerprint: sha256(JSON.stringify(fif)), fif };
+    // Composite verification runs BEFORE the lineage ledger advances.
+    await this.verify(next);
+    return next;
   }
 
   private async readFibSummary(checkpoint: Checkpoint): Promise<FibSummary> {
     const manifest = JSON.parse(await this.resources.read(checkpoint.ref));
-    if (manifest.schema !== 'nyx.fib.v1' || !Array.isArray(manifest.files)) throw new Error('FIB_MANIFEST_INVALID');
+    this.validateFibManifest(checkpoint, manifest);
     const find = (name: string) => manifest.files.find((item: any) => item?.ref?.path?.endsWith('/' + name));
     const markdown = find('summary.md');
     const data = find('summary.json');
@@ -303,14 +345,69 @@ export class HandoffStore implements OnModuleInit, OnModuleDestroy, FifPromotion
     finally { if (this.pending.get(id) === work) this.pending.delete(id); }
   }
 
+  /** The FIB manifest is the final commit marker for exactly five files. */
+  private validateFibManifest(checkpoint: Checkpoint, manifest: any) {
+    const required = new Set(['fif.json', 'summary.md', 'summary.json', 'sources.json', 'continuity.json']);
+    if (!manifest || manifest.schema !== 'nyx.fib.v1' ||
+        manifest.id !== checkpoint.id || !/^[a-f0-9]{64}$/.test(manifest.revision ?? '') ||
+        !Array.isArray(manifest.files) || manifest.files.length !== required.size ||
+        !checkpoint.ref.path.endsWith('/revisions/' + manifest.revision + '/manifest.json'))
+      throw new Error('FIB_MANIFEST_INVALID');
+    const prefix = checkpoint.ref.path.slice(0, -'manifest.json'.length);
+    const seen = new Set<string>();
+    for (const file of manifest.files) {
+      const ref = file?.ref;
+      const name = typeof ref?.path === 'string' && ref.path.startsWith(prefix)
+        ? ref.path.slice(prefix.length) : '';
+      if (!required.has(name) || seen.has(name) || ref.area !== checkpoint.ref.area ||
+          ref.driveId !== checkpoint.ref.driveId ||
+          !/^[a-f0-9]{64}$/.test(file?.sha256 ?? '') || file.verified !== true)
+        throw new Error('FIB_MANIFEST_INVALID');
+      seen.add(name);
+    }
+    // Optional for backwards compatibility with previously created v1 manifests.
+    if (manifest.predecessor !== undefined) {
+      const prev = manifest.predecessor;
+      if (!['FIF', 'FIB'].includes(prev?.kind) ||
+          typeof prev?.ref?.path !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(prev.sha256 ?? ''))
+        throw new Error('FIB_LINEAGE_MISMATCH');
+    }
+  }
+
   private async verify(checkpoint: Checkpoint) {
     const content = await this.resources.read(checkpoint.ref);
     if (sha256(content) !== checkpoint.sha256) throw new Error('HANDOFF_CHECKPOINT_CHANGED');
     const document = JSON.parse(content);
-    if (document.schema === 'nyx.fib.v1') {
+    if (checkpoint.kind === 'FIB') {
+      this.validateFibManifest(checkpoint, document);
       for (const file of document.files) {
         if (sha256(await this.resources.read(file.ref)) !== file.sha256) throw new Error('FIB_MEMBER_CHANGED');
       }
-    }
+      const find = (name: string) => document.files.find((entry: any) => entry.ref.path.endsWith('/' + name));
+      let fif: Fif;
+      let sources: unknown;
+      let continuity: any;
+      try {
+        fif = JSON.parse(await this.resources.read(find('fif.json').ref));
+        sources = JSON.parse(await this.resources.read(find('sources.json').ref));
+        continuity = JSON.parse(await this.resources.read(find('continuity.json').ref));
+      } catch { throw new Error('FIB_MEMBER_INVALID'); }
+      // JSONB may reorder keys; compare normalized structural values, not
+      // serialization order. JSON round-trip also ignores optional undefined keys.
+      const fromLedger = JSON.parse(JSON.stringify(checkpoint.fif));
+      if (fif.schema !== 'nyx.fif.v1' || fif.id !== checkpoint.id ||
+          !isDeepStrictEqual(fif, fromLedger) ||
+          !isDeepStrictEqual(sources, fif.source_refs) ||
+          continuity.id !== checkpoint.id ||
+          !isDeepStrictEqual(continuity.predecessor, fif.continuity.predecessor))
+        throw new Error('FIB_LINEAGE_MISMATCH');
+      if (document.predecessor !== undefined &&
+          (!isDeepStrictEqual(document.predecessor.ref, fif.continuity.predecessor) ||
+           document.predecessor.sha256 !== continuity.predecessor_sha256 ||
+           document.predecessor.kind !== continuity.predecessor_kind))
+        throw new Error('FIB_LINEAGE_MISMATCH');
+    } else if (document.schema !== 'nyx.fif.v1' || document.id !== checkpoint.id)
+      throw new Error('FIF_CHECKPOINT_INVALID');
   }
 }

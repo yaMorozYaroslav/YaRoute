@@ -96,6 +96,43 @@ test('promoted FIB member tampering blocks further SUM promotion', async () => {
 
 
 
+test('FIB readback accepts JSONB object key reordering and omitted undefined fields', async () => {
+  const r=resources(),h=handoffs(r);
+  const metadata={command:{name:'begin',targets:[],depth:'basic'},canonical:locator.canonical,
+    cli:{version:'test',sha256:'test'},loaded_context:{areas:[],sources:[]},source_refs:[]};
+  await h.initialize('owner','jsonb-order',ref('Handoffs'),metadata);
+  const checkpoint=await h.promote('owner','jsonb-order',ref('Handoffs'),{markdown:'Keep',data:{}});
+  const plain=JSON.parse(JSON.stringify(checkpoint.fif));
+  const reordered=Object.fromEntries(Object.entries(plain).reverse());
+  await h.verify({...checkpoint,fif:reordered});
+});
+
+test('FIB manifest rejects missing members even when forged checkpoint hashes match', async () => {
+  const r=resources(),h=handoffs(r);
+  const metadata={command:{name:'begin',targets:[],depth:'basic'},canonical:locator.canonical,
+    cli:{version:'test',sha256:'test'},loaded_context:{areas:[],sources:[]},source_refs:[]};
+  await h.initialize('owner','manifest-short',ref('Handoffs'),metadata);
+  const checkpoint=await h.promote('owner','manifest-short',ref('Handoffs'),{markdown:'Keep',data:{}});
+  const original=JSON.parse(r.files.get(checkpoint.ref.path));
+  const tampered={...original,files:original.files.slice(1)};
+  const content=JSON.stringify(tampered);
+  r.files.set(checkpoint.ref.path,content);
+  await assert.rejects(()=>h.verify({...checkpoint,sha256:sha256(content)}),/FIB_MANIFEST_INVALID/);
+});
+
+test('FIB lineage rejects substituted predecessor even when manifest checksum is forged', async () => {
+  const r=resources(),h=handoffs(r);
+  const metadata={command:{name:'begin',targets:[],depth:'basic'},canonical:locator.canonical,
+    cli:{version:'test',sha256:'test'},loaded_context:{areas:[],sources:[]},source_refs:[]};
+  await h.initialize('owner','lineage-forgery',ref('Handoffs'),metadata);
+  const checkpoint=await h.promote('owner','lineage-forgery',ref('Handoffs'),{markdown:'Keep',data:{}});
+  const manifest=JSON.parse(r.files.get(checkpoint.ref.path));
+  manifest.predecessor.ref.path='unrelated/other-session.json';
+  const content=JSON.stringify(manifest);
+  r.files.set(checkpoint.ref.path,content);
+  await assert.rejects(()=>h.verify({...checkpoint,sha256:sha256(content)}),/FIB_LINEAGE_MISMATCH/);
+});
+
 test('active key sources are read before command dispatch and pinned changes fail closed', async () => {
   const r = resources();
   const cli = makeCli();

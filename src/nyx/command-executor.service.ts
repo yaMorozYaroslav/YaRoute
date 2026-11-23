@@ -118,6 +118,8 @@ export class NyxCommandExecutor {
         status: 'COMPLETE',
         conversation_id: fib.conversationId,
         fif: { id: fib.id, kind: fib.kind, ref: fib.ref, sha256: fib.sha256, verified: fib.verified },
+        continuity: { transition: fib.transition, artifact_id: fib.id,
+          checkpoint_sha256: fib.sha256, verified: fib.verified },
         files_to_paste: [],
         summary: {
           title: plan.payload!.title,
