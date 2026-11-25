@@ -71,7 +71,22 @@ export class GithubWriteConnector {
       ...(body===undefined?{}:{body:JSON.stringify(body)}),
       redirect:'error',signal:AbortSignal.timeout(10000),
     });
-    if(!response.ok)throw new Error(response.status===409?'GITHUB_CONFLICT':'GITHUB_API_FAILED');
+    // Only expose provider HTTP category. Never include response bodies, URLs,
+    // tokens, or private repository metadata in MCP error messages.
+    if(!response.ok) {
+      const status=response.status;
+      if(status===409)throw new Error('GITHUB_CONFLICT');
+      const remaining=response.headers?.get('x-ratelimit-remaining');
+      const retryAfter=response.headers?.get('retry-after');
+      if(status===429 || (status===403 && (remaining==='0' || retryAfter!==null && retryAfter!==undefined)))
+        throw new Error('GITHUB_PROVIDER_RATE_LIMITED');
+      if(status===401)throw new Error('GITHUB_PROVIDER_UNAUTHORIZED');
+      if(status===403)throw new Error('GITHUB_PROVIDER_FORBIDDEN');
+      if(status===404)throw new Error('GITHUB_PROVIDER_NOT_FOUND');
+      if(status===422)throw new Error('GITHUB_PROVIDER_VALIDATION_FAILED');
+      if(status>=500 && status<=599)throw new Error('GITHUB_PROVIDER_TEMPORARY_FAILURE');
+      throw new Error('GITHUB_PROVIDER_HTTP_'+String(status));
+    }
     const raw=await response.text();
     if(raw.length>100000)throw new Error('GITHUB_RESPONSE_TOO_LARGE');
     try{return JSON.parse(raw);}catch{throw new Error('GITHUB_RESPONSE_INVALID');}
