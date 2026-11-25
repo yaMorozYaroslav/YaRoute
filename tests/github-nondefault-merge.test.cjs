@@ -81,6 +81,7 @@ test('ready-for-review PR creation targets only verified unprotected nondefault 
   calls.push({p,method:options.method,body:options.body?JSON.parse(options.body):null});
   let result;
   if(options.method==='GET'&&p==='')result={default_branch:'master'};
+  else if(options.method==='GET'&&p==='/pulls?state=all&per_page=100')result=[];
   else if(options.method==='GET'&&p==='/branches/tester')
    result={name:'tester',protected:false,commit:{sha:BASE}};
   else if(options.method==='GET'&&p==='/branches/nyx%2Freview')
