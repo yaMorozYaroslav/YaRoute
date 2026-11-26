@@ -97,6 +97,7 @@ test('ready-for-review PR creation targets only verified unprotected nondefault 
   'nyx/review','tester','Review verified change','',HEAD,BASE);
  assert.equal(result.readyForReview,true);
  assert.equal(result.merged,false);
+ assert.equal(calls.filter(x=>x.method==='GET'&&x.p==='/pulls?state=all&per_page=100').length,1);
  assert.deepEqual(calls.filter(x=>x.method==='POST').map(x=>x.body),[
   {head:'nyx/review',base:'tester',title:'Review verified change',
    body:'',draft:false,maintainer_can_modify:false},
