@@ -57,3 +57,7 @@ After the reviewed Dev and Tester changes are merged **and the target app is act
 - Weekly, or only when requested: 3–5 lines covering material releases, failed gates and next action.
 
 Phase-1 reports are diagnostic and cannot independently certify production readiness. Add GitHub Actions test-result attestation, authoritative Drive archive validation, Template inventory and isolated CLI matrix in later reviewed transactions; preserve this evidence distinction in all user-visible summaries.
+
+## Tester staging limitation (26 November 2026)
+
+The **public GET /health/checklist endpoint** and read-only GitHub exact-SHA collector are staged in this Tester candidate, and they use no private canonical source. The separate `nyx_runtime_checklist` MCP tool **is not registered in this Tester candidate**: `src/mcp/mcp.service.ts` exceeds NestNyx's current 65,536-byte reviewed file-staging limit, and the external GitHub integration cannot write this repository (HTTP 403). Do not advertise the MCP tool as available after refreshing until a follow-up deployment explicitly verifies its registration. The dedicated public HTTP checklist is the available integration path after this branch is merged and deployed; the private `GET /nyx/checklist` remains disabled by the public-tenant guard.
