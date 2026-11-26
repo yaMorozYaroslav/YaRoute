@@ -91,6 +91,29 @@ function binaryPath(tool:SafeCli){
   return binary;
 }
 
+/** Non-sensitive readiness metadata for existing nyx_capabilities (no token/API calls).
+ * Artifact presence is NOT binary attestation: actual CLI probes validate SHA-256.
+ */
+export function publicGithubCliReadiness(
+  env:NodeJS.ProcessEnv=process.env,
+  present:(filename:string)=>boolean=existsSync,
+) {
+  const publicConnectors=env.NYX_DEPLOYMENT_MODE==='public' &&
+    env.NYX_PUBLIC_CONNECTORS_ENABLED==='true';
+  if(!publicConnectors) return {
+    publicConnectors:false,pilotEnabled:false,
+    gitBinaryPresent:false,ghArtifactsPresent:false,probeVerified:false,
+  };
+  return {
+    publicConnectors:true,
+    pilotEnabled:env.NYX_GITHUB_CLI_PILOT_ENABLED==='true',
+    gitBinaryPresent:['/usr/bin/git','/bin/git'].some(present),
+    ghArtifactsPresent:present(path.resolve('.bin/gh')) &&
+      present(path.resolve('.bin/gh-manifest.json')),
+    probeVerified:false,
+  };
+}
+
 /** Verified owner + one selected repository; no global PAT or user's host gh auth. */
 export class SafeGithubCli {
   constructor(private readonly connections:ConnectorsService,
