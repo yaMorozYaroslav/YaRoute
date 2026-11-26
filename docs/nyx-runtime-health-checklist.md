@@ -32,7 +32,18 @@ Every row must have `PASS`, `WARN`, `FAIL`, or `UNVERIFIED`; a redacted evidence
 5. **Runtime and identity.** Test `/health`, exact deployed commit, configured storage capabilities without exposing paths/tokens, MCP OAuth, GitHub PR flow, and user isolation. Health should degrade to `UNVERIFIED` instead of querying private data from a public tenant session.
 6. **Production gate.** Only a reviewed, CI-passing Tester candidate may open a *draft* PR to protected Master. The human code owner performs approval. No automatic Master merge, secrets disclosure, or premature Heroku cutover.
 
-### Endpoints / access boundary
+#
+## Phase 2 — live tool for ChatGPT tool refresh
+
+The authenticated MCP tool `nyx_runtime_checklist` (zero arguments) gives a bounded live process and public CI view. It reads `HEROKU_SLUG_COMMIT`/build-info, independently fetches the public `yaMorozYaroslav/YaRoute:tester` HEAD and GitHub check runs for **that exact running SHA**, and records whether the running app matches Tester. Only exact-SHA completed successful build and audit/security checks count toward `ci.workflow=PASS`. Pending, missing, stale and provider-error checks cannot count as success. The response includes no Github/Drive credentials and no mutation.
+
+In the **public multi-user deployment**, the tool MUST NOT access the private operator bootstrap/Head, Rclone, Template source text, or private CLI. Canonical and Template checks remain `UNVERIFIED`, not fake failures or success. In the **private operator deployment**, the same tool may inspect the existing bounded CLI registry, approved execution profile and key-pin statuses using already-authorized private service dependencies. No mutating CLI is executed; the optional `hel` inspection is read-only. No user's profile may grant another user's access.
+
+`ci.workflow=PASS` means the matching GitHub build/security checks succeeded. `ci.functions=UNVERIFIED` and `testCaseCounts.*=null` remain until a separate exact-SHA artifact has independently attested real test cases, skips and component mapping. Do **not** substitute passing job labels for per-function test coverage. If GitHub's unauthenticated public API is unavailable or rate-limited, report `UNVERIFIED` and leave any private state untouched.
+
+After the reviewed Dev and Tester changes are merged **and the target app is actually deployed**, refresh NestNyxDev tools and call `nyx_runtime_checklist`. Verify its reported runtime SHA matches an independently fetched Tester commit. Tool discovery in ChatGPT is not by itself deployment evidence; a CI-passing PR branch is not a running Heroku dyno.
+
+## Endpoints / access boundary
 
 - `GET /health`: existing public, minimal liveness endpoint; unchanged.
 - `GET /nyx/checklist`: **private legacy API route** guarded by `X-Nyx-Key`; fails closed in public OAuth tenant mode. It intentionally does not expose paths, credential material, source contents or GitHub token data. This first version does **not** make the checklist available through a public tenant or Nyx GPT plugin.
