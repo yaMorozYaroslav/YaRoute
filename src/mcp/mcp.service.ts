@@ -9,6 +9,7 @@ import { NyxTenantKeyService } from '../nyx/tenant-key.service';
 import { preparePublicIniPlan } from '../nyx/public-init-plan';
 import { extractKeySignals } from '../nyx/key-chat-extractor';
 import { RuntimeMaintenanceService } from './runtime-maintenance.service';
+import { composeRuntimeHealthReport, fetchPublicGitHubEvidence } from './runtime-health-report';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { toNodeHandler } from '@modelcontextprotocol/node';
@@ -123,6 +124,7 @@ export class McpService {
     },async()=>this.safeTool(async()=>({schema:'nyx.ui-diagnostic.v1',result:'resource-requested',
       noCredentialsRead:true,noStorageAccess:true})));
 
+
     // Capability discovery is advisory: canonical Head/nyxcli.json defines semantics.
     // A supported tool failing authorization is NOT a GPT fallback condition.
     server.registerTool(
@@ -193,6 +195,56 @@ export class McpService {
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
       })),
     );
+
+    // Any authenticated public tenant can inspect public app/CI evidence only.
+    // The operator's private Head, Drive routing, Template keys, and CLI remain
+    // inaccessible in public mode. This tool NEVER executes CLI mutations.
+    server.registerTool('nyx_runtime_checklist', {
+      title: 'Inspect running NestNyx and Tester CI health checklist',
+      description: 'Read-only live process SHA and exact-SHA GitHub CI status, plus private canonical CLI/profile diagnostics only for an authorized private operator. Missing evidence is UNVERIFIED, never a successful test. No secrets or mutations.',
+      inputSchema: z.object({}).strict(),
+      annotations: { readOnlyHint: true, destructiveHint: false,
+        idempotentHint: true, openWorldHint: true },
+    }, async () => this.safeTool(async () => {
+      const owner = this.connectorOwner(); // verified OAuth subject, not a caller argument
+      const runtimeCommit = process.env.HEROKU_SLUG_COMMIT || (() => {
+        try { return (require('../build-info.json') as { commit?: string }).commit || ''; }
+        catch { return ''; }
+      })();
+      const service = process.env.NYX_SERVICE_NAME?.trim() || 'NestNyx';
+      const evidence = await fetchPublicGitHubEvidence(runtimeCommit);
+      const deploymentMode = process.env.NYX_DEPLOYMENT_MODE === 'public' ? 'public' : 'private';
+      if (deploymentMode === 'public') {
+        // Never call a private bootstrap, Rclone, or Head cache for public users.
+        return composeRuntimeHealthReport({ runtimeCommit, service, deploymentMode }, evidence);
+      }
+      try {
+        const locator = await this.bootstrap.locate();
+        const current = await this.cliRegistry.current(locator);
+        const profile = await this.commands.inspectRuntimeProfile(locator, current.hash);
+        let effectiveCommands: string[] | undefined;
+        if (profile.ready) {
+          try {
+            // Canonical hel is read-only. Availability does not imply other
+            // CLI operations have been smoke-tested.
+            const help = await this.commands.execute({ command: 'hel' }, owner) as {
+              status?: string; commands?: Array<{ name: string; executable: boolean }>;
+            };
+            if (help.status === 'COMPLETE' && Array.isArray(help.commands)) {
+              effectiveCommands = help.commands.filter(c => c.executable).map(c => c.name);
+            }
+          } catch { /* leave unverified rather than inventing bindings */ }
+        }
+        return composeRuntimeHealthReport({
+          runtimeCommit, service, deploymentMode, canonical: locator.canonical,
+          cli: { version: current.cli.version, sha256: current.hash,
+            commands: current.cli.commands },
+          profile, effectiveCommands,
+        }, evidence);
+      } catch {
+        return composeRuntimeHealthReport({ runtimeCommit, service, deploymentMode }, evidence);
+      }
+    }));
 
     server.registerTool(
       'nyx_risk_preview',
