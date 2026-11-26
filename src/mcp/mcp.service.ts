@@ -1217,7 +1217,7 @@ export class McpService {
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
       server.registerTool('nyx_key_chain',{
         title:'Execute Nyx KEY file then seed in one verified transaction',
-        description:'Strict Dev KEY-only adapter: accepts Nyx key oF x oS [Go], Nyx key oFxS [Go], or explicit Nyx key oF x key oS [Go]. Executes F then S atomically in authenticated tenant-isolated Neon. oS creates pending-validation seed proposals only. Requires explicit bounded chat messages; does not access hidden ChatGPT transcript, core GEN/CAN, or private MAIN.',
+        description:'Strict Dev KEY-only adapter: accepts Nyx key oFxS (local), Nyx key oFxSL (local), Nyx key oFxSG (global), Nyx key oFxS Go (global), or explicit Nyx key oF x key oS [Go]. Executes F then S atomically in authenticated tenant-isolated Neon. oS creates pending-validation seed proposals only. KEY aliases are pending Head canonicalization; mixed forms and reversed stages are rejected. Requires explicit bounded chat messages; does not access hidden ChatGPT transcript, core GEN/CAN, or private MAIN.',
         inputSchema:z.object({
           command:z.string().min(8).max(100),
           messages:chatMessagesSchema,
