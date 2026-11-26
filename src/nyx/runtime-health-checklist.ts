@@ -27,6 +27,7 @@ export function buildNyxRuntimeChecklist(input: {
   profile?: ProfileDiagnostic;
   effectiveCommands?: string[];
   sourceError?: string;
+  privateBootstrapUnavailable?: boolean;
 }) {
   const checks: ChecklistItem[] = [];
   const add = (id: string, status: ChecklistStatus, evidence: string, details?: Record<string, unknown>) =>
@@ -38,7 +39,10 @@ export function buildNyxRuntimeChecklist(input: {
     { runtimeCommit: commit, matchesTester: null });
 
   if (input.sourceError || !input.canonical || !input.cli) {
-    add('canonical.registry', 'FAIL', 'Live canonical CLI/bootstrap could not be resolved.');
+    add('canonical.registry', input.privateBootstrapUnavailable ? 'UNVERIFIED' : 'FAIL',
+      input.privateBootstrapUnavailable
+        ? 'Private operator bootstrap is intentionally inaccessible to public tenants.'
+        : 'Live canonical CLI/bootstrap could not be resolved.');
     add('canonical.bundles', 'UNVERIFIED', 'Core bundle bytes, manifest and hashes not compared.');
     add('cli.contracts', 'UNVERIFIED', 'Canonical command registry unavailable.');
     add('runtime.profile', 'UNVERIFIED', 'Execution profile not inspected.');
