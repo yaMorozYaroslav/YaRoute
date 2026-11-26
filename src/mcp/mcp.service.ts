@@ -1211,6 +1211,33 @@ export class McpService {
     }));
 
 
+    // Single-call Dev adapter for accepted pending KEY-only shorthand.
+    // It uses only caller-supplied messages; it never reads private chat
+    // history or changes canonical Head grammar or bundle state.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      server.registerTool('nyx_key_chain',{
+        title:'Execute Nyx KEY file then seed in one verified transaction',
+        description:'Strict Dev KEY-only adapter: accepts Nyx key oF x oS [Go], Nyx key oFxS [Go], or explicit Nyx key oF x key oS [Go]. Executes F then S atomically in authenticated tenant-isolated Neon. oS creates pending-validation seed proposals only. Requires explicit bounded chat messages; does not access hidden ChatGPT transcript, core GEN/CAN, or private MAIN.',
+        inputSchema:z.object({
+          command:z.string().min(8).max(100),
+          messages:chatMessagesSchema,
+          transactionId:z.string().regex(/^[A-Za-z0-9_-]{1,73}$/).optional(),
+        }).strict(),
+        annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async({command,messages,transactionId})=>this.safeTool(async()=>{
+        const owner=this.connectorOwner();
+        const extracted=extractKeySignals(messages);
+        if(!extracted.candidates.length)throw Error('KEY_NO_GROUNDED_CANDIDATES');
+        const candidates=extracted.candidates.map(({evidence,...candidate})=>candidate);
+        const result=await this.tenantKeys.executeFs(owner,{
+          command,candidates,transactionId,
+        });
+        return {...result,source:'explicit-supplied-chat',
+          suppliedMessageCount:extracted.suppliedMessageCount,
+          selectedCandidateCount:candidates.length};
+      }));
+    }
+
     // Authenticated public tenants can preflight INI syntax without crossing
     // the private MAIN bootstrap boundary. Separate authorized provider reads
     // remain mandatory before anyone may claim source-verified initialization.
