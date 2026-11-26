@@ -1186,7 +1186,7 @@ export class McpService {
     const chatMessagesSchema = z.array(chatMessageSchema).min(1).max(80);
     server.registerTool('nyx_key_extract_preview',{
       title:'Preview actionable KEY signals from supplied chat messages',
-      description:'Read-only extractor for authenticated users; accepts only explicitly supplied bounded chat text. User instructions only; no ChatGPT transcript access, storage writes, seed or canonical changes.',
+      description:'Conservative preview of explicit new change instructions from bounded caller-supplied user messages. Ignores bare Nyx commands, requests to test/check/explain, hypothetical suggestions, assistant claims, quoted content and code. Reports ignored-reason counts; no ChatGPT transcript access, storage writes, seeds or canonical changes.',
       inputSchema:z.object({messages:chatMessagesSchema}).strict(),
       annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     },async({messages})=>this.safeTool(async()=>{
@@ -1229,7 +1229,7 @@ export class McpService {
     if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
       server.registerTool('nyx_key_chain',{
         title:'Execute Nyx KEY file then seed in one verified transaction',
-        description:'Strict Dev KEY-only adapter: accepts Nyx key oFxS (local), Nyx key oFxSL (local), Nyx key oFxSG (global), Nyx key oFxS Go (global), or explicit Nyx key oF x key oS [Go]. Executes F then S atomically in authenticated tenant-isolated Neon. oS creates pending-validation seed proposals only. KEY aliases are pending Head canonicalization; mixed forms and reversed stages are rejected. Requires explicit bounded chat messages; does not access hidden ChatGPT transcript, core GEN/CAN, or private MAIN.',
+        description:'Strict Dev KEY-only adapter: accepts Nyx key oFxS (local), Nyx key oFxSL (local), Nyx key oFxSG (global), Nyx key oFxS Go (global), or explicit Nyx key oF x key oS [Go]. Executes F then S atomically in authenticated tenant-isolated Neon only when explicit user messages contain grounded, actionable new changes. Bare commands and test/check/explain requests do not become KEY candidates; unsupported input fails closed. oS creates pending-validation seed proposals only. KEY aliases remain pending Head canonicalization; no hidden chat history, core GEN/CAN or private MAIN access.',
         inputSchema:z.object({
           command:z.string().min(8).max(100),
           messages:chatMessagesSchema,
