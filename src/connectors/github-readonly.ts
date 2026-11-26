@@ -3,6 +3,9 @@ import { ConnectorRegistry, type ConnectorCapability } from './connector-registr
 /** Implementations must obtain short-lived installation tokens from a secure vault. */
 export interface GithubInstallationCredentials {
   tokenFor(ownerId: string, connectionId: string, installationId: string, repo: string, capability: ConnectorCapability, boundary?: {branch?:string; path?:string}): Promise<string>;
+  // Dedicated one-repository PR-ready token; requires BOTH pulls:write and contents:write grants.
+  // Implementations may omit it; callers must fail closed rather than downgrade to a generic token.
+  tokenForReady?(ownerId: string, connectionId: string, installationId: string, repo: string, branch: string): Promise<string>;
 }
 export type GithubHttp = (url: string, init: RequestInit) => Promise<Response>;
 export class GithubReadonlyConnector {
