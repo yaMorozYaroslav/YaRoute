@@ -544,7 +544,6 @@ export class GithubWriteConnector {
     if(!head.startsWith('nyx/') || head===base ||
        pr?.state!=='open' || pr?.draft!==false ||
        pr?.head?.sha!==expectedHeadSha ||
-       pr?.base?.sha!==expectedBaseSha ||
        pr?.head?.repo?.full_name!==repo ||
        pr?.base?.repo?.full_name!==repo ||
        pr?.mergeable!==true)
@@ -553,6 +552,9 @@ export class GithubWriteConnector {
       undefined,{branch:base});
     if(meta?.default_branch===base)
       throw new Error('GITHUB_DEFAULT_BRANCH_WRITE_FORBIDDEN');
+    // GitHub PR.base.sha can reflect an earlier base tip after other PRs merge.
+    // Authorize against the *live* selected branch SHA twice; keep strict
+    // head SHA, repo, default-branch, protected-branch and CI checks.
     const branch=await this.call(owner,id,repo,'resources:read','GET',
       '/branches/'+encodeURIComponent(base),undefined,{branch:base});
     if(branch?.name!==base || branch?.protected!==false ||
@@ -580,7 +582,9 @@ export class GithubWriteConnector {
       '/branches/'+encodeURIComponent(base),undefined,{branch:base});
     if(again?.state!=='open'||again?.draft!==false||
        again?.head?.sha!==expectedHeadSha||
-       again?.base?.sha!==expectedBaseSha||
+       again?.head?.repo?.full_name!==repo||
+       again?.base?.repo?.full_name!==repo||
+       again?.base?.ref!==base||
        latest?.commit?.sha!==expectedBaseSha||
        latest?.protected!==false)
       throw new Error('GITHUB_REVIEW_MERGE_STALE');
