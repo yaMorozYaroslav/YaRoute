@@ -219,4 +219,34 @@ export class GithubAppService {
     if(typeof token.token!=='string'||token.token.length<15) throw new Error('GITHUB_TOKEN_UNAVAILABLE');
     return token.token;
   }
+
+  /**
+   * The GraphQL markPullRequestReadyForReview mutation requires the App's
+   * content and PR write permissions together. Mint a short-lived token
+   * confined to one selected repository and a nyx/* branch, never a user PAT.
+   */
+  async tokenForReady(ownerId:string,connectionId:string,installationId:string,
+    repo:string,branch:string):Promise<string> {
+    if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..') ||
+       !/^nyx\/[A-Za-z0-9][A-Za-z0-9._/-]{0,95}$/.test(branch) ||
+       branch.includes('..') || branch.includes('//'))
+      throw new Error('GITHUB_READY_SCOPE_INVALID');
+    if(!/^[1-9]\d{0,19}$/.test(installationId))
+      throw new Error('GITHUB_INSTALLATION_INVALID');
+    const boundary={kind:'repository' as const,id:repo,branch};
+    const policy=this.connections.registryPolicy();
+    const pulls=await policy.requireResource(ownerId,connectionId,'pulls:write',boundary);
+    const contents=await policy.requireResource(ownerId,connectionId,'contents:write',boundary);
+    if(pulls.provider!=='github' || contents.provider!=='github' ||
+       pulls.installationId!==installationId || contents.installationId!==installationId)
+      throw new Error('GITHUB_READY_INSTALLATION_MISMATCH');
+    const token=await requestGitHub('/app/installations/'+installationId+'/access_tokens',
+      'POST',appJwt(),{
+        repositories:[repo.split('/')[1]],
+        permissions:{metadata:'read',pull_requests:'write',contents:'write'},
+      });
+    if(typeof token.token!=='string' || token.token.length<15)
+      throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
+    return token.token;
+  }
 }

@@ -773,6 +773,18 @@ export class McpService {
       this.limitedConnectionApi(id,()=>this.githubWrites.draftPullToNonDefault(
         this.connectorOwner(),id,repo,branch,baseBranch,title,body))));
 
+    server.registerTool('nyx_connection_github_pr_ready_to_ref',{
+      title:'Mark one verified NYX draft PR ready for review',
+      description:'Convert one same-repository nyx-prefixed draft PR into ready status using an exact head/base SHA and independently verified unprotected non-default target. Uses one-repository App token with contents:write + pulls:write. GitHub may trigger repository CI or auto-merge workflows; this tool itself never merges or deploys. No arbitrary gh/shell, no default/master target.',
+      inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+        prNumber:z.number().int().min(1).max(1000000),
+        expectedHeadSha:z.string().regex(/^[a-f0-9]{40}$/),
+        expectedBaseSha:z.string().regex(/^[a-f0-9]{40}$/)}).strict(),
+      annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true},
+    },async({id,repo,prNumber,expectedHeadSha,expectedBaseSha})=>this.safeTool(()=>
+      this.limitedConnectionApi(id,()=>this.githubWrites.readyReviewedNonDefault(
+        this.connectorOwner(),id,repo,prNumber,expectedHeadSha,expectedBaseSha))));
+
     server.registerTool('nyx_connection_github_merge_reviewed_nondefault',{
       title:'Merge a CI-verified NYX review PR into an unprotected non-default branch',
       description:'Explicit merge only of same-repo nyx-prefixed review PR. Checks precise head and base SHAs, protected status and completed successful CI. Cannot merge master/main/default and never invokes Heroku.',

@@ -527,6 +527,105 @@ export class GithubWriteConnector {
   }
 
   /**
+   * Convert an exact-SHA draft NYX review PR to ready for review.
+   * This may trigger repository-owned automation (including auto-merge).
+   * The tool itself never merges or deploys; protected/default base is refused.
+   */
+  async readyReviewedNonDefault(owner:string,id:string,repo:string,
+    number:number,expectedHeadSha:string,expectedBaseSha:string) {
+    if(!Number.isSafeInteger(number)||number<1||number>1000000||
+       !/^[a-f0-9]{40}$/.test(expectedHeadSha)||
+       !/^[a-f0-9]{40}$/.test(expectedBaseSha))
+      throw new Error('GITHUB_READY_INPUT_INVALID');
+    const getPr=()=>this.call(owner,id,repo,'pulls:read','GET','/pulls/'+number);
+    const pr=await getPr();
+    const head=pr?.head?.ref,base=pr?.base?.ref;
+    this.workingBranch(head);this.workingBranch(base);
+    if(!head.startsWith('nyx/')||head===base||
+       pr?.number!==number||!['open','closed'].includes(pr?.state)||
+       pr?.head?.repo?.full_name!==repo || pr?.base?.repo?.full_name!==repo ||
+       pr?.head?.sha!==expectedHeadSha||pr?.base?.sha!==expectedBaseSha ||
+       typeof pr?.html_url!=='string' ||
+       !pr.html_url.startsWith('https://github.com/'+repo+'/pull/'))
+      throw new Error('GITHUB_READY_PR_UNVERIFIED');
+    const def=await this.defaultBranch(owner,id,repo,'pulls:read',{branch:head});
+    if(def===base||def===head)throw new Error('GITHUB_DEFAULT_BRANCH_WRITE_FORBIDDEN');
+    const verifyBranch=async(ref:string,sha:string)=>{
+      const x=await this.call(owner,id,repo,'resources:read','GET',
+        '/branches/'+encodeURIComponent(ref),undefined,{branch:ref});
+      if(x?.name!==ref||x?.protected!==false||x?.commit?.sha!==sha)
+        throw new Error('GITHUB_READY_BRANCH_CHANGED_OR_PROTECTED');
+    };
+    // Github may have auto-merged already, in which case the operation is idempotent.
+    if(pr.state==='closed' && pr.merged===true && pr.draft===false)
+      return {repo,pr:number,url:pr.html_url,head,base,headSha:expectedHeadSha,
+        ready:true,merged:true,alreadyReady:true,graphQlMutation:false};
+    if(pr.state!=='open'||typeof pr.draft!=='boolean')
+      throw new Error('GITHUB_READY_PR_NOT_OPEN');
+    await verifyBranch(head,expectedHeadSha);
+    await verifyBranch(base,expectedBaseSha);
+    if(pr.draft===false)
+      return {repo,pr:number,url:pr.html_url,head,base,headSha:expectedHeadSha,
+        ready:true,merged:false,alreadyReady:true,graphQlMutation:false};
+    if(typeof pr.node_id!=='string'||! /^[A-Za-z0-9_=-]{8,256}$/.test(pr.node_id))
+      throw new Error('GITHUB_READY_NODE_ID_UNVERIFIED');
+    const latest=await getPr();
+    if(latest?.state!=='open'||latest?.draft!==true||
+       latest?.head?.sha!==expectedHeadSha||latest?.base?.sha!==expectedBaseSha)
+      throw new Error('GITHUB_READY_PR_CHANGED');
+    if(!this.credentials.tokenForReady)
+      throw new Error('GITHUB_READY_SCOPED_TOKEN_UNAVAILABLE');
+    const connection=await this.registry.requireResource(owner,id,'pulls:write',
+      {kind:'repository',id:repo,branch:head});
+    if(connection.provider!=='github'||!connection.installationId)
+      throw new Error('GITHUB_INSTALLATION_REQUIRED');
+    const token=await this.credentials.tokenForReady(owner,id,
+      connection.installationId,repo,head);
+    if(!token)throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
+    const request={
+      query:'mutation MarkNyxReviewReady($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { id isDraft } } }',
+      variables:{id:pr.node_id},
+    };
+    let mutationConfirmed=false;
+    let mutationError:string|undefined;
+    try {
+      const response=await this.http('https://api.github.com/graphql',{
+        method:'POST',headers:{Authorization:'Bearer '+token,
+          Accept:'application/vnd.github+json','Content-Type':'application/json',
+          'X-GitHub-Api-Version':'2022-11-28'},
+        body:JSON.stringify(request),redirect:'error',signal:AbortSignal.timeout(10000),
+      });
+      if(!response.ok){
+        mutationError=response.status===401||response.status===403
+          ?'GITHUB_READY_PROVIDER_FORBIDDEN':'GITHUB_READY_PROVIDER_HTTP_'+response.status;
+      }else{
+        const raw=await response.text();
+        if(raw.length>16000)throw new Error('GITHUB_READY_RESPONSE_TOO_LARGE');
+        let data:any;
+        try{data=JSON.parse(raw);}catch{throw new Error('GITHUB_READY_RESPONSE_INVALID');}
+        mutationConfirmed=Array.isArray(data?.errors)?false:
+          data?.data?.markPullRequestReadyForReview?.pullRequest?.id===pr.node_id &&
+          data?.data?.markPullRequestReadyForReview?.pullRequest?.isDraft===false;
+        if(!mutationConfirmed)mutationError='GITHUB_READY_GRAPHQL_REJECTED';
+      }
+    }catch(e){
+      mutationError=e instanceof Error && e.message.startsWith('GITHUB_READY_')
+        ?e.message:'GITHUB_READY_TRANSPORT_UNVERIFIED';
+    }
+    // Never issue a blind retry of a mutation. Reconcile its effect via REST.
+    const after=await getPr();
+    const accepted=(after?.draft===false &&
+      after?.head?.sha===expectedHeadSha &&
+      after?.head?.repo?.full_name===repo &&
+      after?.base?.repo?.full_name===repo &&
+      (after?.state==='open'||after?.merged===true));
+    if(!accepted)throw new Error(mutationError||'GITHUB_READY_NOT_VERIFIED');
+    return {repo,pr:number,url:pr.html_url,head,base,headSha:expectedHeadSha,
+      ready:true,merged:after.merged===true,alreadyReady:false,
+      graphQlMutation:mutationConfirmed,reconciledAfterError:!mutationConfirmed};
+  }
+
+  /**
    * Explicit reviewed promotion ONLY to an unprotected non-default branch.
    * Require an exact head SHA, exact current base SHA, non-draft same-repository
    * PR, and successful GitHub Actions CI for that head. No admin bypass,
