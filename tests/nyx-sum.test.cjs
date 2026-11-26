@@ -141,16 +141,28 @@ test('SUM mutates continuity and promotes FIF to FIB under the same identity', a
   });
   assert.equal(summed.fif.id, initial.fif.id);
   assert.equal(summed.fif.kind, 'FIB');
+  assert.equal(summed.continuity.transition, 'FIF_TO_FIB');
+  assert.equal(summed.continuity.artifact_id, initial.fif.id);
+  assert.equal(summed.continuity.checkpoint_sha256, summed.fif.sha256);
+  assert.equal(summed.continuity.verified, true);
   assert.equal(summed.summary.title, 'Voice continuity');
-  assert.equal(summed.summary.message_count, 12);
+  assert.equal(summed.summary.message_count, 'UNKNOWN');
   const manifest = JSON.parse(r.files.get(summed.fif.ref.path));
   const fifEntry = manifest.files.find(x => x.ref.path.endsWith('/fif.json'));
   const summaryEntry = manifest.files.find(x => x.ref.path.endsWith('/summary.md'));
   const fif = JSON.parse(r.files.get(fifEntry.ref.path));
-  assert.equal(fif.message_count, 12);
+  assert.equal(fif.message_count, 'UNKNOWN');
+  assert.equal(fif.unverified_message_count, 12);
+  assert.equal(summed.summary.message_count, 'UNKNOWN');
   assert.equal(fif.compact_context, 'Voice chat continuity checkpoint.');
   assert.deepEqual(fif.urgent_items, ['Finish TechLab routing']);
   assert.equal(fif.next_action, 'Work on NoteFlow.');
+  const continuityEntry = manifest.files.find(x => x.ref.path.endsWith('/continuity.json'));
+  const continuity = JSON.parse(r.files.get(continuityEntry.ref.path));
+  assert.equal(manifest.predecessor.kind, 'FIF');
+  assert.equal(manifest.predecessor.sha256, initial.fif.sha256);
+  assert.equal(continuity.predecessor_sha256, initial.fif.sha256);
+  assert.equal(continuity.predecessor_kind, 'FIF');
   assert.equal(fif.chat_config.current.modifier, 'oLN');
   assert.match(r.files.get(summaryEntry.ref.path), /^# Voice continuity/);
 });
@@ -163,10 +175,12 @@ test('identical SUM is idempotent; changed SUM appends a new FIB revision', asyn
   const writes = r.writes.length;
   const b = await e.execute({ command: 'sum', conversationId: initial.conversation_id, payload });
   assert.equal(b.fif.ref.path, a.fif.ref.path);
+  assert.equal(b.continuity.transition, 'UNCHANGED');
   assert.equal(r.writes.length, writes);
   const c = await e.execute({ command: 'sum', conversationId: initial.conversation_id, payload: { ...payload, messageCount: 6, summary: 'New data.' } });
   assert.equal(c.fif.id, a.fif.id);
   assert.notEqual(c.fif.ref.path, a.fif.ref.path);
+  assert.equal(c.continuity.transition, 'FIB_REVISION');
 });
 
 test('scope ++ and -- after SUM preserve FIB shape and summary while changing current scope', async () => {
@@ -201,4 +215,89 @@ test('Head library verifies and reuses a canonical ZIP container', async () => {
   assert.equal(b.library.source, 'canonical-head');
   assert.equal(byteReads, 1);
   assert.equal(lib.snapshot().loaded, true);
+});
+
+test('incremental SUM retains omitted urgent items and next action, explicit [] clears only urgent items', async () => {
+  const r = new MemoryResources(), e = executor(r);
+  const initial = await e.execute({command:'ini', conversationId:'chat-delta'});
+  const a = await e.execute({command:'sum', conversationId:initial.conversation_id,
+    payload:{title:'First',summary:'Initial context', urgentItems:['Carry this'],nextAction:'Finish check'}});
+  const b = await e.execute({command:'sum', conversationId:initial.conversation_id,
+    payload:{title:'Second',summary:'New incremental context only'}});
+  assert.equal(a.fif.id,b.fif.id);
+  assert.notEqual(a.fif.ref.path,b.fif.ref.path);
+  const manifest = JSON.parse(r.files.get(b.fif.ref.path));
+  const fif = JSON.parse(r.files.get(manifest.files.find(x=>x.ref.path.endsWith('/fif.json')).ref.path));
+  assert.deepEqual(fif.urgent_items,['Carry this']);
+  assert.equal(fif.next_action,'Finish check');
+  assert.equal(manifest.predecessor.kind,'FIB');
+  assert.equal(manifest.predecessor.ref.path,a.fif.ref.path);
+  assert.equal(manifest.predecessor.sha256,a.fif.sha256);
+  const c = await e.execute({command:'sum',conversationId:initial.conversation_id,
+    payload:{title:'Third',summary:'Urgent items completed',urgentItems:[]}});
+  const manifestC=JSON.parse(r.files.get(c.fif.ref.path));
+  const fifC=JSON.parse(r.files.get(manifestC.files.find(x=>x.ref.path.endsWith('/fif.json')).ref.path));
+  assert.deepEqual(fifC.urgent_items,[]);
+  assert.equal(fifC.next_action,'Finish check');
+  assert.equal(r.files.has(a.fif.ref.path),true);
+});
+
+test('caller-supplied messageCount never becomes exact telemetry without a transcript receipt', async () => {
+  const r = new MemoryResources(), e = executor(r);
+  const initial=await e.execute({command:'ini',conversationId:'chat-count'});
+  const a=await e.execute({command:'sum',conversationId:initial.conversation_id,
+    payload:{title:'Count',summary:'Summary',messageCount:47}});
+  assert.equal(a.summary.message_count,'UNKNOWN');
+  const manifest=JSON.parse(r.files.get(a.fif.ref.path));
+  const fif=JSON.parse(r.files.get(manifest.files.find(x=>x.ref.path.endsWith('/fif.json')).ref.path));
+  assert.equal(fif.message_count,'UNKNOWN');
+  assert.equal(fif.unverified_message_count,47);
+  const summary=JSON.parse(r.files.get(manifest.files.find(x=>x.ref.path.endsWith('/summary.json')).ref.path));
+  assert.equal(summary.message_count_provenance,'UNVERIFIED_NO_TRANSCRIPT_RECEIPT');
+  assert.equal(summary.unverified_message_count,47);
+});
+
+test('interrupted SUM resumes the original immutable FIB revision without losing FIF', async () => {
+  const r=new MemoryResources(),e=executor(r);
+  const initial=await e.execute({command:'ini',conversationId:'partial-retry'});
+  const originalFif=r.files.get(initial.fif.ref.path);
+  const create=r.createVerified.bind(r);
+  let failed=false;
+  r.createVerified=async (ref,text,options)=>{
+    if(!failed && ref.path.endsWith('/summary.md')) {
+      failed=true;
+      throw Error('SIMULATED_INTERRUPTED_UPLOAD');
+    }
+    return create(ref,text,options);
+  };
+  const payload={title:'Retry',summary:'Stable summary',messageCount:31,
+    urgentItems:['Keep the checkpoint'],nextAction:'Reconcile later'};
+  await assert.rejects(
+    ()=>e.execute({command:'sum',conversationId:initial.conversation_id,payload}),
+    /SIMULATED_INTERRUPTED_UPLOAD/);
+  assert.equal(failed,true);
+  assert.equal(r.files.get(initial.fif.ref.path),originalFif);
+  assert.equal([...r.files.keys()].filter(x=>x.endsWith('/fif.json')).length,1);
+  await new Promise(resolve=>setTimeout(resolve,8)); // Ensure a fresh attempt would use a different timestamp.
+  const resumed=await e.execute({command:'sum',conversationId:initial.conversation_id,payload});
+  assert.equal(resumed.continuity.transition,'FIF_TO_FIB');
+  assert.equal(resumed.fif.id,initial.fif.id);
+  assert.equal(resumed.continuity.verified,true);
+  const manifest=JSON.parse(r.files.get(resumed.fif.ref.path));
+  assert.equal(manifest.files.length,5);
+  const savedFif=JSON.parse(r.files.get(manifest.files.find(x=>x.ref.path.endsWith('/fif.json')).ref.path));
+  const summary=JSON.parse(r.files.get(manifest.files.find(x=>x.ref.path.endsWith('/summary.json')).ref.path));
+  assert.equal(savedFif.updated_at,summary.updated_at);
+  assert.deepEqual(savedFif.urgent_items,['Keep the checkpoint']);
+  assert.equal(savedFif.message_count,'UNKNOWN');
+});
+
+test('cross-owner SUM cannot promote another owner’s conversation FIF', async () => {
+  const r=new MemoryResources(),h=handoffs(r);
+  const metadata={command:{name:'ini',targets:[],depth:'normal'},
+    canonical:locator.canonical,cli:{version:'test',sha256:'test'},
+    loaded_context:{areas:[],sources:[]},source_refs:[]};
+  await h.initialize('owner-a','shared-name',ref('Handoffs'),metadata);
+  await assert.rejects(()=>h.summarize('owner-b','shared-name',ref('Handoffs'),{
+    title:'Unauthorized',summary:'Not allowed'}),/FIF_NOT_INITIALIZED/);
 });

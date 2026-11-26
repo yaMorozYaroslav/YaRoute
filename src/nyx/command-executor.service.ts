@@ -10,6 +10,9 @@ import { ChatConfigState, HandoffStore, assertNoSecrets } from './handoff-store.
 @Injectable()
 export class NyxCommandExecutor {
   constructor(private readonly bootstrap: NyxBootstrapService, private readonly registry: NyxCliRegistryService, private readonly resolver: NyxCommandResolver, private readonly resources: NyxResourceResolver, private readonly handoffs: HandoffStore, private readonly profiles: NyxExecutionProfileService) {}
+  async inspectRuntimeProfile(locator: Parameters<NyxExecutionProfileService['inspect']>[0], cliHash: string) {
+    return this.profiles.inspect(locator, cliHash);
+  }
   async execute(request: CommandRequest, owner = 'api-key') {
     const locator = await this.bootstrap.locate();
     const { cli, hash } = await this.registry.current(locator);
@@ -115,6 +118,8 @@ export class NyxCommandExecutor {
         status: 'COMPLETE',
         conversation_id: fib.conversationId,
         fif: { id: fib.id, kind: fib.kind, ref: fib.ref, sha256: fib.sha256, verified: fib.verified },
+        continuity: { transition: fib.transition, artifact_id: fib.id,
+          checkpoint_sha256: fib.sha256, verified: fib.verified },
         files_to_paste: [],
         summary: {
           title: plan.payload!.title,
@@ -131,7 +136,7 @@ export class NyxCommandExecutor {
           modifier: fib.fif.chat_config?.current.modifier,
           cli: { version: cli.version, sha256: hash, profile_sha256: profile.hash },
           source_receipts: [], key_preflight: profile.keyReceipts ?? [],
-          warnings: [],
+          warnings: profile.keyWarnings ?? [],
           upgraded: true,
           artifact_kind: fib.kind,
         },
@@ -156,7 +161,7 @@ export class NyxCommandExecutor {
           modifier_source: 'operation',
           scope_change: { operation: plan.scopeAction === 'upgrade' ? '++' : '--', changed: changed.changed, from: changed.from, to: changed.to },
           cli: { version: cli.version, sha256: hash, profile_sha256: profile.hash },
-          source_receipts: [], key_preflight: profile.keyReceipts ?? [], warnings: [],
+          source_receipts: [], key_preflight: profile.keyReceipts ?? [], warnings: profile.keyWarnings ?? [],
         },
       };
     }
@@ -178,7 +183,7 @@ export class NyxCommandExecutor {
       metadata: {
         command: plan.name, targets: plan.targets, depth: plan.depth,
         ...(plan.scope ? { scope: plan.scope, modifier: plan.modifier, modifier_source: plan.modifierSource } : {}),
-        cli: { version: cli.version, sha256: hash, profile_sha256: profile.hash }, source_receipts: loaded.files.map(({ content, ...receipt }) => receipt), key_preflight: profile.keyReceipts ?? [], warnings: loaded.warnings,
+        cli: { version: cli.version, sha256: hash, profile_sha256: profile.hash }, source_receipts: loaded.files.map(({ content, ...receipt }) => receipt), key_preflight: profile.keyReceipts ?? [], warnings: [...(profile.keyWarnings ?? []), ...loaded.warnings],
       },
     };
   }

@@ -6,10 +6,11 @@ import { StorageModule } from '../storage/storage.module';
 import { McpAuthService } from './mcp-auth.service';
 import { McpController } from './mcp.controller';
 import { McpService } from './mcp.service';
+import { RuntimeMaintenanceService } from './runtime-maintenance.service';
 
 @Module({
   imports: [StorageModule, InitModule, NyxModule, ConnectorsModule],
   controllers: [McpController],
-  providers: [McpAuthService, McpService],
+  providers: [McpAuthService, McpService, RuntimeMaintenanceService],
 })
 export class McpModule {}

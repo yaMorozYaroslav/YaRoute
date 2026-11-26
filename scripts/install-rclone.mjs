@@ -3,6 +3,14 @@ import path from 'node:path';
 import process from 'node:process';
 import AdmZip from 'adm-zip';
 
+// GitHub CI verifies dependency installation, compilation and tests without
+// relying on availability of the external Rclone download service.
+// Runtime/Heroku installation is unchanged unless this flag is explicitly set.
+if (process.env.NYX_SKIP_RCLONE_INSTALL === '1') {
+  console.log('Skipping Rclone download for CI (NYX_SKIP_RCLONE_INSTALL=1).');
+  process.exit(0);
+}
+
 const binDir = path.resolve('.bin');
 const binPath = path.join(binDir, 'rclone');
 

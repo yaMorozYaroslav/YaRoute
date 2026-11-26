@@ -8,7 +8,7 @@ export const CONNECTOR_CAPABILITIES = ['resources:read', 'contents:write', 'ci:r
   'git:commit', 'git:push', 'git:tag',
   'git:checkout', 'git:merge', 'git:rebase', 'git:cherry-pick', 'git:revert',
   'git:stash', 'git:reset', 'git:clean', 'git:worktree',
-  'repository:metadata', 'pulls:read', 'pulls:write', 'issues:read', 'issues:write',
+  'repository:metadata', 'github:protection:read', 'pulls:read', 'pulls:write', 'issues:read', 'issues:write',
   'releases:read', 'releases:write',
   'heroku:apps:read', 'heroku:config:names', 'heroku:releases:read', 'heroku:logs:read',
   'heroku:config:write', 'heroku:deploy', 'heroku:apps:create', 'heroku:apps:restart'] as const;
@@ -55,6 +55,7 @@ export function supportsCapability(provider: ConnectorProvider, capability: Conn
   if (isFinanciallyProhibited(capability)) return false;
   // Owner decision: GitHub/GitLab and Heroku are API-only; never grant Git CLI.
   if (capability.startsWith('git:')) return false;
+  if (capability.startsWith('github:')) return provider === 'github';
   if (/^(git:|repository:|pulls:|issues:|releases:|ci:)/.test(capability)) return gitProviders.has(provider);
   if (capability.startsWith('heroku:')) return provider === 'heroku';
   if (capability.startsWith('storage:')) return provider === 'google-drive' || provider === 'mega';
@@ -72,7 +73,7 @@ export function validateResourceRules(provider: ConnectorProvider, rules: Connec
       (provider === 'google-drive' && !['drive','folder'].includes(rule.kind)) ||
       (provider === 'mega' && rule.kind !== 'mega-root') ||
       (provider === 'heroku' && !['heroku-app','heroku-account'].includes(rule.kind))) throw new Error('CONNECTOR_RESOURCE_PROVIDER_MISMATCH');
-    if (rule.kind === 'repository' && (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(rule.id) || rule.id.includes('..'))) throw new Error('CONNECTOR_REPOSITORY_INVALID');
+    if (rule.kind === 'repository' && (!/^[A-Za-z0-9_.-]+\/(?:[A-Za-z0-9_.-]+|\*)$/.test(rule.id) || rule.id.includes('..'))) throw new Error('CONNECTOR_REPOSITORY_INVALID');
     if (rule.pathPrefix !== undefined && (!rule.pathPrefix || rule.pathPrefix.startsWith('/') ||
       rule.pathPrefix.includes('\\') || rule.pathPrefix.length > 2048 ||
       rule.pathPrefix.split('/').some(p => !p || p === '.' || p === '..'))) throw new Error('CONNECTOR_PATH_INVALID');
@@ -167,8 +168,16 @@ export class ConnectorRegistry {
     const connection = await this.require(ownerId,connectionId,capability);
     if (resource.path !== undefined && (resource.path.startsWith('/') || resource.path.includes('\\') ||
       resource.path.split('/').some(p => p === '.' || p === '..'))) throw new Error('CONNECTOR_PATH_INVALID');
+    // Wildcards remain limited to the GitHub App's verified installation owner.
+    const resourceOwner = resource.kind === 'repository' ? resource.id.split('/')[0] : '';
+    const verifiedOwner = connection.provider === 'github' &&
+      resourceOwner.toLowerCase() === connection.externalAccountId.toLowerCase();
     if (!(connection.resources ?? []).some(rule =>
-      rule.kind === resource.kind && rule.id.toLowerCase() === resource.id.toLowerCase() &&
+      rule.kind === resource.kind &&
+      (rule.id.toLowerCase() === resource.id.toLowerCase() ||
+        (resource.kind === 'repository' && verifiedOwner &&
+          rule.id.toLowerCase() === resourceOwner.toLowerCase() + '/*' &&
+          /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(resource.id))) &&
       rule.capabilities.includes(capability) &&
       (!rule.pathPrefix || (resource.path !== undefined &&
         (resource.path === rule.pathPrefix || resource.path.startsWith(rule.pathPrefix + '/')))) &&

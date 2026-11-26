@@ -7,6 +7,11 @@ export class SharedRootsService {
   private readonly roots: Record<string, SharedRoot>;
 
   constructor() {
+    // A public OAuth tenant may not see private operator remotes or root aliases.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      this.roots = {};
+      return;
+    }
     const raw = process.env.NYX_SHARED_ROOTS_JSON;
     if (!raw) throw new Error('NYX_SHARED_ROOTS_JSON is required');
 
