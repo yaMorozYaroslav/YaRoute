@@ -13,7 +13,8 @@ const GH_VERSION='2.105.0';
 const safeRepo=(repo:string)=>/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)&&!repo.includes('..');
 
 /** No shell, arbitrary command string, user-controlled URL, extension or subcommand. */
-export function safeCliPlan(tool:SafeCli,repo:string,token:string,home:string){
+export function safeCliPlan(tool:SafeCli,repo:string,token:string,home:string,
+  present:(filename:string)=>boolean=existsSync){
   if(!safeRepo(repo))throw Error('GITHUB_CLI_REPOSITORY_INVALID');
   if(typeof token!=='string'||token.length<15)throw Error('GITHUB_CLI_SCOPED_TOKEN_REQUIRED');
   const env:Record<string,string>={
@@ -24,6 +25,21 @@ export function safeCliPlan(tool:SafeCli,repo:string,token:string,home:string){
     GH_HOST:'github.com',GH_PAGER:'cat',NO_COLOR:'1',
   };
   if(tool==='git'){
+    // Heroku-24 has Git at build time but not in the runtime image. The
+    // Heroku APT buildpack installs it at .apt/usr/bin/git and its HTTPS
+    // helper under .apt/usr/lib/git-core. Never add arbitrary PATH entries.
+    const aptRoot=path.resolve('.apt');
+    if(present(path.join(aptRoot,'usr/bin/git'))) {
+      const arch=process.arch==='arm64'?'aarch64-linux-gnu':'x86_64-linux-gnu';
+      env.PATH=path.join(aptRoot,'usr/bin')+':/usr/bin:/bin';
+      env.GIT_EXEC_PATH=path.join(aptRoot,'usr/lib/git-core');
+      env.LD_LIBRARY_PATH=[
+        path.join(aptRoot,'usr/lib',arch),
+        path.join(aptRoot,'usr/lib'),
+        path.join(aptRoot,'lib',arch),
+        path.join(aptRoot,'lib'),
+      ].join(':');
+    }
     // Git's environment-only config avoids tokens in command line, remotes,
     // disk, Git config and log output. No extensions/hooks/submodules execute.
     env.GIT_CONFIG_COUNT='2';
@@ -70,7 +86,7 @@ const runBounded:SafeRun=(binary,args,env)=>new Promise((resolve,reject)=>{
 
 function binaryPath(tool:SafeCli){
   if(tool==='git'){
-    for(const candidate of ['/usr/bin/git','/bin/git'])
+    for(const candidate of ['/usr/bin/git','/bin/git',path.resolve('.apt/usr/bin/git')])
       if(existsSync(candidate))return candidate;
     throw Error('GITHUB_GIT_BINARY_NOT_INSTALLED');
   }
@@ -107,7 +123,7 @@ export function publicGithubCliReadiness(
   return {
     publicConnectors:true,
     pilotEnabled:env.NYX_GITHUB_CLI_PILOT_ENABLED==='true',
-    gitBinaryPresent:['/usr/bin/git','/bin/git'].some(present),
+    gitBinaryPresent:['/usr/bin/git','/bin/git',path.resolve('.apt/usr/bin/git')].some(present),
     ghArtifactsPresent:present(path.resolve('.bin/gh')) &&
       present(path.resolve('.bin/gh-manifest.json')),
     probeVerified:false,
