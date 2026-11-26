@@ -61,8 +61,7 @@ export class GithubWriteConnector {
        (suffix.includes('..') && !(method==='GET' &&
          /^\/compare\/(?:main|master)\.\.\.tester$/.test(suffix))) ||
        (/[?#]/.test(suffix) && !(method==='GET' &&
-         (/^\/pulls\?state=all&per_page=100$/.test(suffix) ||
-          /^\/git\/trees\/[a-f0-9]{40}\?recursive=1$/.test(suffix) ||
+         (/^\/git\/trees\/[a-f0-9]{40}\?recursive=1$/.test(suffix) ||
           /^\/actions\/runs\?head_sha=[a-f0-9]{40}&per_page=10$/.test(suffix) ||
           /^\/contents\/config\/nyx-runtime-profile\.json\?ref=[a-f0-9]{40}$/.test(suffix)))))
       throw new Error('GITHUB_API_PATH_INVALID');
@@ -72,22 +71,7 @@ export class GithubWriteConnector {
       ...(body===undefined?{}:{body:JSON.stringify(body)}),
       redirect:'error',signal:AbortSignal.timeout(10000),
     });
-    // Only expose provider HTTP category. Never include response bodies, URLs,
-    // tokens, or private repository metadata in MCP error messages.
-    if(!response.ok) {
-      const status=response.status;
-      if(status===409)throw new Error('GITHUB_CONFLICT');
-      const remaining=response.headers?.get('x-ratelimit-remaining');
-      const retryAfter=response.headers?.get('retry-after');
-      if(status===429 || (status===403 && (remaining==='0' || retryAfter!==null && retryAfter!==undefined)))
-        throw new Error('GITHUB_PROVIDER_RATE_LIMITED');
-      if(status===401)throw new Error('GITHUB_PROVIDER_UNAUTHORIZED');
-      if(status===403)throw new Error('GITHUB_PROVIDER_FORBIDDEN');
-      if(status===404)throw new Error('GITHUB_PROVIDER_NOT_FOUND');
-      if(status===422)throw new Error('GITHUB_PROVIDER_VALIDATION_FAILED');
-      if(status>=500 && status<=599)throw new Error('GITHUB_PROVIDER_TEMPORARY_FAILURE');
-      throw new Error('GITHUB_PROVIDER_HTTP_'+String(status));
-    }
+    if(!response.ok)throw new Error(response.status===409?'GITHUB_CONFLICT':'GITHUB_API_FAILED');
     const raw=await response.text();
     if(raw.length>100000)throw new Error('GITHUB_RESPONSE_TOO_LARGE');
     try{return JSON.parse(raw);}catch{throw new Error('GITHUB_RESPONSE_INVALID');}
@@ -273,51 +257,12 @@ export class GithubWriteConnector {
         throw new Error('GITHUB_REVIEW_BRANCH_UNVERIFIED');
       return result.commit.sha as string;
     };
-    // GitHub may accept PR creation while an MCP client observes a transient
-    // failure or retries its request. Reconcile by exact branch and source
-    // SHA rather than reporting a false failure or submitting a duplicate PR.
-    const existingReview=async()=>{
-      const pulls=await this.call(owner,id,repo,'pulls:read','GET',
-        '/pulls?state=all&per_page=100',undefined,{branch:head});
-      if(!Array.isArray(pulls)||pulls.length>=100)
-        throw new Error('GITHUB_REVIEW_PR_INVENTORY_INCOMPLETE');
-      const matches=pulls.filter((p:any)=>
-        p?.head?.ref===head&&p?.base?.ref===base&&
-        p?.head?.repo?.full_name===repo&&p?.base?.repo?.full_name===repo);
-      if(matches.length>1)throw new Error('GITHUB_REVIEW_PR_AMBIGUOUS');
-      const prior=matches[0];
-      if(!prior)return null;
-      const isOpen=prior.state==='open';
-      const isMerged=prior.state==='closed'&&typeof prior.merged_at==='string'&&
-        prior.merged_at.length>0;
-      if(!Number.isSafeInteger(prior.number)||prior.number<1||
-         prior.draft!==false||(!isOpen&&!isMerged)||
-         prior.head.sha!==expectedHeadSha||
-         (isOpen&&prior.base.sha!==expectedBaseSha)||
-         typeof prior.html_url!=='string'||
-         !prior.html_url.startsWith('https://github.com/'+repo+'/pull/'))
-        throw new Error('GITHUB_REVIEW_EXISTING_PR_MISMATCH');
-      return {repo,head,base,pr:prior.number,url:prior.html_url,
-        readyForReview:isOpen,merged:isMerged,headSha:expectedHeadSha,
-        baseSha:expectedBaseSha,alreadyExists:true};
-    };
-    const prior=await existingReview();
-    if(prior)return prior;
     if((await inspect(head))!==expectedHeadSha ||
        (await inspect(base))!==expectedBaseSha)
       throw new Error('GITHUB_REVIEW_BRANCH_CHANGED');
-    let result:any;
-    try {
-      result=await this.call(owner,id,repo,'pulls:write','POST','/pulls',{
-        head,base,title:title.trim(),body,draft:false,maintainer_can_modify:false,
-      },{branch:head});
-    } catch(error) {
-      if(!(error instanceof Error)||
-         error.message!=='GITHUB_PROVIDER_VALIDATION_FAILED')throw error;
-      const accepted=await existingReview();
-      if(accepted)return {...accepted,reconciledAfterCreateError:true};
-      throw error;
-    }
+    const result=await this.call(owner,id,repo,'pulls:write','POST','/pulls',{
+      head,base,title:title.trim(),body,draft:false,maintainer_can_modify:false,
+    },{branch:head});
     if(result?.draft!==false||!Number.isSafeInteger(result.number) ||
        result?.head?.ref!==head||result?.base?.ref!==base ||
        result?.head?.sha!==expectedHeadSha||
