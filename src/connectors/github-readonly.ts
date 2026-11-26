@@ -47,12 +47,26 @@ export class GithubReadonlyConnector {
     }));
   }
   async pullRequests(ownerId:string,connectionId:string,repo:string) {
-    const body=await this.request(ownerId,connectionId,repo,'/pulls?state=open&per_page=30','pulls:read');
-    if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
-    return body.slice(0,30).map(x=>({
-      number:x.number,title:x.title,state:x.state,draft:x.draft,url:x.html_url,
-      base:x.base?.ref,head:x.head?.ref,updatedAt:x.updated_at,
-    }));
+    // PR objects are verbose; retry smaller bounded pages if GitHub exceeds
+    // the connector's safe response ceiling. Never increase that ceiling.
+    for(const perPage of [10,5,2,1]) {
+      let body:any;
+      try {
+        body=await this.request(ownerId,connectionId,repo,
+          '/pulls?state=open&per_page='+perPage,'pulls:read');
+      }catch(error) {
+        if(error instanceof Error && error.message==='GITHUB_RESPONSE_TOO_LARGE' &&
+           perPage>1)continue;
+        throw error;
+      }
+      if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
+      return body.slice(0,perPage).map(x=>({
+        number:x.number,title:typeof x.title==='string'?x.title.slice(0,200):'',
+        state:x.state,draft:x.draft,url:x.html_url,
+        base:x.base?.ref,head:x.head?.ref,updatedAt:x.updated_at,
+      }));
+    }
+    throw new Error('GITHUB_RESPONSE_TOO_LARGE');
   }
   async fileText(ownerId:string,connectionId:string,repo:string,path:string,ref:string) {
     if(!path||path.length>600||path.startsWith('/')||path.includes('\\')||

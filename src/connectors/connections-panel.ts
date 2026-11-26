@@ -994,6 +994,35 @@ function render(connections){
         show('Draft PR #'+result.number+' created. Review it in GitHub before merging.');
       }));
     ops.append(commands,prRow);
+    // A real CLI binary is installed ONLY during an independently reviewed
+    // release. Buttons probe one authorized repository with fixed RO argv.
+    if(${process.env.NYX_DEPLOYMENT_MODE==='public' &&
+         process.env.NYX_PUBLIC_CONNECTORS_ENABLED==='true' &&
+         process.env.NYX_GITHUB_CLI_PILOT_ENABLED==='true'}){
+      const cli=el('fieldset');cli.append(el('legend','Restricted Git / GitHub CLI'));
+      cli.append(el('p','Optional, read-only Git CLI and gh checks. Uses this GitHub connection only, a short-lived repository-scoped token and a disposable runtime profile. Never executes commands entered by users or installs unverified extensions.'));
+      const cliActions=el('div');cliActions.className='controls';
+      cliActions.append(button('Add Git CLI (read-only)',async()=>{
+        const result=await call('nyx_connection_github_cli_probe',{
+          id:c.id,repo:opRepo.value.trim(),tool:'git'});
+        if(result?.status!=='verified'||result?.tool!=='git'||
+           result?.repository!==opRepo.value.trim())
+          throw Error('Git CLI verification failed');
+        show('Git CLI verified for '+result.repository+
+          ': '+result.headCount+' remote branches. No write permissions granted.');
+      }),button('Add gh CLI (read-only)',async()=>{
+        const result=await call('nyx_connection_github_cli_probe',{
+          id:c.id,repo:opRepo.value.trim(),tool:'gh'});
+        if(result?.status!=='verified'||result?.tool!=='gh'||
+           result?.repository!==opRepo.value.trim())
+          throw Error('gh CLI verification failed');
+        show('GitHub CLI verified for '+result.repository+
+          ' (default branch '+result.defaultBranch+'). No write permissions granted.');
+      }));
+      cli.append(cliActions);
+      ops.append(cli);
+    }
+
     const issueTitle=input('');issueTitle.placeholder='Issue title';
     const issueRow=el('div');issueRow.className='row';issueRow.append(issueTitle,
       button('Create issue',async()=>{
