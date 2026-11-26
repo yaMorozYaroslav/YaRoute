@@ -29,6 +29,7 @@ import { PrivateLegacyOwnerLinkService } from '../connectors/private-legacy-owne
 import { PrivateLegacyBrokerClient } from '../connectors/private-legacy-broker.client';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
+import { SafeGithubCli } from '../connectors/github-cli-safe';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
 import { GithubAppService, githubInstallationUrl } from '../connectors/github-app.service';
@@ -185,6 +186,8 @@ export class McpService {
                 ['nyx_storage_mega_file_mutate'] : [])] : []),
            ...(process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true' ? ['nyx_private_owner_link_status','nyx_private_owner_link_begin'] : []),
             ...(process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true' ? ['nyx_private_legacy_roots','nyx_private_legacy_list'] : []),
+           ...(process.env.NYX_GITHUB_CLI_PILOT_ENABLED === 'true' && process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' ?
+                ['nyx_connection_github_cli_probe'] : []),
            ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare',
            ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])],
         note: 'This inventory does not assert that a backend command is executable; use backend command resolution and verified receipts.',
@@ -784,6 +787,22 @@ export class McpService {
     },async({id,repo,prNumber,expectedHeadSha,expectedBaseSha})=>this.safeTool(()=>
       this.limitedConnectionApi(id,()=>this.githubWrites.readyReviewedNonDefault(
         this.connectorOwner(),id,repo,prNumber,expectedHeadSha,expectedBaseSha))));
+
+    // Restricted CLI bridge: explicit public-only pilot, one owner, one GitHub
+    // App installation and one selected repository. NO arbitrary gh/git input.
+    if(process.env.NYX_DEPLOYMENT_MODE==='public' &&
+       process.env.NYX_PUBLIC_CONNECTORS_ENABLED==='true' &&
+       process.env.NYX_GITHUB_CLI_PILOT_ENABLED==='true') {
+      server.registerTool('nyx_connection_github_cli_probe',{
+        title:'Add/check restricted Git CLI or GitHub CLI for my GitHub connection',
+        description:'Executes only a bounded, read-only repo-scoped git ls-remote or gh api repository check using a short-lived GitHub App token. No arbitrary shell, PAT, writes, branches, merges or deploys.',
+        inputSchema:z.object({id:z.string().uuid(),repo:z.string().min(3).max(200),
+          tool:z.enum(['git','gh'])}),
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+      },async({id,repo,tool})=>this.safeTool(()=>this.limitedConnectionApi(id,()=>
+        new SafeGithubCli(this.connections,this.githubApp).probe(
+          this.connectorOwner(),id,repo,tool))));
+    }
 
     server.registerTool('nyx_connection_github_merge_reviewed_nondefault',{
       title:'Merge a CI-verified NYX review PR into an unprotected non-default branch',
