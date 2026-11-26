@@ -75,17 +75,42 @@ const keyInput={command:'Nyx key oF x oS Go',
  candidates:[candidate('Implement strict KEY parser')]};
 test('strict KEY-specific grammar: oFxS and oF x oS normalize to F then S',()=>{
  for(const input of ['Nyx key oFxS Go','Nyx key oF x oS Go',
-   'Nyx key oF x key oS Go','NyxkeyoFxSGo','NyxkeyoFxkeyoSGo']){
+   'Nyx key oF x key oS Go','NyxkeyoFxSGo','NyxkeyoFxkeyoSGo',
+   'NyxkeyoFxSG','Nyx key oFxSG']){
    assert.deepEqual(parseKeyFsCommand(input).scope,'global');
    assert.equal(parseKeyFsCommand(input).expanded,'NyxkeyoFxkeyoSGo');
  }
  assert.equal(parseKeyFsCommand('Nyx key oF x oS').scope,'local');
+ for(const input of ['Nyx key oFxS', 'NyxkeyoFxSL', 'Nyx key oFxSL']){
+   const parsed=parseKeyFsCommand(input);
+   assert.equal(parsed.scope,'local');
+   assert.equal(parsed.expanded,'NyxkeyoFxkeyoS');
+   assert.equal(parsed.aliasPendingHead,true);
+ }
+ assert.equal(parseKeyFsCommand('Nyx key oFxSG').expanded,'NyxkeyoFxkeyoSGo');
+ assert.equal(parseKeyFsCommand('Nyx key oFxSG').aliasPendingHead,true);
+ assert.equal(parseKeyFsCommand('Nyx key oF x key oS Go').aliasPendingHead,false);
  for(const input of ['Nyx key oS x oF Go','Nyx key oF x fin Go',
    'Nyx key oF x oS x upd Go','Nyx gen oFxS Go','Nyx key oFS Go',
-   'Nyx key x S Go','Nyx key oFxS xoS','NyxkeyoFxxoSGo']){
+   'Nyx key x S Go','Nyx key oFxS xoS','NyxkeyoFxxoSGo',
+   'Nyx key oLFxG','Nyx key oSxFL','Nyx key oFxSGL',
+   'Nyx key oF x key oS G','Nyx key oF x oS L']){
    assert.throws(()=>parseKeyFsCommand(input),/KEY_FS_COMMAND_INVALID/,input);
  }
 });
+test('new local/global aliases keep separate deterministic tenant transaction scopes',()=>run(null,async()=>{
+ const db=makeDb(),svc=service(db);
+ const glob=await svc.executeFs('oauth:scope-user',{...keyInput,command:'Nyx key oFxSG'});
+ const loc=await svc.executeFs('oauth:scope-user',{...keyInput,command:'Nyx key oFxSL'});
+ assert.equal(glob.scope,'global');
+ assert.equal(loc.scope,'local');
+ assert.notEqual(glob.transactionId,loc.transactionId);
+ assert.equal(glob.status,'APPLIED');
+ assert.equal(loc.status,'APPLIED');
+ assert.equal([...db.rows].filter(([k])=>k.endsWith('.fs.done.json')).length,2);
+ assert.equal(db.commits,2);
+}));
+
 test('same evidence yields same transaction; malformed ID fails closed',()=>{
  const a=keyFsFingerprint('global',keyInput.candidates);
  assert.equal(a,keyFsFingerprint('global',[...keyInput.candidates]));

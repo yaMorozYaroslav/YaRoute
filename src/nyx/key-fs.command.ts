@@ -18,9 +18,13 @@ export function parseKeyFsCommand(input: string): {
   if (typeof input !== 'string' || input.length < 8 || input.length > 100)
     throw Error('KEY_FS_COMMAND_INVALID');
   const compact = input.replace(/\s+/g,'');
-  const match = /^nyxkey(?:ofxos|ofxkeyos|ofxs)(go)?$/i.exec(compact);
+  // Canonical explicit forms continue using terminal Go for global.
+  // Pending KEY-only aliases accept compact G(global) or L(local) after oFxS.
+  // L is NOT a canonical Yaro modifier and this must not generalize to x.
+  const match = /^nyxkey(?:(ofxos|ofxkeyos)(go)?|(ofxs)(go|g|l)?)$/i.exec(compact);
   if (!match) throw Error('KEY_FS_COMMAND_INVALID');
-  const scope = match[1] ? 'global' : 'local';
+  const scope = match[2] || /^(?:go|g)$/i.test(match[4] || '')
+    ? 'global' : 'local';
   return {
     scope,
     expanded: 'NyxkeyoFxkeyoS' + (scope === 'global' ? 'Go' : ''),
