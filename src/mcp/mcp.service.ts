@@ -30,7 +30,7 @@ import { PrivateLegacyOwnerLinkService } from '../connectors/private-legacy-owne
 import { PrivateLegacyBrokerClient } from '../connectors/private-legacy-broker.client';
 import { GithubReadonlyConnector } from '../connectors/github-readonly';
 import { GithubWriteConnector } from '../connectors/github-writes';
-import { SafeGithubCli } from '../connectors/github-cli-safe';
+import { SafeGithubCli, publicGithubCliReadiness } from '../connectors/github-cli-safe';
 import { HerokuBrokerClient } from '../connectors/heroku-broker.client';
 import { herokuReadAuthorization } from '../connectors/heroku-read-policy';
 import { GithubAppService, githubInstallationUrl } from '../connectors/github-app.service';
@@ -165,6 +165,7 @@ export class McpService {
           ini: { tool: 'nyx_ini', status: 'registered-requires-verified-bootstrap' },
           sum: { tool: 'nyx_sum', status: 'registered-requires-verified-bootstrap' },
         },
+        githubCliPilot: publicGithubCliReadiness(),
         auxiliaryTools: process.env.NYX_DEPLOYMENT_MODE === 'public' ?
           ['nyx_ini_plan','get_profile','nyx_connections_home','nyx_connections_panel','nyx_connections_list','nyx_risk_preview',
             'nyx_account_view_snapshot','nyx_accounts_view',
@@ -188,6 +189,7 @@ export class McpService {
                 ['nyx_storage_mega_file_mutate'] : [])] : []),
            ...(process.env.NYX_PRIVATE_OWNER_LINK_ENABLED === 'true' ? ['nyx_private_owner_link_status','nyx_private_owner_link_begin'] : []),
             ...(process.env.NYX_PRIVATE_BROKER_CLIENT_ENABLED === 'true' ? ['nyx_private_legacy_roots','nyx_private_legacy_list'] : []),
+           ...(process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' ? ['nyx_connection_github_pr_ready_to_ref'] : []),
            ...(process.env.NYX_GITHUB_CLI_PILOT_ENABLED === 'true' && process.env.NYX_PUBLIC_CONNECTORS_ENABLED === 'true' ?
                 ['nyx_connection_github_cli_probe'] : []),
            ...(process.env.NYX_HEROKU_READ_ENABLED === 'true' ? ['nyx_heroku_app_info','nyx_heroku_releases'] : [])] : ['nyx_mega_accounts', 'nyx_mega_list', 'nyx_mega_stat', 'nyx_mega_capacity', 'nyx_global_index', 'nyx_copy_file', 'nyx_risk_preview','nyx_connections_home','nyx_connections_panel','nyx_rclone_connections_list','nyx_head_status','nyx_areas','nyx_list','nyx_stat','nyx_capacity','nyx_job_status','nyx_maintenance_runtime_inspect','nyx_maintenance_runtime_prepare',
