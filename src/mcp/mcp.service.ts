@@ -8,6 +8,7 @@ import { NyxKeyService } from '../nyx/key.service';
 import { NyxTenantKeyService } from '../nyx/tenant-key.service';
 import { preparePublicIniPlan } from '../nyx/public-init-plan';
 import { extractKeySignals } from '../nyx/key-chat-extractor';
+import { parseKeyFinUpdCommand, publicFinUpdPreflight } from '../nyx/yaro-key-fin-upd';
 import { RuntimeMaintenanceService } from './runtime-maintenance.service';
 import { composeRuntimeHealthReport, fetchPublicGitHubEvidence } from './runtime-health-report';
 import { Injectable, Logger } from '@nestjs/common';
@@ -159,7 +160,11 @@ export class McpService {
           completionGate: 'No canonical-initialization COMPLETE or FIF verification without those live receipts.',
           privateBoundary: 'Never route public MCP tenants into the private MAIN bootstrap.',
         },
-        commandEntrypoints: process.env.NYX_DEPLOYMENT_MODE === 'public' ? {} : {
+        commandEntrypoints: process.env.NYX_DEPLOYMENT_MODE === 'public' ? {
+          execute: {tool:'nyx_execute',commands:'KEY oF/oS, FIN/UPD preflight (strict allowlist)',
+            finUpdCompletion:'blocked_until_trusted_authoritative_source_resolution',
+            nativeGenCan:false},
+        } : {
           execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
           help: { tool: 'nyx_help', command: 'hel', mode: 'read-only' },
           ini: { tool: 'nyx_ini', status: 'registered-requires-verified-bootstrap' },
@@ -1320,6 +1325,98 @@ export class McpService {
         return {...result,source:'explicit-supplied-chat',
           suppliedMessageCount:extracted.suppliedMessageCount,
           selectedCandidateCount:candidates.length};
+      }));
+    }
+
+    // Head v032's primary Yaro entrypoint. This public adapter is deliberately
+    // narrower than the private nyx_execute registered below the public return.
+    // It may ACT on the owner's KEY, but FIN/UPD cannot claim completion without
+    // separately authorized and verified Head/Body/Footer/LCB source adapters.
+    if (process.env.NYX_DEPLOYMENT_MODE === 'public') {
+      server.registerTool('nyx_execute',{
+        title:'Run bounded Yaro KEY / FIN / UPD command chain',
+        description:'Head v032 bounded Yaro executor. Accepts Nyx key oFxS x fin x upd Go or explicit Nyx key oF x key oS x fin x upd Go; also key-only, fin, fin x upd, or upd. KEY stages run in one owner-isolated verified Neon transaction. FIN and UPD preserve full source requirements and return PARTIAL_DIAGNOSTIC/BLOCKED until trusted global Head/Body/Footer, pending-key and LCB source resolution and same-chat disposition gates pass. No canonical generation, private MAIN access or hidden transcript access.',
+        inputSchema:z.object({
+          command:z.string().min(8).max(240),
+          messages:z.array(chatMessageSchema).max(80).default([]),
+          transactionId:z.string().regex(/^[A-Za-z0-9_-]{1,73}$/).optional(),
+        }).strict(),
+        annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+      },async({command,messages,transactionId})=>this.safeTool(async()=>{
+        const owner=this.connectorOwner();
+        const parsed=parseKeyFinUpdCommand(command);
+        const stages=parsed.stages;
+        let keyResult:unknown=null;
+        if(stages.includes('key_oF')){
+          if(!messages.length)throw Error('KEY_NO_GROUNDED_CANDIDATES');
+          const extracted=extractKeySignals(messages);
+          if(!extracted.candidates.length)throw Error('KEY_NO_GROUNDED_CANDIDATES');
+          const candidates=extracted.candidates.map(({evidence,...c})=>c);
+          keyResult=await this.tenantKeys.executeFs(owner,{
+            command:parsed.scope==='global'
+              ?'Nyx key oF x key oS Go'
+              :'Nyx key oF x key oS',
+            candidates,transactionId,
+          });
+        }
+        // An isolated UPD has no same-chat FIN. No UPDATE can be created.
+        if(stages.length===1&&stages[0]==='upd'){
+          return {schema:'nyx.yaro.public-execution.v1',status:'PARTIAL_DIAGNOSTIC',
+            command:parsed.normalized,scope:parsed.scope,stages,
+            key:null,fin:null,upd:{status:'BLOCKED_FIN_PRECONDITION',
+              reason:'Compatible valid FIN required in same chat'},
+            canonicalChanged:false,tenantIsolated:true};
+        }
+        let planning:ReturnType<typeof publicFinUpdPreflight>|null=null;
+        let sourceSummary:Record<string,unknown>|null=null;
+        if(stages.includes('fin')){
+          let snapshot:Awaited<ReturnType<NyxTenantKeyService['inspectPlanningSource']>>|null=null;
+          try{snapshot=await this.tenantKeys.inspectPlanningSource(owner);}
+          catch(e){
+            if(!(e instanceof Error)||e.message!=='KEY_TENANT_ACTIVE_MISSING')throw e;
+          }
+          // No caller-supplied "verified" flag is trusted; use only the
+          // owner-scoped readback here. Global Head/Body/Footer and LCBs still
+          // require independent authorized adapters, never private MAIN.
+          const executionId=transactionId||(keyResult&&
+            typeof keyResult==='object'&&'transactionId' in keyResult&&
+            typeof keyResult.transactionId==='string'
+            ?keyResult.transactionId
+            :'plan_'+createHash('sha256').update(parsed.normalized+JSON.stringify(messages))
+              .digest('hex').slice(0,32));
+          planning=publicFinUpdPreflight({scope:parsed.scope,executionId,
+            candidates:snapshot?.candidates||[],
+            hasExplicitChatMessages:messages.length>0});
+          sourceSummary=snapshot?{
+            tenantKeyPath:snapshot.path,
+            sha256:snapshot.sha256,
+            readbackVerified:snapshot.readbackVerified,
+            activeCount:snapshot.activeCount,
+            archivedCount:snapshot.archivedCount,
+          }:{tenantKeyPath:null,readbackVerified:false,
+            reason:'KEY_TENANT_ACTIVE_MISSING'};
+        }
+        return {
+          schema:'nyx.yaro.public-execution.v1',
+          status:'PARTIAL_DIAGNOSTIC',
+          command:parsed.normalized,
+          implementationBaseline:'head_db_v032 / CLI v007 / compact grammar v009',
+          canonicalAuthorityVerifiedInRuntime:false,
+          pendingAlias:parsed.pendingAlias,
+          scope:parsed.scope,stages,
+          key:keyResult,
+          fin:planning?.fin??null,
+          upd:stages.includes('upd')?planning?.upd??null:null,
+          sourceSummary,
+          verifiedBoundaries:{
+            key:keyResult?'owner-scoped Neon KEY transaction':'not_requested',
+            fin:planning?'BLOCKED_SOURCE_RESOLUTION':'not_requested',
+            upd:stages.includes('upd')?'BLOCKED_FIN_PRECONDITION':'not_requested',
+            canonicalChanged:false,
+            privateMainAccess:false,
+            fullChatHistoryAccess:false,
+          },
+        };
       }));
     }
 
