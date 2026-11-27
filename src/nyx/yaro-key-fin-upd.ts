@@ -243,10 +243,14 @@ export function updateYaroPlanning(input:{
 export function publicFinUpdPreflight(input:{
   scope:KeyScope;executionId:string;candidates:KeyCandidate[];
   hasExplicitChatMessages:boolean;
+  /** Only server-derived reads may reach this parameter; NEVER model input. */
+  verifiedSourceReceipts?:SourceReceipt[];
+  dispositions?:KeyDisposition[];
 }) {
   const fin=finalizeYaroPlanning({
     scope:input.scope,executionId:input.executionId,candidates:input.candidates,
-    sourceReceipts:[], // The public handler cannot read private canonical H/B/F.
+    sourceReceipts:input.verifiedSourceReceipts??[],
+    dispositions:input.dispositions??[],
   });
   const upd=updateYaroPlanning({fin,executionId:input.executionId});
   return {
@@ -255,9 +259,11 @@ export function publicFinUpdPreflight(input:{
     fin,upd,
     sourceCoverage:{
       explicitMessages:input.hasExplicitChatMessages?'supplied_not_full_chat':'none',
-      tenantKey:'owner_scoped_readback_only',
-      canonicalHeadBodyFooter:'not_accessed',
-      pendingKeyAndLCB:'not_reconciled',
+      tenantKey:input.verifiedSourceReceipts?.some(x=>x.sourceClass==='active_keys')
+        ?'owner_scoped_readback_verified':'not_verified',
+      canonicalHeadBodyFooter:input.verifiedSourceReceipts?.filter(x=>
+        ['head','body','footer'].includes(x.sourceClass)).map(x=>x.sourceClass)??[],
+      pendingKeyAndLCB:'not_globally_reconciled',
     },
     nextAction:'Resolve current Head, Body, Footer, pending keys and relevant LCBs through separately authorized adapters; complete provenance-preserving dispositions before FIN/UPD',
     noCanonicalChanges:true,

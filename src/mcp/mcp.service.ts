@@ -9,7 +9,9 @@ import { NyxTenantKeyService } from '../nyx/tenant-key.service';
 import { preparePublicIniPlan } from '../nyx/public-init-plan';
 import { extractKeySignals } from '../nyx/key-chat-extractor';
 import { parseKeyFinUpdCommand, publicFinUpdPreflight } from '../nyx/yaro-key-fin-upd';
-import { inspectFinSource, reconcileFinSourcePins } from '../nyx/fin-source-inspection';
+import { inspectFinSource } from '../nyx/fin-source-inspection';
+import { inspectNPathsRegistry, reconcileRegistryAgainstBundles } from '../nyx/fin-source-registry';
+import type { SourceReceipt, KeyDisposition } from '../nyx/yaro-key-fin-upd';
 import { RuntimeMaintenanceService } from './runtime-maintenance.service';
 import { composeRuntimeHealthReport, fetchPublicGitHubEvidence } from './runtime-health-report';
 import { Injectable, Logger } from '@nestjs/common';
@@ -1265,7 +1267,7 @@ export class McpService {
     }).strict();
     const chatMessagesSchema = z.array(chatMessageSchema).min(1).max(80);
     const finSourceSchema=z.object({
-      sourceKind:z.enum(['head','body','footer','pending_keys','lcb']),
+      sourceKind:z.enum(['head','body','footer','pending_keys','lcb','registry']),
       connectionId:z.string().uuid(),
       provider:z.enum(['google-drive','mega']),
       rootId:z.string().min(1).max(256),
@@ -1363,7 +1365,9 @@ export class McpService {
         const bytes=await this.tenantRclone.readAuthorizedFinSource(
           this.connectorOwner(),input.connectionId,input.provider,
           input.rootId,input.path);
-        const result=inspectFinSource(bytes,input.sourceKind,input.path);
+        const result=input.sourceKind==='registry'
+          ?inspectNPathsRegistry(bytes,input.path)
+          :inspectFinSource(bytes,input.sourceKind,input.path);
         if(input.expectedSha256&&input.expectedSha256!==result.sha256)
           throw Error('FIN_SOURCE_HASH_MISMATCH');
         return {...result,connectionId:input.connectionId,provider:input.provider,
@@ -1385,30 +1389,47 @@ export class McpService {
           command:z.string().min(8).max(240),
           messages:z.array(chatMessageSchema).max(80).default([]),
           sourceFiles:z.array(finSourceSchema).max(8).default([]),
+          dispositions:z.array(z.object({
+            id:z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+            target:z.enum(['head','body','footer']),
+            status:z.enum(['implemented_now','queued_for_target_bundle',
+              'blocked_with_reason','preserved_pending_decision']),
+            reason:z.string().min(1).max(1200),
+            instructions:z.array(z.string().min(1).max(1200)).max(12),
+            source:z.string().min(1).max(256),
+          }).strict()).max(200).default([]),
           transactionId:z.string().regex(/^[A-Za-z0-9_-]{1,73}$/).optional(),
         }).strict(),
         annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-      },async({command,messages,sourceFiles,transactionId})=>this.safeTool(async()=>{
+      },async({command,messages,sourceFiles,dispositions,transactionId})=>this.safeTool(async()=>{
         const owner=this.connectorOwner();
         const parsed=parseKeyFinUpdCommand(command);
         // Preflight SOURCE permissions, bytes and structure BEFORE a KEY write.
         // Fail closed on any invalid source; never imply that these are newest
         // canonical artifacts merely because a provider returned their bytes.
-        const observedSources=[];
+        const observedSources:ReturnType<typeof inspectFinSource>[]=[];
+        let registry:ReturnType<typeof inspectNPathsRegistry>|null=null;
         if(sourceFiles.length && !parsed.stages.includes('fin'))
           throw Error('FIN_SOURCE_REQUIRES_FIN_STAGE');
         for(const entry of sourceFiles){
           const bytes=await this.tenantRclone.readAuthorizedFinSource(
             owner,entry.connectionId,entry.provider,entry.rootId,entry.path);
-          const inspection=inspectFinSource(bytes,entry.sourceKind,entry.path);
-          if(entry.expectedSha256 && entry.expectedSha256!==inspection.sha256)
-            throw Error('FIN_SOURCE_HASH_MISMATCH');
-          observedSources.push({...inspection,connectionId:entry.connectionId,
-            provider:entry.provider,rootId:entry.rootId,
-            comparedWithCallerDigest:entry.expectedSha256?'MATCH':'NOT_PROVIDED'});
+          if(entry.sourceKind==='registry'){
+            if(registry)throw Error('FIN_SOURCE_CLASS_DUPLICATE');
+            const inspected=inspectNPathsRegistry(bytes,entry.path);
+            if(entry.expectedSha256 && entry.expectedSha256!==inspected.sha256)
+              throw Error('FIN_SOURCE_HASH_MISMATCH');
+            registry=inspected;
+          }else{
+            const inspected=inspectFinSource(bytes,entry.sourceKind,entry.path);
+            if(entry.expectedSha256 && entry.expectedSha256!==inspected.sha256)
+              throw Error('FIN_SOURCE_HASH_MISMATCH');
+            observedSources.push(inspected);
+          }
         }
-
-        const sourceConsistency=reconcileFinSourcePins(observedSources);
+        // Bytes and Footer/registry cross-pins verified before a KEY write;
+        // source copies do not prove currentness at the authority location.
+        const sourceConsistency=reconcileRegistryAgainstBundles(registry,observedSources);
         const stages=parsed.stages;
         let keyResult:unknown=null;
         if(stages.includes('key_oF')){
@@ -1448,9 +1469,29 @@ export class McpService {
             ?keyResult.transactionId
             :'plan_'+createHash('sha256').update(parsed.normalized+JSON.stringify(messages))
               .digest('hex').slice(0,32));
+          const sourceReceipts:SourceReceipt[]=[];
+          // Verified bytes, never caller supplied "verified" metadata. Only
+          // complete registry+H/B/F consistency can contribute core receipts.
+          if(sourceConsistency.registryMatchesBundles){
+            for(const inspected of observedSources.filter(x=>
+              ['head','body','footer'].includes(x.sourceKind))){
+              sourceReceipts.push({sourceClass:inspected.sourceKind as
+                'head'|'body'|'footer',sha256:inspected.sha256,
+                ref:'owner-provider:'+inspected.pathBasename,verifiedByAdapter:true});
+            }
+          }
+          if(snapshot?.readbackVerified){
+            sourceReceipts.push({sourceClass:'active_keys',
+              ref:'owner-neon:'+snapshot.path,sha256:snapshot.sha256,
+              verifiedByAdapter:true});
+          }
+          // Provider-inspected pending-key and LCB files are NOT certified
+          // exhaustive global sets and cannot satisfy global coverage alone.
           planning=publicFinUpdPreflight({scope:parsed.scope,executionId,
             candidates:snapshot?.candidates||[],
-            hasExplicitChatMessages:messages.length>0});
+            hasExplicitChatMessages:messages.length>0,
+            verifiedSourceReceipts:sourceReceipts,
+            dispositions:dispositions as KeyDisposition[]});
           sourceSummary=snapshot?{
             tenantKeyPath:snapshot.path,
             sha256:snapshot.sha256,
@@ -1473,6 +1514,7 @@ export class McpService {
           upd:stages.includes('upd')?planning?.upd??null:null,
           sourceSummary,
           observedSourceFiles:observedSources,
+          observedRegistry:registry,
           sourceConsistency,
           sourceCurrentness:'NOT_VERIFIED_BY_PUBLIC_ADAPTER',
           verifiedBoundaries:{
