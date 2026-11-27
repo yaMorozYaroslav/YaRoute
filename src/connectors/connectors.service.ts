@@ -249,7 +249,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
       ? ['storage:list','storage:write','storage:move','storage:delete'] :
       connection.provider==='google-drive' && process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true'
-      ? ['storage:list','storage:write','storage:move','storage:delete'] : ['storage:list'];
+      ? ['storage:list','storage:write','storage:move','storage:delete'] : ['storage:list', 'storage:read'];
     if (!Array.isArray(capabilities) ||
         capabilities.some(c => !allowed.includes(c))) {
       throw new Error('TENANT_RCLONE_READ_ONLY');
@@ -273,7 +273,7 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       process.env.NYX_PUBLIC_MEGA_WRITE_ENABLED==='true'
       ? ['storage:list','storage:write','storage:move','storage:delete'] :
       connection.provider==='google-drive' && process.env.NYX_PUBLIC_GOOGLE_WRITE_ENABLED==='true'
-      ? ['storage:list','storage:write','storage:move','storage:delete'] : ['storage:list'];
+      ? ['storage:list','storage:write','storage:move','storage:delete'] : ['storage:list', 'storage:read'];
     if (!Array.isArray(resources) || resources.length > 10 ||
         resources.some(r => !r || r.kind !== (connection.provider === 'mega' ? 'mega-root' : 'drive') ||
           !Array.isArray(r.capabilities) || r.capabilities.some(c => !allowed.includes(c)) ||
@@ -393,6 +393,48 @@ export class ConnectorsService implements OnModuleInit, OnModuleDestroy {
       throw error;
     }finally{client.release();}
     return this.view(verified);
+  }
+
+  /**
+   * Source-read provider capability can only be recorded after a fresh
+   * owner-bound provider probe through TenantRcloneService. This does not
+   * enable user-selected capability or broaden the selected root.
+   */
+  async attestFinSourceReadAvailable(ownerId:string,id:string,
+    provider:'google-drive'|'mega') {
+    this.assertTenantStorageMode();
+    const c=await this.owned(this.owner(ownerId),id);
+    if(c.status!=='active'||c.provider!==provider||
+       process.env.NYX_PUBLIC_NYX_SOURCE_READ_ENABLED==='false')
+      throw Error('FIN_SOURCE_PROVIDER_NOT_READY');
+    const proof=await this.db().query(
+      'SELECT provider,external_id,namespace FROM nyx_storage_verified_identity_v1 '+
+      'WHERE owner_id=$1 AND connection_id=$2',[ownerId,id]);
+    if(proof.rowCount!==1||proof.rows[0].provider!==provider||
+       proof.rows[0].external_id!==c.externalAccountId||
+       typeof proof.rows[0].namespace!=='string'||
+       !proof.rows[0].namespace)
+      throw Error('FIN_SOURCE_PROVIDER_IDENTITY_UNVERIFIED');
+    // Update only the provider attestation column, never the owner's
+    // selected permissions/resources. Concurrent permission edits are safe.
+    await this.db().query(
+      'UPDATE nyx_connector_connections '+
+      'SET provider_capabilities = CASE WHEN provider_capabilities @> '+
+      "'[\"storage:read\"]'::jsonb THEN provider_capabilities ELSE "+
+      "provider_capabilities || '[\"storage:read\"]'::jsonb END, "+
+      'updated_at=now() WHERE owner_id=$1 AND id=$2 AND provider=$3 '+
+      "AND status='active'",[ownerId,id,provider]);
+    const refreshed=await this.owned(ownerId,id);
+    if(!refreshed.providerCapabilities.includes('storage:read'))
+      throw Error('FIN_SOURCE_PROVIDER_ATTESTATION_FAILED');
+    return {
+      schema:'nyx.fin.source-read-provider.v1' as const,
+      provider,connectionId:id,providerReadAvailable:true,
+      userReadPermissionEnabled:refreshed.capabilities.includes('storage:read'),
+      selectedReadRoots:(refreshed.resources||[]).filter(r=>
+        r.capabilities.includes('storage:read')).map(r=>r.id),
+      noPermissionsChanged:true,noRootsChanged:true,
+    };
   }
 
   async beginGithub(ownerId:string, id:string, installationId?:string) {
