@@ -187,7 +187,7 @@ test('public preflight cannot invent FIN/UPD or canonical persistence',()=>{
  assert.equal(p.noCanonicalChanges,true);
  assert.equal(p.fin.keyUtilization.length,2);
  assert.equal(p.fin.selectedGenerationCore,null);
- assert.equal(p.sourceCoverage.canonicalHeadBodyFooter,'not_accessed');
+ assert.deepEqual(p.sourceCoverage.canonicalHeadBodyFooter,[]);
  assert.equal(p.sourceCoverage.explicitMessages,'supplied_not_full_chat');
  assert.equal(p.fin.finSeedCandidate,null);
 });
