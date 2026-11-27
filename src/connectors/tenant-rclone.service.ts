@@ -683,6 +683,103 @@ export class TenantRcloneService implements OnModuleInit, OnModuleDestroy {
 
 
   /**
+   * Read-only provider preflight for a selected owner/root. This verifies
+   * the existing provider session and then advertises that the PROVIDER can
+   * read. It deliberately does not enable user-selected storage:read or
+   * expand selected resource permissions.
+   */
+  async prepareFinSourceRead(ownerId:string,connectionId:string,
+    provider:TenantRcloneProvider,resourceId:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE!=='public' ||
+       process.env.NYX_PUBLIC_NYX_SOURCE_READ_ENABLED==='false')
+      throw Error('FIN_SOURCE_READ_DISABLED');
+    const status=await this.probeAuthorizedRoot(
+      ownerId,connectionId,provider,resourceId,'');
+    if(status!=='verified')throw Error('FIN_SOURCE_PROVIDER_PROBE_REQUIRED');
+    return this.connectors.attestFinSourceReadAvailable(
+      ownerId,connectionId,provider);
+  }
+
+  /**
+   * Opt-in exact-byte read of one file for Yaro FIN source inspection.
+   * Requires independently verified provider capability, user-enabled
+   * storage:read, and exact owner-selected root/resource authorization.
+   * The returned Buffer must remain inside trusted server code; MCP only
+   * releases bounded hashes and structural metadata.
+   */
+  async readAuthorizedFinSource(ownerId:string,connectionId:string,
+    provider:TenantRcloneProvider,resourceId:string,relativePath:string) {
+    if(process.env.NYX_DEPLOYMENT_MODE!=='public' ||
+       process.env.NYX_PUBLIC_NYX_SOURCE_READ_ENABLED==='false')
+      throw Error('FIN_SOURCE_READ_DISABLED');
+    const clean=tenantRclonePath(relativePath);
+    if(!clean||clean.endsWith('/')||clean!==relativePath||
+       relativePath.split('/').some(v=>!v||v==='.'||v==='..'))
+      throw Error('FIN_SOURCE_PATH_INVALID');
+    await this.connectors.registryPolicy().requireResource(ownerId,connectionId,
+      'storage:read',{kind:provider==='mega'?'mega-root':'drive',
+        id:resourceId,path:clean});
+    // Root/user/provider isolation is verified again here, not inferred
+    // from a filename or client-asserted hash.
+    const target=await this.authorizedTarget(
+      ownerId,connectionId,provider,resourceId,relativePath);
+    return this.readIsolatedFinSource(target.profile,target.path,
+      target.profile.provider==='google-drive'
+        ? configPath=>this.persistActiveGoogleRefresh(
+          ownerId,connectionId,target.profile,target.packed,configPath)
+        :undefined);
+  }
+
+  private async readIsolatedFinSource(profile:TenantRcloneProfile,relativePath:string,
+    afterSuccess?:(configPath:string)=>Promise<boolean>):Promise<Buffer> {
+    const directory=await fs.mkdtemp(path.join(os.tmpdir(),'nyx-fin-source-'));
+    const config=path.join(directory,'rclone.conf');
+    try{
+      await fs.chmod(directory,0o700);
+      await fs.writeFile(config,tenantRcloneConfig(profile),{mode:0o600,flag:'wx'});
+      const target='tenant:'+tenantRclonePath(relativePath);
+      const bytes=await new Promise<Buffer>((resolve,reject)=>{
+        const child=spawn(this.binary,['--config',config,'cat',target],{
+          env:{PATH:process.env.PATH||'',HOME:directory,TMPDIR:directory,
+            XDG_CONFIG_HOME:directory},
+          stdio:['ignore','pipe','pipe'],
+        });
+        let done=false,total=0;
+        const chunks:Buffer[]=[];
+        const finish=(error?:Error)=>{
+          if(done)return;
+          done=true;clearTimeout(timer);
+          if(error)reject(error);
+          else resolve(Buffer.concat(chunks,total));
+        };
+        const timer=setTimeout(()=>{
+          child.kill('SIGKILL');finish(new Error('FIN_SOURCE_READ_TIMEOUT'));
+        },30000);
+        child.stdout.on('data',(chunk:Buffer)=>{
+          if(done)return;
+          const part=Buffer.from(chunk);
+          total+=part.length;
+          if(total>16*1024*1024){
+            child.kill('SIGKILL');
+            finish(new Error('FIN_SOURCE_TOO_LARGE'));return;
+          }
+          chunks.push(part);
+        });
+        child.stderr.on('data',()=>{}); // No provider text or secrets in MCP.
+        child.once('error',()=>finish(new Error('FIN_SOURCE_READ_FAILED')));
+        child.once('close',code=>finish(
+          code===0?undefined:new Error('FIN_SOURCE_READ_FAILED')));
+      });
+      if(!bytes.length)throw Error('FIN_SOURCE_EMPTY');
+      if(afterSuccess && !(await afterSuccess(config)))
+        throw Error('TENANT_GOOGLE_REFRESH_NOT_SAVED');
+      return bytes;
+    }finally{
+      await fs.rm(directory,{recursive:true,force:true});
+    }
+  }
+
+  /**
    * Opt-in, owner-authorized single-file MEGA operations.
    * Trash is the MEGA backend's *provider rubbish bin*, not a folder called Trash.
    * Never run --mega-hard-delete or rclone purge; no per-file confirmation token.

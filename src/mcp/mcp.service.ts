@@ -9,6 +9,7 @@ import { NyxTenantKeyService } from '../nyx/tenant-key.service';
 import { preparePublicIniPlan } from '../nyx/public-init-plan';
 import { extractKeySignals } from '../nyx/key-chat-extractor';
 import { parseKeyFinUpdCommand, publicFinUpdPreflight } from '../nyx/yaro-key-fin-upd';
+import { inspectFinSource, reconcileFinSourcePins } from '../nyx/fin-source-inspection';
 import { RuntimeMaintenanceService } from './runtime-maintenance.service';
 import { composeRuntimeHealthReport, fetchPublicGitHubEvidence } from './runtime-health-report';
 import { Injectable, Logger } from '@nestjs/common';
@@ -163,6 +164,7 @@ export class McpService {
         commandEntrypoints: process.env.NYX_DEPLOYMENT_MODE === 'public' ? {
           execute: {tool:'nyx_execute',commands:'KEY oF/oS, FIN/UPD preflight (strict allowlist)',
             finUpdCompletion:'blocked_until_trusted_authoritative_source_resolution',
+            sourceRead:'nyx_fin_source_prepare / nyx_fin_source_verify (explicit storage:read grant)',
             nativeGenCan:false},
         } : {
           execute: { tool: 'nyx_execute', commands: 'backend-resolved; not all Head commands guaranteed' },
@@ -956,9 +958,9 @@ export class McpService {
 
       server.registerTool('nyx_storage_connection_permissions', {
         title: 'Select storage connection capabilities',
-        description: 'Select separately authorized Google Drive write/move/trash or MEGA move/trash grants. Actual provider permissions and per-root grants are enforced.',
+        description: 'Select separately authorized storage:list, storage:read for exact NYX source files, or provider write/move/trash grants. Source read requires separate provider proof and matching user-selected root; never auto-enabled.',
         inputSchema: z.object({id: z.string().uuid(),
-           capabilities: z.array(z.enum(['storage:list','storage:write','storage:move','storage:delete'])).max(4)}),
+           capabilities: z.array(z.enum(['storage:list','storage:read','storage:write','storage:move','storage:delete'])).max(5)}),
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
       }, async ({id,capabilities}) => this.safeTool(() =>
         this.connections.storagePermissions(this.connectorOwner(),id,capabilities)));
@@ -969,7 +971,7 @@ export class McpService {
         inputSchema: z.object({id:z.string().uuid(),resources:z.array(z.object({
           kind:z.enum(['drive','mega-root']),
           id:z.string().min(1).max(256),
-          capabilities:z.array(z.enum(['storage:list','storage:write','storage:move','storage:delete'])).min(1).max(4),
+          capabilities:z.array(z.enum(['storage:list','storage:read','storage:write','storage:move','storage:delete'])).min(1).max(5),
         }).strict()).max(10)}),
         annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
       }, async ({id,resources}) => this.safeTool(() =>
@@ -1262,6 +1264,15 @@ export class McpService {
       id:z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional(),
     }).strict();
     const chatMessagesSchema = z.array(chatMessageSchema).min(1).max(80);
+    const finSourceSchema=z.object({
+      sourceKind:z.enum(['head','body','footer','pending_keys','lcb']),
+      connectionId:z.string().uuid(),
+      provider:z.enum(['google-drive','mega']),
+      rootId:z.string().min(1).max(256),
+      path:z.string().min(1).max(2048),
+      expectedSha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    }).strict();
+
     server.registerTool('nyx_key_extract_preview',{
       title:'Preview actionable KEY signals from supplied chat messages',
       description:'Conservative preview of explicit new change instructions from bounded caller-supplied user messages. Ignores bare Nyx commands, requests to test/check/explain, hypothetical suggestions, assistant claims, quoted content and code. Reports ignored-reason counts; no ChatGPT transcript access, storage writes, seeds or canonical changes.',
@@ -1328,6 +1339,40 @@ export class McpService {
       }));
     }
 
+    // Provider-side source attestation never enables a user permission or
+    // expands root grants. The user must opt into storage:read separately.
+    if(process.env.NYX_DEPLOYMENT_MODE==='public') {
+      server.registerTool('nyx_fin_source_prepare',{
+        title:'Verify my provider is ready for NYX canonical source reads',
+        description:'Read-only provider root probe for one OAuth-owned connection, enabling server-attested provider storage:read support without changing user-selected permissions or allowed roots. The user must separately enable storage:read for the exact connection and root. Does not read file contents or claim canonical currentness.',
+        inputSchema:z.object({
+          connectionId:z.string().uuid(),
+          provider:z.enum(['google-drive','mega']),
+          rootId:z.string().min(1).max(256),
+        }).strict(),
+        annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+      },async({connectionId,provider,rootId})=>this.safeTool(()=>
+        this.tenantRclone.prepareFinSourceRead(this.connectorOwner(),connectionId,
+          provider,rootId)));
+      server.registerTool('nyx_fin_source_verify',{
+        title:'Verify exact bytes of an authorized NYX source archive',
+        description:'Read and hash one exact Head/Body/Footer/KEY/LCB file from my independently authorized storage connection. Requires explicit storage:read user permission and root grant. Returns bounded SHA-256, structural evidence and declared Footer pointers, never raw file content. Does not claim newest canonical version or FIN completion.',
+        inputSchema:finSourceSchema,
+        annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+      },async input=>this.safeTool(async()=>{
+        const bytes=await this.tenantRclone.readAuthorizedFinSource(
+          this.connectorOwner(),input.connectionId,input.provider,
+          input.rootId,input.path);
+        const result=inspectFinSource(bytes,input.sourceKind,input.path);
+        if(input.expectedSha256&&input.expectedSha256!==result.sha256)
+          throw Error('FIN_SOURCE_HASH_MISMATCH');
+        return {...result,connectionId:input.connectionId,provider:input.provider,
+          rootId:input.rootId,
+          comparedWithCallerDigest:input.expectedSha256?'MATCH':'NOT_PROVIDED',
+          canonicalAuthorityVerified:false};
+      }));
+    }
+
     // Head v032's primary Yaro entrypoint. This public adapter is deliberately
     // narrower than the private nyx_execute registered below the public return.
     // It may ACT on the owner's KEY, but FIN/UPD cannot claim completion without
@@ -1339,12 +1384,31 @@ export class McpService {
         inputSchema:z.object({
           command:z.string().min(8).max(240),
           messages:z.array(chatMessageSchema).max(80).default([]),
+          sourceFiles:z.array(finSourceSchema).max(8).default([]),
           transactionId:z.string().regex(/^[A-Za-z0-9_-]{1,73}$/).optional(),
         }).strict(),
         annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-      },async({command,messages,transactionId})=>this.safeTool(async()=>{
+      },async({command,messages,sourceFiles,transactionId})=>this.safeTool(async()=>{
         const owner=this.connectorOwner();
         const parsed=parseKeyFinUpdCommand(command);
+        // Preflight SOURCE permissions, bytes and structure BEFORE a KEY write.
+        // Fail closed on any invalid source; never imply that these are newest
+        // canonical artifacts merely because a provider returned their bytes.
+        const observedSources=[];
+        if(sourceFiles.length && !parsed.stages.includes('fin'))
+          throw Error('FIN_SOURCE_REQUIRES_FIN_STAGE');
+        for(const entry of sourceFiles){
+          const bytes=await this.tenantRclone.readAuthorizedFinSource(
+            owner,entry.connectionId,entry.provider,entry.rootId,entry.path);
+          const inspection=inspectFinSource(bytes,entry.sourceKind,entry.path);
+          if(entry.expectedSha256 && entry.expectedSha256!==inspection.sha256)
+            throw Error('FIN_SOURCE_HASH_MISMATCH');
+          observedSources.push({...inspection,connectionId:entry.connectionId,
+            provider:entry.provider,rootId:entry.rootId,
+            comparedWithCallerDigest:entry.expectedSha256?'MATCH':'NOT_PROVIDED'});
+        }
+
+        const sourceConsistency=reconcileFinSourcePins(observedSources);
         const stages=parsed.stages;
         let keyResult:unknown=null;
         if(stages.includes('key_oF')){
@@ -1408,6 +1472,9 @@ export class McpService {
           fin:planning?.fin??null,
           upd:stages.includes('upd')?planning?.upd??null:null,
           sourceSummary,
+          observedSourceFiles:observedSources,
+          sourceConsistency,
+          sourceCurrentness:'NOT_VERIFIED_BY_PUBLIC_ADAPTER',
           verifiedBoundaries:{
             key:keyResult?'owner-scoped Neon KEY transaction':'not_requested',
             fin:planning?'BLOCKED_SOURCE_RESOLUTION':'not_requested',
