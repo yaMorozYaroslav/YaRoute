@@ -176,3 +176,21 @@ test('tenant separation and replay conflict are enforced',()=>run(null,async()=>
  ...keyInput,transactionId:'same',candidates:[candidate('Deploy unrelated operation')],
  }),/KEY_FS_REPLAY_CONFLICT/);
 }));
+
+test('readback-verified KEY inventory includes only authenticated owner and all active candidates',()=>run(null,async()=>{
+ const db=makeDb(),s=service(db);
+ await s.executeFs('oauth:owner-a',{command:'Nyx key oFxSG',
+  candidates:[candidate('Owned by A')]});
+ await s.executeFs('oauth:owner-b',{command:'Nyx key oFxSG',
+  candidates:[candidate('Owned by B')]});
+ const a=await s.inspectPlanningSource('oauth:owner-a');
+ const b=await s.inspectPlanningSource('oauth:owner-b');
+ assert.equal(a.readbackVerified,true);
+ assert.equal(a.scope,'owner-isolated');
+ assert.match(a.sha256,/^[a-f0-9]{64}$/);
+ assert.ok(a.candidates.some(x=>x.description==='Owned by A'));
+ assert.ok(!a.candidates.some(x=>x.description==='Owned by B'));
+ assert.ok(b.candidates.some(x=>x.description==='Owned by B'));
+ assert.ok(!b.candidates.some(x=>x.description==='Owned by A'));
+ await assert.rejects(()=>s.inspectPlanningSource('unverified'),/KEY_OWNER_NOT_VERIFIED/);
+}));

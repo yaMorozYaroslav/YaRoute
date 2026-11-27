@@ -245,4 +245,46 @@ export class NyxTenantKeyService {
     }
   }
 
+  /** Verified, read-only view of the ACTIVE KEY for exactly this OAuth tenant.
+   * Includes historical archived candidates, because FIN may not silently
+   * discard any valid unconsumed key just because triage archived it.
+   */
+  async inspectPlanningSource(owner:string) {
+    if(!/^oauth:[A-Za-z0-9._:@|\\-]{1,300}$/.test(owner))
+      throw Error('KEY_OWNER_NOT_VERIFIED');
+    const tenant=createHash('sha256').update('nyx-key-tenant-v1:'+owner).digest('hex');
+    const db=await this.ready();
+    const rows=await db.query(
+      'SELECT content FROM nyx_tenant_key_artifacts_v1 WHERE tenant_id=$1 AND artifact_path=$2',
+      [tenant,'temp_key.json'],
+    );
+    if(rows.rowCount!==1||typeof rows.rows[0]?.content!=='string')
+      throw Error('KEY_TENANT_ACTIVE_MISSING');
+    const bytes=rows.rows[0].content as string;
+    let value:any;
+    try{value=JSON.parse(bytes)}catch{throw Error('KEY_TENANT_ACTIVE_INVALID');}
+    if(!value||!Array.isArray(value.candidates)||
+       (value.archived!==undefined&&!Array.isArray(value.archived)))
+      throw Error('KEY_TENANT_ACTIVE_INVALID');
+    const candidates=[...value.candidates,...(value.archived||[])];
+    if(candidates.length>2000)throw Error('KEY_TENANT_ACTIVE_TOO_LARGE');
+    const check=await db.query(
+      'SELECT content FROM nyx_tenant_key_artifacts_v1 WHERE tenant_id=$1 AND artifact_path=$2',
+      [tenant,'temp_key.json'],
+    );
+    if(check.rows[0]?.content!==bytes)
+      throw Error('KEY_TENANT_ACTIVE_READBACK_CONFLICT');
+    return {
+      provider:'neon-postgres' as const,
+      scope:'owner-isolated' as const,
+      path:'temp_key.json' as const,
+      sha256:createHash('sha256').update(bytes).digest('hex'),
+      activeCount:value.candidates.length,
+      archivedCount:(value.archived||[]).length,
+      candidates:candidates as KeyCandidate[],
+      readbackVerified:true,
+      canonicalChanged:false,
+    };
+  }
+
 }
