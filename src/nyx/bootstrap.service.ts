@@ -23,8 +23,8 @@ export class NyxBootstrapService {
   }
   private configuredPath(value: string | undefined, area: string) {
     if (!value) return undefined;
-    // Current public Heroku config uses repository-style `YaRoute/...` while MAIN stores the decorated root.
-    const path = area === 'MAIN' && value.startsWith('YaRoute/') ? `🪼👁️📡${value}` : value;
+    // MAIN now exposes the undecorated `YaRoute/...` root. Normalize only legacy decorated configuration; never decorate current routes.
+    const path = area === 'MAIN' && value.startsWith('🪼👁️📡YaRoute/') ? value.slice('🪼👁️📡'.length) : value;
     return refSchema.parse({ area, path });
   }
 }

@@ -3,6 +3,9 @@ import { ConnectorRegistry, type ConnectorCapability } from './connector-registr
 /** Implementations must obtain short-lived installation tokens from a secure vault. */
 export interface GithubInstallationCredentials {
   tokenFor(ownerId: string, connectionId: string, installationId: string, repo: string, capability: ConnectorCapability, boundary?: {branch?:string; path?:string}): Promise<string>;
+  // Dedicated one-repository PR-ready token; requires BOTH pulls:write and contents:write grants.
+  // Implementations may omit it; callers must fail closed rather than downgrade to a generic token.
+  tokenForReady?(ownerId: string, connectionId: string, installationId: string, repo: string, branch: string): Promise<string>;
 }
 export type GithubHttp = (url: string, init: RequestInit) => Promise<Response>;
 export class GithubReadonlyConnector {
@@ -44,12 +47,26 @@ export class GithubReadonlyConnector {
     }));
   }
   async pullRequests(ownerId:string,connectionId:string,repo:string) {
-    const body=await this.request(ownerId,connectionId,repo,'/pulls?state=open&per_page=30','pulls:read');
-    if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
-    return body.slice(0,30).map(x=>({
-      number:x.number,title:x.title,state:x.state,draft:x.draft,url:x.html_url,
-      base:x.base?.ref,head:x.head?.ref,updatedAt:x.updated_at,
-    }));
+    // PR objects are verbose; retry smaller bounded pages if GitHub exceeds
+    // the connector's safe response ceiling. Never increase that ceiling.
+    for(const perPage of [10,5,2,1]) {
+      let body:any;
+      try {
+        body=await this.request(ownerId,connectionId,repo,
+          '/pulls?state=open&per_page='+perPage,'pulls:read');
+      }catch(error) {
+        if(error instanceof Error && error.message==='GITHUB_RESPONSE_TOO_LARGE' &&
+           perPage>1)continue;
+        throw error;
+      }
+      if(!Array.isArray(body))throw new Error('GITHUB_RESPONSE_INVALID');
+      return body.slice(0,perPage).map(x=>({
+        number:x.number,title:typeof x.title==='string'?x.title.slice(0,200):'',
+        state:x.state,draft:x.draft,url:x.html_url,
+        base:x.base?.ref,head:x.head?.ref,updatedAt:x.updated_at,
+      }));
+    }
+    throw new Error('GITHUB_RESPONSE_TOO_LARGE');
   }
   async fileText(ownerId:string,connectionId:string,repo:string,path:string,ref:string) {
     if(!path||path.length>600||path.startsWith('/')||path.includes('\\')||
@@ -104,6 +121,48 @@ export class GithubReadonlyConnector {
       tag:x.tag_name,draft:x.draft,prerelease:x.prerelease,
       publishedAt:x.published_at,url:x.html_url,
     }));
+  }
+
+  /** Inspect repo-scoped rulesets. Requires verified GitHub Administration: read. */
+  async rulesets(ownerId:string,connectionId:string,repo:string) {
+    const body=await this.request(ownerId,connectionId,repo,
+      '/rulesets?includes_parents=true&per_page=100','github:protection:read');
+    if(!Array.isArray(body)) throw new Error('GITHUB_RESPONSE_INVALID');
+    if(body.length>100) throw new Error('GITHUB_RESPONSE_TOO_LARGE');
+    return body.map((x:any)=>({
+      id:x.id,name:x.name,enforcement:x.enforcement,target:x.target,sourceType:x.source_type,
+    }));
+  }
+
+  /** Resolve exact rule definition; never accepts an arbitrary URL/path. */
+  async ruleset(ownerId:string,connectionId:string,repo:string,rulesetId:number) {
+    if(!Number.isSafeInteger(rulesetId)||rulesetId<1) throw new Error('GITHUB_RULESET_INVALID');
+    const body=await this.request(ownerId,connectionId,repo,
+      '/rulesets/'+rulesetId,'github:protection:read');
+    if(!body||typeof body!=='object'||body.id!==rulesetId)
+      throw new Error('GITHUB_RESPONSE_INVALID');
+    return {id:body.id,name:body.name,enforcement:body.enforcement,target:body.target,
+      conditions:body.conditions,bypassActors:body.bypass_actors,rules:body.rules,
+      createdAt:body.created_at,updatedAt:body.updated_at};
+  }
+
+  /** 404 means no classic branch protection; 403 is an authorization failure. */
+  async classicProtection(ownerId:string,connectionId:string,repo:string,branch:string) {
+    if(!/^[A-Za-z0-9_.\/-]{1,120}$/.test(branch)||branch.includes('..')||
+       branch.startsWith('/')||branch.startsWith('-'))
+      throw new Error('GITHUB_BRANCH_INVALID');
+    try {
+      const body=await this.request(ownerId,connectionId,repo,
+        '/branches/'+branch.split('/').map(encodeURIComponent).join('/')+'/protection',
+        'github:protection:read');
+      return {branch,protected:true,requiredStatusChecks:body.required_status_checks,
+        requiredPullRequestReviews:body.required_pull_request_reviews,
+        enforceAdmins:body.enforce_admins,allowForcePushes:body.allow_force_pushes,
+        allowDeletions:body.allow_deletions,requiredConversationResolution:body.required_conversation_resolution};
+    } catch(error) {
+      if(error instanceof Error&&error.message==='GITHUB_NOT_FOUND')return {branch,protected:false};
+      throw error;
+    }
   }
 
   async workflows(ownerId: string, connectionId: string, repo: string) {

@@ -99,6 +99,31 @@ export class StorageService {
     };
   }
 
+  /**
+   * Private broker only: a direct, bounded listing for one configured Rclone
+   * remote. This runs ONLY on the private service; callers must first pass a
+   * signed, owner-bound broker delegation and the private remote allowlist.
+   * No public Rclone config, secrets or raw remote options are exported.
+   */
+  async privateRemoteList(remote: string, relativePath = '') {
+    if (process.env.NYX_DEPLOYMENT_MODE !== 'private')
+      throw new Error('PRIVATE_RCLONE_CONNECTIONS_ONLY');
+    if (typeof remote !== 'string' ||
+        !/^[A-Za-z][A-Za-z0-9_.-]{0,119}$/.test(remote) ||
+        typeof relativePath !== 'string' || relativePath.length > 1024 ||
+        relativePath.startsWith('/') || /[:\\\x00-\x1f]/.test(relativePath) ||
+        (relativePath.length > 0 &&
+         relativePath.split('/').some(part => part === '.' || part === '..' || !part))) {
+      throw new Error('PRIVATE_RCLONE_PATH_DENIED');
+    }
+    const inventory = await this.rcloneConnections();
+    if (!inventory.remotes.some(item => item.name === remote))
+      throw new Error('PRIVATE_RCLONE_REMOTE_NOT_CONFIGURED');
+    return this.rclone.json([
+      'lsjson', remote + ':' + relativePath, '--max-depth', '1',
+    ]);
+  }
+
   // Only recent *explicitly requested* checks; not durable provider authorization.
   private readonly recentRcloneReadResults=new Map<string,{
     connectivity:'verified'|'failed'|'timeout';checkedAt:string;

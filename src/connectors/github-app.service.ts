@@ -70,6 +70,7 @@ export async function githubInstallationUrl():Promise<{url:string;provider:'gith
 function verifiedGrants(permissions:Record<string,string>):ConnectorCapability[] {
   const values=new Set<ConnectorCapability>(['repository:metadata']);
   if(['read','write'].includes(permissions.actions)) values.add('ci:read');
+  if(['read','write'].includes(permissions.administration)) values.add('github:protection:read');
   if(['read','write'].includes(permissions.contents)) values.add('resources:read');
   if(['read','write'].includes(permissions.contents)) values.add('releases:read');
   if(['read','write'].includes(permissions.issues)) values.add('issues:read');
@@ -83,6 +84,7 @@ function verifiedGrants(permissions:Record<string,string>):ConnectorCapability[]
 const permissionsFor=(capability:ConnectorCapability):Record<string,'read'|'write'>=>{
   switch(capability) {
     case 'ci:read':return {metadata:'read',actions:'read'};
+    case 'github:protection:read':return {metadata:'read',administration:'read'};
     case 'contents:write':return {metadata:'read',contents:'write'};
     case 'issues:write':return {metadata:'read',issues:'write'};
     case 'pulls:write':return {metadata:'read',pull_requests:'write'};
@@ -179,6 +181,23 @@ export class GithubAppService {
       String(id),verified.account.login,verifiedGrants(verified.permissions??{}),names);
   }
 
+  /** Reconcile existing connection grants using the App's trusted installation identity. */
+  async refreshInstallationGrants(ownerId:string,connectionId:string) {
+    const connection=await this.connections.getOwned(ownerId,connectionId);
+    if(connection.provider!=='github'||connection.status!=='active'||
+       !connection.installationId||!/^[1-9]\d{0,19}$/.test(connection.installationId))
+      throw new Error('GITHUB_INSTALLATION_REQUIRED');
+    const installation=await requestGitHub('/app/installations/'+connection.installationId,
+      'GET',appJwt()) as GitHubInstallation;
+    if(String(installation.id)!==connection.installationId||
+       installation.app_id!==githubAppConfig().appId||
+       installation.account?.login!==connection.externalAccountId)
+      throw new Error('GITHUB_INSTALLATION_MISMATCH');
+    return this.connections.refreshGithubGrants(ownerId,connectionId,
+      connection.installationId,connection.externalAccountId,
+      verifiedGrants(installation.permissions??{}));
+  }
+
   /**
    * Every GitHub call mints a short-lived token restricted to one exact
    * user-selected repo AND one minimal provider permission. No token is persisted.
@@ -198,6 +217,36 @@ export class GithubAppService {
         permissions:perms,
       });
     if(typeof token.token!=='string'||token.token.length<15) throw new Error('GITHUB_TOKEN_UNAVAILABLE');
+    return token.token;
+  }
+
+  /**
+   * The GraphQL markPullRequestReadyForReview mutation requires the App's
+   * content and PR write permissions together. Mint a short-lived token
+   * confined to one selected repository and a nyx/* branch, never a user PAT.
+   */
+  async tokenForReady(ownerId:string,connectionId:string,installationId:string,
+    repo:string,branch:string):Promise<string> {
+    if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.includes('..') ||
+       !/^nyx\/[A-Za-z0-9][A-Za-z0-9._/-]{0,95}$/.test(branch) ||
+       branch.includes('..') || branch.includes('//'))
+      throw new Error('GITHUB_READY_SCOPE_INVALID');
+    if(!/^[1-9]\d{0,19}$/.test(installationId))
+      throw new Error('GITHUB_INSTALLATION_INVALID');
+    const boundary={kind:'repository' as const,id:repo,branch};
+    const policy=this.connections.registryPolicy();
+    const pulls=await policy.requireResource(ownerId,connectionId,'pulls:write',boundary);
+    const contents=await policy.requireResource(ownerId,connectionId,'contents:write',boundary);
+    if(pulls.provider!=='github' || contents.provider!=='github' ||
+       pulls.installationId!==installationId || contents.installationId!==installationId)
+      throw new Error('GITHUB_READY_INSTALLATION_MISMATCH');
+    const token=await requestGitHub('/app/installations/'+installationId+'/access_tokens',
+      'POST',appJwt(),{
+        repositories:[repo.split('/')[1]],
+        permissions:{metadata:'read',pull_requests:'write',contents:'write'},
+      });
+    if(typeof token.token!=='string' || token.token.length<15)
+      throw new Error('GITHUB_CREDENTIAL_UNAVAILABLE');
     return token.token;
   }
 }

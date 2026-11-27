@@ -5,6 +5,8 @@ import { CommandRequest } from './runtime.schema';
 import { NyxBootstrapService } from './bootstrap.service';
 import { NyxCliRegistryService } from './cli-registry.service';
 import { NyxHeadLibraryService } from './head-library.service';
+import { NyxExecutionProfileService } from './execution-profile.service';
+import { buildNyxRuntimeChecklist } from './runtime-health-checklist';
 
 @Controller('nyx')
 export class NyxController {
@@ -14,7 +16,42 @@ export class NyxController {
     private readonly registry: NyxCliRegistryService,
     private readonly head: NyxHeadLibraryService,
     private readonly keys: NyxKeyService,
+    private readonly profiles: NyxExecutionProfileService,
   ) {}
+
+
+  /**
+   * Private, read-only diagnostics. The API guard blocks this route in public
+   * tenant mode, and requires X-Nyx-Key in the private operator runtime.
+   * Do not turn into a Public endpoint: live canonical paths are sensitive.
+   */
+  @Get('checklist')
+  async checklist() {
+    const runtimeCommit = process.env.HEROKU_SLUG_COMMIT || (() => {
+      try { return (require('../build-info.json') as { commit?: string }).commit || ''; }
+      catch { return ''; }
+    })();
+    try {
+      const locator = await this.bootstrap.locate();
+      const resolved = await this.registry.current(locator);
+      const profile = await this.profiles.inspect(locator, resolved.hash);
+      let effectiveCommands: string[] | undefined;
+      if (profile.ready) {
+        try {
+          const applied = await this.profiles.apply(locator, resolved.cli, resolved.hash);
+          effectiveCommands = Object.entries(applied.cli.commands)
+            .filter(([, contract]) => Boolean(contract.execution)).map(([name]) => name);
+        } catch { effectiveCommands = undefined; }
+      }
+      return buildNyxRuntimeChecklist({
+        runtimeCommit, canonical: locator.canonical,
+        cli: { version: resolved.cli.version, sha256: resolved.hash, commands: resolved.cli.commands },
+        profile, effectiveCommands,
+      });
+    } catch {
+      return buildNyxRuntimeChecklist({ runtimeCommit, sourceError: 'CANONICAL_SOURCE_NOT_VERIFIED' });
+    }
+  }
 
   @Get('head')
   async headStatus() {

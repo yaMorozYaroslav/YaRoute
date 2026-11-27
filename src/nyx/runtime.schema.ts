@@ -43,19 +43,35 @@ export const cliSchema = z.object({
   schema: z.string().min(1), version: z.string().min(1),
   commands: z.record(name, z.object({ aliases: z.array(name).optional(), execution: executionSchema.optional() }).passthrough()),
 }).passthrough();
+export const runtimeKeyPinSchema = z.object({
+  key: name, ref: refSchema, sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  mode: z.enum(['enforce', 'observe']).default('enforce'),
+}).strict().refine(pin => pin.mode === 'enforce' ||
+  (pin.ref.area === 'MAIN' && (
+    (pin.key === 'temp_paths' && [
+      'YaRoute/0_repository/3_template/staging/drafts/temp_paths.json',
+      '🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_paths.json',
+    ].includes(pin.ref.path)) ||
+    (pin.key === 'temp_nyxcli' && [
+      'YaRoute/0_repository/3_template/staging/drafts/temp_nyxcli.json',
+      '🪼👁️📡YaRoute/0_repository/3_template/staging/drafts/temp_nyxcli.json',
+    ].includes(pin.ref.path))
+  )), 'only fixed mutable staging overlays may use observe mode');
+
 export const profileSchema = z.object({
   schema: z.literal('nyx.runtime-profile.v1'),
   authority: z.literal('user-authorized-runtime-configuration'),
   cliSha256: z.string().regex(/^[a-f0-9]{64}$/),
   commands: z.record(name, executionSchema),
-  keySources: z.array(z.object({ key: name, ref: refSchema, sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).default([]),
+  keySources: z.array(runtimeKeyPinSchema).default([]),
 }).strict();
 export const sumPayloadSchema = z.object({
   title: z.string().min(1).max(200),
   summary: z.string().min(1).max(100000),
   messageCount: z.union([z.number().int().nonnegative(), z.literal('UNKNOWN')]).optional(),
   compactContext: z.string().max(20000).optional(),
-  urgentItems: z.array(z.string().min(1).max(2000)).max(64).default([]),
+  // Omitted means retain the existing session's urgent items; [] explicitly clears them.
+  urgentItems: z.array(z.string().min(1).max(2000)).max(64).optional(),
   nextAction: z.string().max(5000).optional(),
 }).strict();
 export const requestSchema = z.object({
